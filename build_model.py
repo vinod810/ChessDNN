@@ -10,7 +10,7 @@ TANH_FACTOR = 200
 
 # Define the path to save the best model
 # TODO create directory if non-existent
-model_filepath = "model/model.keras"  # or "best_model.h5" for HDF5 format
+MODEL_FILEPATH = "model/model.keras"  # or "best_model.h5" for HDF5 format
 
 # ----- Parse TFRecord -----
 def parser(example_proto):
@@ -90,7 +90,7 @@ if __name__ == '__main__':
     # save_best_only: if True, only saves when the monitored metric improves
     # mode: 'min' for metrics like loss (lower is better), 'max' for metrics like accuracy (higher is better)
     checkpoint = ModelCheckpoint(
-        model_filepath,
+        MODEL_FILEPATH,
         monitor='val_loss',
         save_best_only=True,
         mode='min',
