@@ -8,6 +8,16 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 from prepare_data import BOARD_SHAPE, COMPRESSION, OUT_DIR
 TANH_FACTOR = 200
 
+def score_to_tf_tanh(score):
+    return tf.tanh(score / TANH_FACTOR)
+
+def tanh_to_score(tanh):
+    if tanh > 0.999999:
+        tanh = 0.999999
+    if tanh < -0.999999:
+        tanh = -0.999999
+    return round(np.arctanh(tanh) * TANH_FACTOR)
+
 # Define the path to save the best model
 # TODO create directory if non-existent
 MODEL_FILEPATH = "model/model.keras"  # or "best_model.h5" for HDF5 format
@@ -20,10 +30,10 @@ def parser(example_proto):
     }
     parsed = tf.io.parse_single_example(example_proto, feature_spec)
 
-    board_raw = tf.io.decode_raw(parsed["board"], out_type=tf.uint8)
+    board_raw = tf.io.decode_raw(parsed["board"], out_type=tf.float32)
     board = tf.reshape(board_raw, BOARD_SHAPE)
     board = tf.cast(board, tf.float32)  # convert for DNN input
-    score = tf.tanh(parsed["score"] / TANH_FACTOR)
+    score = score_to_tf_tanh(parsed["score"])
 
     return board, score
 
@@ -109,10 +119,10 @@ if __name__ == '__main__':
     )
 
     model.fit(train_ds,
-              epochs=100,#10,
+              epochs=100,
               steps_per_epoch=10000,      # dataset is infinite stream
               validation_data=val_ds,
-              validation_steps=100, #00,
+              validation_steps=100,
               callbacks=[checkpoint, early_stopping_callback]
               )
 
@@ -122,7 +132,7 @@ if __name__ == '__main__':
 
         for t, p in zip(batch_y.numpy(), y_pred.flatten()):  # pred_labels):
             try:
-                print(f"{round(np.arctanh(t) * TANH_FACTOR)}, {round(np.arctanh(p) * TANH_FACTOR)}")
+                print(f"{tanh_to_score(t)}, {tanh_to_score(p)}")
             except (ValueError, OverflowError):
                 print("NA, NA")
                 pass
@@ -131,6 +141,7 @@ if __name__ == '__main__':
                 break
         if pairs_printed >= 20:
             break
+
 
 
 

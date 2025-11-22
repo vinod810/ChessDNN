@@ -2,8 +2,9 @@ import sys
 import chess.pgn
 import numpy as np
 import tensorflow as tf
+from chess import Board
 
-from build_model import MODEL_FILEPATH, TANH_FACTOR
+from build_model import MODEL_FILEPATH, TANH_FACTOR, tanh_to_score
 from prepare_data import get_board_repr
 
 
@@ -20,16 +21,22 @@ def  main():
             if fen == "exit" or fen == "Exit":
                 break
             board = chess.Board(fen)
-            board_repr = get_board_repr(board)
-            board_repr = np.expand_dims(board_repr, axis=0)  # batch size = 1
-            #score = model.predict([board_repr], steps=1)[0]
-            score = model.predict(board_repr)[0][0]
-            score = round(np.arctanh(score) * TANH_FACTOR)# round((score[0][0] * 2.0 * Max_Score - Max_Score) / 100, 1)
+            score = evaluate_position(board, model)
             print("predicted score: ", score)
         except KeyboardInterrupt:
             if input("Type 'exit' to exit: ") != "exit":
                 continue
             break
+
+
+def evaluate_position(board: Board, model) -> float:
+    board_repr = get_board_repr(board)
+    board_repr = np.expand_dims(board_repr, axis=0)  # batch size = 1
+    score = model.predict(board_repr, verbose=0)[0][0]
+    score = tanh_to_score(score)  # round((score[0][0] * 2.0 * Max_Score - Max_Score) / 100, 1)
+    if board.turn == chess.BLACK:
+        score = -score
+    return score
 
 
 if __name__ == '__main__':
