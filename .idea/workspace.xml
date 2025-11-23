@@ -4,9 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="First working version of find best move.">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Uses material search inside quiescent searach.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/find_best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/find_best_move.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -98,7 +97,15 @@
       <option name="project" value="LOCAL" />
       <updated>1763866032214</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="Uses material search inside quiescent searach.">
+      <option name="closed" value="true" />
+      <created>1763880513901</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1763880513901</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -117,6 +124,7 @@
     <MESSAGE value="Added predict_score.py" />
     <MESSAGE value="Added find_best_score.oy" />
     <MESSAGE value="First working version of find best move." />
-    <option name="LAST_COMMIT_MESSAGE" value="First working version of find best move." />
+    <MESSAGE value="Uses material search inside quiescent searach." />
+    <option name="LAST_COMMIT_MESSAGE" value="Uses material search inside quiescent searach." />
   </component>
 </project>
