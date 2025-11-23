@@ -26,7 +26,7 @@ kpi = {
     "games_no_eval": 0,
     "moves": 0,
     "moves_score_too_large": 0,
-    "moves_material_change": 0,
+    "moves_tactical": 0,
     "moves_mate": 0
 }
 
@@ -144,7 +144,7 @@ def get_board_repr(board: chess.Board):
     """
 
     # 18 base planes
-    planes = np.zeros((18, 8, 8), dtype=np.float32)
+    planes = np.zeros((18, 8, 8), dtype=np.uint8)
 
     # -----------------------------
     # 1. Piece planes (12)
@@ -154,33 +154,33 @@ def get_board_repr(board: chess.Board):
         col = square % 8
 
         base = 0 if piece.color == chess.WHITE else 6
-        planes[base + PIECE_TO_PLANE[piece.piece_type], row, col] = 1.0
+        planes[base + PIECE_TO_PLANE[piece.piece_type], row, col] = 1
 
     # -----------------------------
     # 2. Side to move (1 plane)
     # -----------------------------
-    planes[12, :, :] = 1.0 if board.turn == chess.WHITE else 0.0
+    planes[12, :, :] = 1 if board.turn == chess.WHITE else 0
 
     # -----------------------------
     # 3. Castling rights (4 planes)
     # -----------------------------
     if board.has_kingside_castling_rights(chess.WHITE):
-        planes[13] = 1.0
+        planes[13] = 1
     if board.has_queenside_castling_rights(chess.WHITE):
-        planes[14] = 1.0
+        planes[14] = 1
     if board.has_kingside_castling_rights(chess.BLACK):
-        planes[15] = 1.0
+        planes[15] = 1
     if board.has_queenside_castling_rights(chess.BLACK):
-        planes[16] = 1.0
+        planes[16] = 1
 
     # -----------------------------
     # 4. En-passant (1 plane)
     # -----------------------------
-    ep_plane = np.zeros((8, 8), dtype=np.float32)
+    ep_plane = np.zeros((8, 8), dtype=np.uint8)
     if board.ep_square is not None:
         file_idx = chess.square_file(board.ep_square)
-        vec = np.zeros(8, dtype=np.float32)
-        vec[file_idx] = 1.0
+        vec = np.zeros(8, dtype=np.uint8)
+        vec[file_idx] = 1
         ep_plane[:] = vec  # repeat 8-bit row across board
 
     planes[17] = ep_plane
@@ -237,7 +237,7 @@ def write_chess_tfrecords(
             file_paths.append(path)
             print(f"Opened shard {shard_id}: {path}")
 
-        writer.write(serialize(board, score))
+        writer.write(serialize(board, np.float32(score)))
         samples_written += 1
 
         if samples_written >= shard_size:
@@ -263,7 +263,7 @@ def write_chess_tfrecords(
 #        score = np.random.uniform(-10_000, 10_000)
 #        yield board, score
 
-def is_material_change(board: chess.Board) -> bool:
+def is_tactical(board: chess.Board) -> bool:
     """
     Returns True if the position is quiescent.
     A quiescent position has:
@@ -277,18 +277,22 @@ def is_material_change(board: chess.Board) -> bool:
     #    return False
 
     # 2. Check all pseudo-legal moves to see if any are tactical (capture/promotions/ep)
-    for move in board.generate_legal_moves():
+    # for move in board.generate_legal_moves():
+    #
+    #     # (A) Captures, including en-passant
+    #     if board.is_capture(move):
+    #         return False
+    #
+    #     # (B) Promotions
+    #     if move.promotion is not None:
+    #         return False
+    #
+    # # If no tactical moves, the position is quiet
+    # return True
 
-        # (A) Captures, including en-passant
-        if board.is_capture(move):
-            return False
-
-        # (B) Promotions
-        if move.promotion is not None:
-            return False
-
-    # If no tactical moves, the position is quiet
-    return True
+    tactical = (board.is_check() or
+                any(board.is_capture(mv) or mv.promotion or board.gives_check(mv) for mv in board.legal_moves))
+    return tactical
 
 
 def stream_data_from_pgn_zst(path):
@@ -322,8 +326,8 @@ def stream_data_from_pgn_zst(path):
 
                     kpi["moves"] += 1
 
-                    if not is_material_change(node.board()):
-                        kpi["moves_material_change"] += 1
+                    if is_tactical(node.board()):
+                        kpi["moves_tactical"] += 1
                         continue
 
                     if node.eval().is_mate():

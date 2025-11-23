@@ -9,8 +9,8 @@ from prepare_data import get_board_repr
 
 
 def  main():
-    model = tf.keras.models.load_model(MODEL_FILEPATH)
-    model.summary()
+    #model = tf.keras.models.load_model(MODEL_FILEPATH)
+    #model.summary()
 
     while True:
         try:
@@ -21,7 +21,7 @@ def  main():
             if fen == "exit" or fen == "Exit":
                 break
             board = chess.Board(fen)
-            score = evaluate_position(board, model)
+            score = evaluate_position(board)
             print("predicted score: ", score)
         except KeyboardInterrupt:
             if input("Type 'exit' to exit: ") != "exit":
@@ -29,14 +29,19 @@ def  main():
             break
 
 
-def evaluate_position(board: Board, model) -> float:
+def evaluate_position(board: Board) -> float:
+    if evaluate_position.model is None:
+        evaluate_position.model = tf.keras.models.load_model(MODEL_FILEPATH)
+        evaluate_position.model.summary()
+
     board_repr = get_board_repr(board)
     board_repr = np.expand_dims(board_repr, axis=0)  # batch size = 1
-    score = model.predict(board_repr, verbose=0)[0][0]
+    score = evaluate_position.model.predict(board_repr, verbose=0)[0][0]
     score = tanh_to_score(score)  # round((score[0][0] * 2.0 * Max_Score - Max_Score) / 100, 1)
-    if board.turn == chess.BLACK:
-        score = -score
+    #if board.turn == chess.BLACK:
+    #    score = -score
     return score
+evaluate_position.model = None
 
 
 if __name__ == '__main__':

@@ -30,7 +30,8 @@ def parser(example_proto):
     }
     parsed = tf.io.parse_single_example(example_proto, feature_spec)
 
-    board_raw = tf.io.decode_raw(parsed["board"], out_type=tf.float32)
+    #board_raw = tf.io.decode_raw(parsed["board"], out_type=tf.float32)
+    board_raw = tf.io.decode_raw(parsed["board"], out_type=tf.uint8)
     board = tf.reshape(board_raw, BOARD_SHAPE)
     board = tf.cast(board, tf.float32)  # convert for DNN input
     score = score_to_tf_tanh(parsed["score"])
