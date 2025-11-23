@@ -45,7 +45,7 @@ CONFIG = {
 
     # ---------------- Time Control ----------------
     "TIME_CONTROL_ENABLED": True,
-    "TIME_LIMIT": 5.0,          # Seconds per move
+    "TIME_LIMIT": 30.0,          # Seconds per move
     "TIME_BUFFER": 0.05,        # Safety buffer to stop search slightly early
 
     # ---------------- Transposition Table ----------------
@@ -83,14 +83,14 @@ def material_evaluate(board: chess.Board) -> int:
         score += val if piece.color == chess.WHITE else -val
     return score
 
-def lightweight_hybrid_evaluate(board: chess.Board) -> int:
-    score = material_evaluate(board)
-    central_squares = [chess.D4, chess.E4, chess.D5, chess.E5]
-    for sq in central_squares:
-        piece = board.piece_at(sq)
-        if piece:
-            score += 10 if piece.color == chess.WHITE else -10
-    return score
+# def lightweight_hybrid_evaluate(board: chess.Board) -> int:
+#     score = material_evaluate(board)
+#     central_squares = [chess.D4, chess.E4, chess.D5, chess.E5]
+#     for sq in central_squares:
+#         piece = board.piece_at(sq)
+#         if piece:
+#             score += 10 if piece.color == chess.WHITE else -10
+#     return score
 
 def evaluate_with_cache_white_centric(board: chess.Board, depth: int = None) -> float:
     key = chess.polyglot.zobrist_hash(board) #board.zobrist_hash()
@@ -156,7 +156,7 @@ def quiescence(board: chess.Board, alpha: float, beta: float, qdepth: int, ply: 
     best_pv = []
 
     if not in_check:
-        stand_pat_white = evaluate_with_cache_white_centric(board, qdepth) # FIXME need depth  lightweight_hybrid_evaluate(board)
+        stand_pat_white = material_evaluate(board)
         stand_pat = stand_pat_white if board.turn == chess.WHITE else -stand_pat_white
         if stand_pat >= beta:
             KPI["beta_cutoffs"] += 1
@@ -246,7 +246,18 @@ def alpha_beta(board: chess.Board, depth: int = None, alpha: float = -math.inf, 
         tactical = board.is_check() or any(board.is_capture(mv) or mv.promotion or board.gives_check(mv)
                                            for mv in board.legal_moves)
         if tactical:
-            return quiescence(board, alpha, beta, qdepth=0, ply=ply)
+            #return quiescence(board, alpha, beta, qdepth=0, ply=ply)
+            stand_pat = material_evaluate(board)
+            q_score, q_pv = quiescence(board, alpha, beta, 0, ply)
+            q_is_tactical = (q_pv != []) or (q_score != stand_pat)
+            if not q_is_tactical:
+                dnn_score = evaluate_with_cache_white_centric(board)
+                if board.turn == chess.BLACK: dnn_score = -dnn_score
+                #alpha = max(alpha, dnn_score)
+                #if dnn_score >= beta: return beta, []
+                #return alpha, []
+                return dnn_score, []
+            return q_score, q_pv
         else:
             white_score = evaluate_with_cache_white_centric(board, depth=depth)
             return (white_score if board.turn == chess.WHITE else -white_score), []
@@ -350,25 +361,25 @@ def iterative_deepening_with_time(board: chess.Board):
 
     return best_move, best_pv, best_score
 
-# ---------------- Example Usage ----------------
-if __name__ == "__main__":
-    board = chess.Board()
-    KPI["per_depth"] = defaultdict(lambda: {"nodes_visited": 0, "quiescence_nodes": 0, "dnn_evaluations": 0})
-
-    best_move, pv, score = iterative_deepening_with_time(board)
-
-    print("\nFinal Best move:", best_move)
-    print("Final PV:", pv)
-    print("Final Score:", score)
-    print("\nGlobal KPIs:")
-    for k, v in KPI.items():
-        if k != "per_depth":
-            print(f"{k}: {v}")
-    print("\nPer-depth KPIs:")
-    for depth in sorted(KPI["per_depth"].keys(), reverse=True):
-        stats = KPI["per_depth"][depth]
-        print(f"Depth {depth}: Nodes={stats['nodes_visited']}, Quiescence={stats['quiescence_nodes']}, "
-              f"DNN calls={stats['dnn_evaluations']}")
+# # ---------------- Example Usage ----------------
+# if __name__ == "__main__":
+#     board = chess.Board()
+#     KPI["per_depth"] = defaultdict(lambda: {"nodes_visited": 0, "quiescence_nodes": 0, "dnn_evaluations": 0})
+#
+#     best_move, pv, score = iterative_deepening_with_time(board)
+#
+#     print("\nFinal Best move:", best_move)
+#     print("Final PV:", pv)
+#     print("Final Score:", score)
+#     print("\nGlobal KPIs:")
+#     for k, v in KPI.items():
+#         if k != "per_depth":
+#             print(f"{k}: {v}")
+#     print("\nPer-depth KPIs:")
+#     for depth in sorted(KPI["per_depth"].keys(), reverse=True):
+#         stats = KPI["per_depth"][depth]
+#         print(f"Depth {depth}: Nodes={stats['nodes_visited']}, Quiescence={stats['quiescence_nodes']}, "
+#               f"DNN calls={stats['dnn_evaluations']}")
 
 
 def main():
