@@ -13,11 +13,12 @@ SHARD_SIZE = 1000_000 #samples per file
 MAX_SHARDS = 1000
 COMPRESSION = "GZIP"
 OUT_DIR = "tfrecords"
-TANH_FACTOR = 400 # 1200(CP) = 3 = ~pi = 0.99
-MAX_SCORE = 10 * TANH_FACTOR # tanh(10) is almost 1
+TANH_SCALE = 400 # 1200(CP) = 3 = ~pi = 0.99
+MAX_SCORE = 10 * TANH_SCALE # tanh(10) is almost 1
  # http://talkchess.com/forum3/download/file.php?id=869
 MATE_FACTOR = 100
-MAX_NON_MATE_SCORE = MAX_SCORE - 10 * MATE_FACTOR
+MAX_MATE_DEPTH = 5
+MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
 
 kpi = {
     "games": 0,
@@ -108,7 +109,7 @@ def write_chess_tfrecords(
     for board, score in data_stream:
 
         if writer is None:
-            path = os.path.join(out_dir, f"chess-{shard_id:05d}.tfrecord")
+            path = os.path.join(out_dir, f"chess-{shard_id:05d}.tfrecord.gz")
             writer = tf.io.TFRecordWriter(path, options=options)
             file_paths.append(path)
             print(f"Opened shard {shard_id}: {path}")
@@ -129,19 +130,12 @@ def write_chess_tfrecords(
 
     if writer:
         writer.close()
+        print(kpi)
         print(f"Closed final shard {shard_id}")
 
     return file_paths
 
 def is_tactical(board: chess.Board) -> bool:
-    """
-    Returns True if the position is quiescent.
-    A quiescent position has:
-      - No checks
-      - No captures
-      - No promotions
-      - No en-passant captures
-    """
     tactical = (board.is_check() or
                 any(board.is_capture(mv) or mv.promotion or board.gives_check(mv)
                     for mv in board.legal_moves))
@@ -180,17 +174,20 @@ def stream_data_from_pgn_zst(path):
 
                     if is_tactical(node.board()):
                         kpi["moves_tactical"] += 1
+                        continue
 
                     if node.eval().is_mate():
                         kpi["moves_mate"] += 1
                         score = node.eval().white().mate()
                         if score < 0:
-                            score = -MAX_SCORE - score * MATE_FACTOR # score will be -ve if mate by black
+                            score = min(-MAX_MATE_DEPTH, score) # score will be -ve if mate by black
+                            score = -MAX_SCORE - score * MATE_FACTOR
                         else:
+                            score = max(MAX_MATE_DEPTH, score) # score will be -ve if mate by black
                             score = MAX_SCORE - score * MATE_FACTOR
                     else:
                         score = node.eval().white().score()
-                        if abs(score) > MAX_NON_MATE_SCORE:  # Discard values larger than 00 cp
+                        if abs(score) > MAX_NON_MATE_SCORE:  # Discard values larger than 30 cp
                             kpi["moves_score_too_large"] += 1
                             continue
 

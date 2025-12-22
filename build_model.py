@@ -2,32 +2,31 @@ import os
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras.callbacks import ModelCheckpoint
-from prepare_data import BOARD_SHAPE, COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_FACTOR
+from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE
 
-MAX_SHARDS = 10 # For faster hyper param tuning
-DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(OUT_DIR, "*.tfrecord")))[:MAX_SHARDS]
-TRAIN_FACTOR = 0.95 if MAX_SHARDS > 20 else 0.90
+MAX_SHARDS = 2 # For faster hyper param tuning
+DATA_DIR = OUT_DIR #"tfrecords_18planes" # OUT_DIR
+
+DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
+TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))
 N_TRAIN = int(len(DATA_FILES) * TRAIN_FACTOR)
+MODEL_FILEPATH = "model/model.keras"  # or "best_model.h5" for HDF5 format
 
 BATCH_SIZE = 256 * 4 # AVX2 CPU = 256
 NUM_EPOCHS = 100
-#TANH_MAX = 0.999999 # ~2880(CP) #
-#TANH_MIN = -TANH_MAX
+TANH_MAX = np.tanh(MAX_SCORE / TANH_SCALE)
+TANH_MIN = -TANH_MAX
 
 def score_to_tf_tanh(score):
-    tanh = tf.tanh(score / TANH_FACTOR)
+    tanh = tf.tanh(score / TANH_SCALE)
     #tanh = TANH_MIN if tanh < TANH_MIN else tanh
     #tanh = TANH_MAX if tanh > TANH_MAX else tanh
     return tanh
 
 def tanh_to_score(tanh):
-    #tanh = TANH_MIN if tanh < TANH_MIN else tanh
-    #tanh = TANH_MAX if tanh > TANH_MAX else tanh
-    return round(np.arctanh(tanh) * TANH_FACTOR)
-
-# Define the path to save the best model
-# TODO create directory if non-existent
-MODEL_FILEPATH = "model/model.keras"  # or "best_model.h5" for HDF5 format
+    tanh = TANH_MIN if tanh < TANH_MIN else tanh
+    tanh = TANH_MAX if tanh > TANH_MAX else tanh
+    return round(np.arctanh(tanh) * TANH_SCALE)
 
 # ----- Parse TFRecord -----
 def parser(example_proto):
@@ -63,7 +62,7 @@ def load_dataset(tfrecord_files, batch_size=256, shuffle=True):
 
 
 # ----- Train / Val split by files -----
-def get_train_val_datasets(data_dir=OUT_DIR, batch_size=256):
+def get_train_val_datasets(batch_size=256):
 
     train_files = DATA_FILES[:N_TRAIN]
     val_files = DATA_FILES[N_TRAIN:]
@@ -81,7 +80,7 @@ if __name__ == '__main__':
         tf.keras.layers.Input(shape=BOARD_SHAPE,),
         tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(512, activation="tanh"), # Fist layer tanh activation
-        tf.keras.layers.Dense(256, activation="relu"),
+        tf.keras.layers.Dense(256, activation="relu"), # TODO try tanh
         tf.keras.layers.Dense(128, activation="relu"),
         #tf.keras.layers.Dense(64, activation="relu"),
         #tf.keras.layers.Dense(32, activation="relu"),
@@ -92,6 +91,7 @@ if __name__ == '__main__':
 
     model.compile(optimizer="adam", loss="mae", metrics=['mae'])
 
+    os.makedirs(os.path.dirname(MODEL_FILEPATH), exist_ok=True)
     checkpoint = ModelCheckpoint(
         MODEL_FILEPATH,
         monitor='val_loss',

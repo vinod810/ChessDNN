@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 from chess import Board
 
-from build_model import MODEL_FILEPATH, TANH_FACTOR, tanh_to_score
+from build_model import MODEL_FILEPATH, TANH_SCALE, tanh_to_score
 from prepare_data import get_board_repr
 
 

@@ -4,11 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="best_move.py initial version">
-      <change afterPath="$PROJECT_DIR$/best_move1.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="13 plane encoding">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/find_best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/find_best_move.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/predict_score.py" beforeDir="false" afterPath="$PROJECT_DIR$/predict_score.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
     </list>
@@ -118,7 +116,15 @@
       <option name="project" value="LOCAL" />
       <updated>1763919180937</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="13 plane encoding">
+      <option name="closed" value="true" />
+      <created>1766370757398</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1766370757398</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -139,6 +145,7 @@
     <MESSAGE value="First working version of find best move." />
     <MESSAGE value="Uses material search inside quiescent searach." />
     <MESSAGE value="best_move.py initial version" />
-    <option name="LAST_COMMIT_MESSAGE" value="best_move.py initial version" />
+    <MESSAGE value="13 plane encoding" />
+    <option name="LAST_COMMIT_MESSAGE" value="13 plane encoding" />
   </component>
 </project>
