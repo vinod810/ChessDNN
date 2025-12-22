@@ -4,8 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Uses material search inside quiescent searach.">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="best_move.py initial version">
+      <change afterPath="$PROJECT_DIR$/best_move1.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/find_best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/find_best_move.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/predict_score.py" beforeDir="false" afterPath="$PROJECT_DIR$/predict_score.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -53,7 +58,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-f69e5c277ee4-cbfc7b97e6b2-com.jetbrains.pycharm.community.sharedIndexes.bundled-PC-252.27397.106" />
+        <option value="bundled-python-sdk-0978a7220b69-9867c7d4c0a4-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.28294.336" />
       </set>
     </attachedChunks>
   </component>
@@ -105,7 +110,15 @@
       <option name="project" value="LOCAL" />
       <updated>1763880513901</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="best_move.py initial version">
+      <option name="closed" value="true" />
+      <created>1763919180937</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1763919180937</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -125,6 +138,7 @@
     <MESSAGE value="Added find_best_score.oy" />
     <MESSAGE value="First working version of find best move." />
     <MESSAGE value="Uses material search inside quiescent searach." />
-    <option name="LAST_COMMIT_MESSAGE" value="Uses material search inside quiescent searach." />
+    <MESSAGE value="best_move.py initial version" />
+    <option name="LAST_COMMIT_MESSAGE" value="best_move.py initial version" />
   </component>
 </project>

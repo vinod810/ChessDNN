@@ -4,7 +4,7 @@ import time
 from collections import defaultdict
 import chess.polyglot
 
-from predict_score import evaluate_position
+from predict_score import dnn_evaluation
 
 # ---------------- Global Engine Configuration ----------------
 CONFIG = {
@@ -96,7 +96,7 @@ def evaluate_with_cache_white_centric(board: chess.Board, depth: int = None) -> 
     key = chess.polyglot.zobrist_hash(board) #board.zobrist_hash()
     if key in eval_cache:
         return eval_cache[key]
-    score = evaluate_position(board)  # User-provided DNN function
+    score = dnn_evaluation(board)  # User-provided DNN function
     eval_cache[key] = score
     KPI["dnn_evaluations"] += 1
     if depth is not None:
