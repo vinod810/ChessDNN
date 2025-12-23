@@ -4,7 +4,7 @@ import numpy as np
 from tensorflow.keras.callbacks import ModelCheckpoint
 from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE
 
-MAX_SHARDS = 2 # For faster hyper param tuning
+MAX_SHARDS = 22 # For faster hyper param tuning
 DATA_DIR = OUT_DIR #"tfrecords_18planes" # OUT_DIR
 
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
@@ -80,7 +80,7 @@ if __name__ == '__main__':
         tf.keras.layers.Input(shape=BOARD_SHAPE,),
         tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(512, activation="tanh"), # Fist layer tanh activation
-        tf.keras.layers.Dense(256, activation="relu"), # TODO try tanh
+        tf.keras.layers.Dense(256, activation="relu"), # TODO try, 512
         tf.keras.layers.Dense(128, activation="relu"),
         #tf.keras.layers.Dense(64, activation="relu"),
         #tf.keras.layers.Dense(32, activation="relu"),

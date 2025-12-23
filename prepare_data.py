@@ -26,7 +26,7 @@ kpi = {
     "games_no_eval": 0,
     "moves": 0,
     "moves_score_too_large": 0,
-    "moves_tactical": 0,
+    "moves_capture": 0,
     "moves_mate": 0
 }
 
@@ -52,26 +52,6 @@ def get_board_repr(board: chess.Board):
 
     # 2. Side to move (1 plane)
     planes[12, :, :] = 1 if board.turn == chess.WHITE else 0
-
-    # # 3. Castling rights (4 planes)
-    # if board.has_kingside_castling_rights(chess.WHITE):
-    #     planes[13] = 1
-    # if board.has_queenside_castling_rights(chess.WHITE):
-    #     planes[14] = 1
-    # if board.has_kingside_castling_rights(chess.BLACK):
-    #     planes[15] = 1
-    # if board.has_queenside_castling_rights(chess.BLACK):
-    #     planes[16] = 1
-    #
-    # # 4. En-passant (1 plane)
-    # ep_plane = np.zeros((8, 8), dtype=np.uint8)
-    # if board.ep_square is not None:
-    #     file_idx = chess.square_file(board.ep_square)
-    #     vec = np.zeros(8, dtype=np.uint8)
-    #     vec[file_idx] = 1
-    #     ep_plane[:] = vec  # repeat 8-bit row across board
-    #
-    # planes[17] = ep_plane
 
     return planes
 
@@ -135,11 +115,9 @@ def write_chess_tfrecords(
 
     return file_paths
 
-def is_tactical(board: chess.Board) -> bool:
-    tactical = (board.is_check() or
-                any(board.is_capture(mv) or mv.promotion or board.gives_check(mv)
-                    for mv in board.legal_moves))
-    return tactical
+def is_capture(board: chess.Board) -> bool:
+    capture = (any(board.is_capture(mv) for mv in board.legal_moves))
+    return capture
 
 
 def stream_data_from_pgn_zst(path):
@@ -172,8 +150,8 @@ def stream_data_from_pgn_zst(path):
 
                     kpi["moves"] += 1
 
-                    if is_tactical(node.board()):
-                        kpi["moves_tactical"] += 1
+                    if is_capture(node.board()):
+                        kpi["moves_capture"] += 1
                         continue
 
                     if node.eval().is_mate():
