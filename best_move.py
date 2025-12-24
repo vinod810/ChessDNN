@@ -1,20 +1,32 @@
 import chess
 import chess.polyglot
-import math
 from collections import namedtuple
+from prepare_data import is_capture
 
 # ----------------------------------
 # Configuration
 # ----------------------------------
 
-MAX_DEPTH = 2
+MAX_DEPTH = 4
 INF = 10_000
+MAX_TT_SIZE = 200_000
+MAX_ET_SIZE = 200_000
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 EXACT, LOWERBOUND, UPPERBOUND = 0, 1, 2
 
 transposition_table = {}
+evaluation_table = {}
 
+kpi = {
+    "dnn_eval": 0,
+    "mat_eval": 0,
+    "beta_cutoff": 0,
+    "tt_hits": 0,
+    "tt_clears": 0,
+    "et_hits": 0,
+    "et_clears": 0,
+}
 # ----------------------------------
 # Piece Values
 # ----------------------------------
@@ -41,10 +53,25 @@ def evaluate(board: chess.Board) -> int:
     if board.is_stalemate():
         return 0
 
+    key = chess.polyglot.zobrist_hash(board)
+    if key in evaluation_table:
+        kpi['et_hits'] += 1
+        return evaluation_table[key]
+
+    if not is_capture(board):
+        kpi['dnn_eval'] += 1
+    else:
+        kpi['mat_eval'] += 1
+
     score = 0
     for piece_type in PIECE_VALUES:
         score += len(board.pieces(piece_type, board.turn)) * PIECE_VALUES[piece_type]
         score -= len(board.pieces(piece_type, not board.turn)) * PIECE_VALUES[piece_type]
+
+    if len(evaluation_table) > MAX_ET_SIZE:
+        kpi['et_clears'] += 1
+        evaluation_table.clear()
+    evaluation_table[key] = score
 
     return score
 
@@ -80,6 +107,7 @@ def ordered_moves(board):
 def quiescence(board, alpha, beta):
     stand_pat = evaluate(board)
     if stand_pat >= beta:
+        kpi['beta_cutoff'] += 1
         return beta
     if alpha < stand_pat:
         alpha = stand_pat
@@ -109,6 +137,7 @@ def negamax(board, depth, alpha, beta):
 
     # Transposition table lookup
     if key in transposition_table:
+        kpi['tt_hits'] += 1
         entry = transposition_table[key]
         if entry.depth >= depth:
             if entry.flag == EXACT:
@@ -145,6 +174,9 @@ def negamax(board, depth, alpha, beta):
     else:
         flag = EXACT
 
+    if len(transposition_table) > MAX_TT_SIZE:
+        kpi['tt_clears'] += 1
+        transposition_table.clear()
     transposition_table[key] = TTEntry(depth, max_eval, flag)
 
     return max_eval
@@ -169,12 +201,29 @@ def find_best_move(fen, depth=MAX_DEPTH):
 
     return best_move, best_score
 
-# ----------------------------------
-# Main
-# ----------------------------------
+def  main():
 
-if __name__ == "__main__":
-    fen = input("Enter FEN: ").strip()
-    move, score = find_best_move(fen)
-    print(f"Best move: {move}")
-    print(f"Evaluation: {score}")
+    while True:
+        try:
+            fen = input("FEN: ")
+            if fen == "":
+                print("Type 'exit' to exit")
+                continue
+            if fen == "exit" or fen == "Exit":
+                break
+            for key in kpi:
+                kpi[key] = 0
+            move, score = find_best_move(fen)
+            kpi['tt_size'] = len(transposition_table)
+            kpi['et_size'] = len(evaluation_table)
+            print(kpi)
+            print(f"Best move: {move}")
+            print(f"Evaluation: {score}")
+
+        except KeyboardInterrupt:
+            if input("Type 'exit' to exit: ") != "exit":
+                continue
+            break
+
+if __name__ == '__main__':
+    main()
