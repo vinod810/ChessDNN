@@ -11,13 +11,14 @@ from prepare_data import is_capture
 # Configuration
 # ----------------------------------
 
-MAX_DEPTH = 2
+MAX_DEPTH = 4
 INF = 10_000
 MAX_TT_SIZE = 200_000
 MAX_ET_SIZE = 200_000
 DNN_MAX_Q_DEPTH = 20
 DNN_SCORE_DIFF_THRESH = 50
 TACTICAL_Q_DEPTH = 5
+MAX_DNN_EAVALS = 300
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 EXACT, LOWERBOUND, UPPERBOUND = 0, 1, 2
@@ -115,8 +116,15 @@ def move_score(board, move):
 
     return score
 
-def ordered_moves(board):
-    return sorted(board.legal_moves, key=lambda m: move_score(board, m), reverse=True)
+def ordered_moves(board, pv_move=None):
+    moves = list(board.legal_moves)
+
+    if pv_move and pv_move in moves:
+        moves.remove(pv_move)
+        moves.sort(key=lambda m: move_score(board, m), reverse=True)
+        return [pv_move] + moves
+
+    return sorted(moves, key=lambda m: move_score(board, m), reverse=True)
 
 
 def quiescence(board, alpha, beta, q_depth):
@@ -125,7 +133,7 @@ def quiescence(board, alpha, beta, q_depth):
 
     stand_pat = evaluate_material(board)
 
-    if q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
+    if kpi['dnn_eval'] < MAX_DNN_EAVALS and q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
         abs(stand_pat - beta) < DNN_SCORE_DIFF_THRESH:
         stand_pat = evaluate_dnn(board)
 
@@ -133,7 +141,7 @@ def quiescence(board, alpha, beta, q_depth):
         kpi['beta_cutoff'] += 1
         return beta
 
-    if q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
+    if  kpi['dnn_eval'] < MAX_DNN_EAVALS and q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
             (abs(stand_pat - alpha) < DNN_SCORE_DIFF_THRESH or alpha < stand_pat):
         stand_pat = evaluate_dnn(board)
 
@@ -219,19 +227,34 @@ def negamax(board, depth, alpha, beta):
 # Root Search
 # ----------------------------------
 
-def find_best_move(fen, depth=MAX_DEPTH):
+def find_best_move(fen, max_depth=MAX_DEPTH):
     board = chess.Board(fen)
     best_move = None
     best_score = -INF
+    pv_move = None
 
-    for move in ordered_moves(board):
-        board.push(move)
-        score = -negamax(board, depth - 1, -INF, INF)
-        board.pop()
+    for depth in range(1, max_depth + 1):
+        alpha = -INF
+        beta = INF
+        current_best_move = None
+        current_best_score = -INF
 
-        if score > best_score:
-            best_score = score
-            best_move = move
+        for move in ordered_moves(board, pv_move):
+            board.push(move)
+            score = -negamax(board, depth - 1, -beta, -alpha)
+            board.pop()
+
+            if score > current_best_score:
+                current_best_score = score
+                current_best_move = move
+
+            alpha = max(alpha, score)
+
+        best_move = current_best_move
+        best_score = current_best_score
+        pv_move = best_move  # PV from this iteration
+
+        print(f"Depth {depth}: Best move = {best_move}, Score = {best_score}")
 
     return best_move, best_score
 
@@ -267,7 +290,7 @@ def  main():
 if __name__ == '__main__':
     main()
 
-# 2r2rk1/1p1nppbp/p1npb1p1/q7/N1P1P3/4BP2/PPN1B1PP/2RQ1RK1 w - - 4 14
+# 2r2rk1/1p1nppbp/p1npb1p1/q7/N1P1P3/4BP2/PP2B1PP/2RQNRK1 b - - 5 14
 
-# {'dnn_eval': 18, 'mat_eval': 2983, 'beta_cutoff': 2734, 'tt_hits': 0, 'met_hits': 136,
-# 'det_hits': 3, 'q_depth': 16, 'tt_size': 40, 'met_size': 2983, 'det_size': 18, 'time': 1}
+# {'dnn_eval': 300, 'mat_eval': 928971, 'beta_cutoff': 841436, 'tt_hits': 2084, 'met_hits': 203026, 'det_hits': 28,
+# 'q_depth': 20, 'tt_size': 15424, 'met_size': 128967, 'det_size': 300, 'time': 356}
