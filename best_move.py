@@ -1,5 +1,4 @@
 import time
-
 import chess
 import chess.polyglot
 from collections import namedtuple
@@ -12,25 +11,28 @@ from prepare_data import is_capture
 # Configuration
 # ----------------------------------
 
-MAX_DEPTH = 1
+MAX_DEPTH = 2
 INF = 10_000
 MAX_TT_SIZE = 200_000
 MAX_ET_SIZE = 200_000
+DNN_MAX_Q_DEPTH = 20
+DNN_SCORE_DIFF_THRESH = 50
+TACTICAL_Q_DEPTH = 5
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 EXACT, LOWERBOUND, UPPERBOUND = 0, 1, 2
 
 transposition_table = {}
-evaluation_table = {}
+material_eval_table = {}
+dnn_eval_table = {}
 
 kpi = {
     "dnn_eval": 0,
     "mat_eval": 0,
     "beta_cutoff": 0,
     "tt_hits": 0,
-    "tt_clears": 0,
-    "et_hits": 0,
-    "et_clears": 0,
+    "met_hits": 0,
+    "det_hits": 0,
     "q_depth": 0,
 }
 # ----------------------------------
@@ -46,11 +48,7 @@ PIECE_VALUES = {
     chess.KING: 0
 }
 
-# ----------------------------------
-# Evaluation Function
-# ----------------------------------
-
-def evaluate(board: chess.Board) -> int:
+def evaluate_material(board: chess.Board) -> int:
     """
     Simple material evaluation from side-to-move perspective
     """
@@ -60,29 +58,44 @@ def evaluate(board: chess.Board) -> int:
         return 0
 
     key = chess.polyglot.zobrist_hash(board)
-    if key in evaluation_table:
-        kpi['et_hits'] += 1
-        return evaluation_table[key]
+    if key in material_eval_table:
+        kpi['met_hits'] += 1
+        return material_eval_table[key]
 
-    if not is_capture(board):
-        kpi['dnn_eval'] += 1
-        score = dnn_evaluation(board)
-        if not board.turn: # black's move
-            score = -score
-    else:
-        kpi['mat_eval'] += 1
-        score = get_material_eval(board)
+    kpi['mat_eval'] += 1
+    score = get_material_eval(board)
 
-    if len(evaluation_table) > MAX_ET_SIZE:
-        kpi['et_clears'] += 1
-        evaluation_table.clear()
-    evaluation_table[key] = score
+    if len(material_eval_table) > MAX_ET_SIZE:
+        material_eval_table.clear()
+    material_eval_table[key] = score
 
     return score
 
-# ----------------------------------
-# Move Ordering
-# ----------------------------------
+
+def evaluate_dnn(board: chess.Board) -> int:
+
+    if board.is_checkmate():
+        return -INF
+    if board.is_stalemate():
+        return 0
+
+    key = chess.polyglot.zobrist_hash(board)
+    if key in dnn_eval_table:
+        kpi['det_hits'] += 1
+        return dnn_eval_table[key]
+
+    assert(not is_capture(board))
+    kpi['dnn_eval'] += 1
+    score = dnn_evaluation(board)
+    if not board.turn: # black's move
+        score = -score
+
+    if len(dnn_eval_table) > MAX_ET_SIZE:
+        dnn_eval_table.clear()
+    dnn_eval_table[key] = score
+
+    return int(score)
+
 
 def move_score(board, move):
     """
@@ -105,29 +118,36 @@ def move_score(board, move):
 def ordered_moves(board):
     return sorted(board.legal_moves, key=lambda m: move_score(board, m), reverse=True)
 
-# ----------------------------------
-# Quiescence Search
-# ----------------------------------
 
 def quiescence(board, alpha, beta, q_depth):
     if q_depth > kpi['q_depth']:
         kpi['q_depth'] = q_depth
 
-    stand_pat = evaluate(board)
-    # if abs(stand_pat - beta) < DNN_THRESH and  not is_capture(board)
-        # kpi['dnn_eval'] += 1
-        # stand_pat = score = dnn_evaluation(board)
-    #         if not board.turn: # black's move
-    #             score = -score
+    stand_pat = evaluate_material(board)
+
+    if q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
+        abs(stand_pat - beta) < DNN_SCORE_DIFF_THRESH:
+        stand_pat = evaluate_dnn(board)
+
     if stand_pat >= beta:
         kpi['beta_cutoff'] += 1
         return beta
+
+    if q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
+            (abs(stand_pat - alpha) < DNN_SCORE_DIFF_THRESH or alpha < stand_pat):
+        stand_pat = evaluate_dnn(board)
+
     if alpha < stand_pat:
         alpha = stand_pat
 
-    for move in board.legal_moves:
-        if not board.is_capture(move): # Todo for first 'n' moves consider check
-            continue
+    for move in ordered_moves(board): #board.legal_moves:
+        if q_depth <= TACTICAL_Q_DEPTH:
+            if not ((board.is_check() or board.is_capture(move) or move.promotion or
+                     board.gives_check(move))):
+                continue
+        else:
+            if not board.is_capture(move):
+                continue
 
         board.push(move)
         score = -quiescence(board, -beta, -alpha, q_depth + 1)
@@ -232,7 +252,8 @@ def  main():
             move, score = find_best_move(fen)
             end_time = time.perf_counter()
             kpi['tt_size'] = len(transposition_table)
-            kpi['et_size'] = len(evaluation_table)
+            kpi['met_size'] = len(material_eval_table)
+            kpi['det_size'] = len(dnn_eval_table)
             kpi['time'] = int(end_time - start_time)
             print(kpi)
             print(f"Best move: {move}")
@@ -248,6 +269,5 @@ if __name__ == '__main__':
 
 # 2r2rk1/1p1nppbp/p1npb1p1/q7/N1P1P3/4BP2/PPN1B1PP/2RQ1RK1 w - - 4 14
 
-# {'dnn_eval': 23909, 'mat_eval': 142743, 'beta_cutoff': 256823, 'tt_hits': 0, 'tt_clears': 0,
-# 'et_hits': 231429, 'et_clears': 0, 'q_depth': 26, 'tt_size': 0, 'et_size': 166652,
-# 'time': 1031} - DEPTH=1
+# {'dnn_eval': 18, 'mat_eval': 2983, 'beta_cutoff': 2734, 'tt_hits': 0, 'met_hits': 136,
+# 'det_hits': 3, 'q_depth': 16, 'tt_size': 40, 'met_size': 2983, 'det_size': 18, 'time': 1}
