@@ -1,13 +1,18 @@
+import time
+
 import chess
 import chess.polyglot
 from collections import namedtuple
+
+from material import get_material_eval
+from predict_score import dnn_evaluation
 from prepare_data import is_capture
 
 # ----------------------------------
 # Configuration
 # ----------------------------------
 
-MAX_DEPTH = 4
+MAX_DEPTH = 1
 INF = 10_000
 MAX_TT_SIZE = 200_000
 MAX_ET_SIZE = 200_000
@@ -26,6 +31,7 @@ kpi = {
     "tt_clears": 0,
     "et_hits": 0,
     "et_clears": 0,
+    "q_depth": 0,
 }
 # ----------------------------------
 # Piece Values
@@ -60,13 +66,12 @@ def evaluate(board: chess.Board) -> int:
 
     if not is_capture(board):
         kpi['dnn_eval'] += 1
+        score = dnn_evaluation(board)
+        if not board.turn: # black's move
+            score = -score
     else:
         kpi['mat_eval'] += 1
-
-    score = 0
-    for piece_type in PIECE_VALUES:
-        score += len(board.pieces(piece_type, board.turn)) * PIECE_VALUES[piece_type]
-        score -= len(board.pieces(piece_type, not board.turn)) * PIECE_VALUES[piece_type]
+        score = get_material_eval(board)
 
     if len(evaluation_table) > MAX_ET_SIZE:
         kpi['et_clears'] += 1
@@ -104,8 +109,16 @@ def ordered_moves(board):
 # Quiescence Search
 # ----------------------------------
 
-def quiescence(board, alpha, beta):
+def quiescence(board, alpha, beta, q_depth):
+    if q_depth > kpi['q_depth']:
+        kpi['q_depth'] = q_depth
+
     stand_pat = evaluate(board)
+    # if abs(stand_pat - beta) < DNN_THRESH and  not is_capture(board)
+        # kpi['dnn_eval'] += 1
+        # stand_pat = score = dnn_evaluation(board)
+    #         if not board.turn: # black's move
+    #             score = -score
     if stand_pat >= beta:
         kpi['beta_cutoff'] += 1
         return beta
@@ -113,14 +126,15 @@ def quiescence(board, alpha, beta):
         alpha = stand_pat
 
     for move in board.legal_moves:
-        if not board.is_capture(move):
+        if not board.is_capture(move): # Todo for first 'n' moves consider check
             continue
 
         board.push(move)
-        score = -quiescence(board, -beta, -alpha)
+        score = -quiescence(board, -beta, -alpha, q_depth + 1)
         board.pop()
 
         if score >= beta:
+            kpi['beta_cutoff'] += 1
             return beta
         if score > alpha:
             alpha = score
@@ -150,7 +164,7 @@ def negamax(board, depth, alpha, beta):
                 return entry.score
 
     if depth == 0:
-        return quiescence(board, alpha, beta)
+        return quiescence(board, alpha, beta, 1)
 
     max_eval = -INF
 
@@ -213,9 +227,13 @@ def  main():
                 break
             for key in kpi:
                 kpi[key] = 0
+
+            start_time = time.perf_counter()
             move, score = find_best_move(fen)
+            end_time = time.perf_counter()
             kpi['tt_size'] = len(transposition_table)
             kpi['et_size'] = len(evaluation_table)
+            kpi['time'] = int(end_time - start_time)
             print(kpi)
             print(f"Best move: {move}")
             print(f"Evaluation: {score}")
@@ -227,3 +245,9 @@ def  main():
 
 if __name__ == '__main__':
     main()
+
+# 2r2rk1/1p1nppbp/p1npb1p1/q7/N1P1P3/4BP2/PPN1B1PP/2RQ1RK1 w - - 4 14
+
+# {'dnn_eval': 23909, 'mat_eval': 142743, 'beta_cutoff': 256823, 'tt_hits': 0, 'tt_clears': 0,
+# 'et_hits': 231429, 'et_clears': 0, 'q_depth': 26, 'tt_size': 0, 'et_size': 166652,
+# 'time': 1031} - DEPTH=1

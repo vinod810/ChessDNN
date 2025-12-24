@@ -7,15 +7,14 @@ import chess.pgn
 import io
 
 # ----- CONFIG -----
-PGN_PATH = "pgn/lichess_db_standard_rated_2025-10.pgn.zst"
-BOARD_SHAPE = (13, 8, 8)     # TODO 13, 8, 8    # Example: 13 planes (12 piece planes + metadata)
+PGN_PATH = "pgn/lichess_db_standard_rated_2025-10.pgn.zst" #TODO make as command line arg
+BOARD_SHAPE = (13, 8, 8)     # TODO 13, 8, 8
 SHARD_SIZE = 1000_000 #samples per file
 MAX_SHARDS = 1000
 COMPRESSION = "GZIP"
 OUT_DIR = "tfrecords"
 TANH_SCALE = 400 # 1200(CP) = 3 = ~pi = 0.99
 MAX_SCORE = 10 * TANH_SCALE # tanh(10) is almost 1
- # http://talkchess.com/forum3/download/file.php?id=869
 MATE_FACTOR = 100
 MAX_MATE_DEPTH = 5
 MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR

@@ -4,7 +4,7 @@ import numpy as np
 from tensorflow.keras.callbacks import ModelCheckpoint
 from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE
 
-MAX_SHARDS = 5 # For faster hyper param tuning
+MAX_SHARDS = 14 # For faster hyper param tuning
 DATA_DIR = OUT_DIR #"tfrecords_18planes" # OUT_DIR
 
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
