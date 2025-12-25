@@ -6,7 +6,7 @@ from chess import Board
 from build_model import MODEL_FILEPATH, tanh_to_score
 from prepare_data import get_board_repr, MAX_SCORE
 
-def dnn_evaluation(board: Board) -> float:
+def dnn_evaluation(board: Board) -> int:
 
     if board.is_checkmate():
         return -MAX_SCORE if board.turn else MAX_SCORE
@@ -20,7 +20,7 @@ def dnn_evaluation(board: Board) -> float:
 
     score = dnn_evaluation.model.predict(board_repr, verbose=0)[0][0]
     score = tanh_to_score(score)
-    return score
+    return int(score)
 
 dnn_evaluation.model = None
 

@@ -190,11 +190,11 @@ class ChessEvaluator:
         return mobility
 
 
-def get_material_eval(board):
-    if get_material_eval.evaluator is None:
-        get_material_eval.evaluator = ChessEvaluator()
-    return get_material_eval.evaluator.evaluate_position(board)
-get_material_eval.evaluator = None
+def positional_eval(board) -> int:
+    if positional_eval.evaluator is None:
+        positional_eval.evaluator = ChessEvaluator()
+    return positional_eval.evaluator.evaluate_position(board)
+positional_eval.evaluator = None
 
 
 def  main():
@@ -209,7 +209,7 @@ def  main():
                 break
 
             board = chess.Board(fen)
-            print("positional score: ", get_material_eval(board))
+            print("positional score: ", positional_eval(board))
 
         except KeyboardInterrupt:
             if input("Type 'exit' to exit: ") != "exit":

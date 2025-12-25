@@ -4,9 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="LMR">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Null move prunin">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/best_move.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/material.py" beforeDir="false" afterPath="$PROJECT_DIR$/material.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/predict_score.py" beforeDir="false" afterPath="$PROJECT_DIR$/predict_score.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -233,7 +236,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766628666006</updated>
     </task>
-    <option name="localTasksCounter" value="18" />
+    <task id="LOCAL-00018" summary="Null move prunin">
+      <option name="closed" value="true" />
+      <created>1766668436394</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1766668436394</updated>
+    </task>
+    <option name="localTasksCounter" value="19" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -265,6 +276,7 @@
     <MESSAGE value="Hueristic" />
     <MESSAGE value="Aspiration window" />
     <MESSAGE value="LMR" />
-    <option name="LAST_COMMIT_MESSAGE" value="LMR" />
+    <MESSAGE value="Null move prunin" />
+    <option name="LAST_COMMIT_MESSAGE" value="Null move prunin" />
   </component>
 </project>

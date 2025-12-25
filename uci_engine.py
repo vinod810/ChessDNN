@@ -4,7 +4,7 @@ import chess
 # ------------------------------------
 # Your engine import / implementation
 # ------------------------------------
-from best_move import find_best_move, MAX_DEPTH   # or inline your code
+from best_move import find_best_move, MAX_NEGAMAX_DEPTH   # or inline your code
 
 
 ENGINE_NAME = "DNN-Engine"
@@ -15,7 +15,7 @@ ENGINE_AUTHOR = "EK"
 # ------------------------------------
 
 board = chess.Board()
-search_depth = MAX_DEPTH
+search_depth = MAX_NEGAMAX_DEPTH
 
 # ------------------------------------
 # Helpers
