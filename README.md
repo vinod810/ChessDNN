@@ -4,9 +4,11 @@ The purpose of this project is to demonstrate 1) chess position evaluation using
 
 ## Description
 
-An in-depth paragraph about your project and overview of use.
+The projects uses about 100 million chess postions to train a DNN that can evaluate a chess position. The chess engine ususes the chess postion evaluation provided by the DNN to decide the best move by eavaluating and ranking the resulting chess postions for each legal move.
 
 ## Getting Started
+* Clone the repository to you computer
+  ** 
 
 ### Dependencies
 
@@ -60,4 +62,5 @@ Inspiration, code snippets, etc.
 * [dbader](https://github.com/dbader/readme-template)
 * [zenorocha](https://gist.github.com/zenorocha/4526327)
 * [fvcproductions](https://gist.github.com/fvcproductions/1bfc2d4aecb01a834b46)
+
 
