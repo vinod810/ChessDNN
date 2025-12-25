@@ -26,9 +26,10 @@ EXACT, LOWERBOUND, UPPERBOUND = 0, 1, 2
 transposition_table = {}
 material_eval_table = {}
 dnn_eval_table = {}
+killer_moves = [[None, None] for _ in range(MAX_DEPTH + 1)]
+dnn_evals = 0
 
 kpi = {
-    "dnn_eval": 0,
     "mat_eval": 0,
     "beta_cutoff": 0,
     "tt_hits": 0,
@@ -74,6 +75,7 @@ def evaluate_material(board: chess.Board) -> int:
 
 
 def evaluate_dnn(board: chess.Board) -> int:
+    global dnn_evals
 
     if board.is_checkmate():
         return -INF
@@ -86,7 +88,7 @@ def evaluate_dnn(board: chess.Board) -> int:
         return dnn_eval_table[key]
 
     assert(not is_capture(board))
-    kpi['dnn_eval'] += 1
+    dnn_evals += 1
     score = dnn_evaluation(board)
     if not board.turn: # black's move
         score = -score
@@ -98,12 +100,19 @@ def evaluate_dnn(board: chess.Board) -> int:
     return int(score)
 
 
-def move_score(board, move):
+def move_score(board, move, depth):
     """
     Heuristic for move ordering:
     Captures > Checks > Quiet moves
     """
     score = 0
+
+    # Killer moves (quiet moves only)
+    if not board.is_capture(move) and depth is not None:
+        if move == killer_moves[depth][0]:
+            score += 9000
+        elif move == killer_moves[depth][1]:
+            score += 8000
 
     if board.is_capture(move):
         victim = board.piece_at(move.to_square)
@@ -116,15 +125,17 @@ def move_score(board, move):
 
     return score
 
-def ordered_moves(board, pv_move=None):
+def ordered_moves(board, depth, pv_move=None):
     moves = list(board.legal_moves)
 
     if pv_move and pv_move in moves:
         moves.remove(pv_move)
-        moves.sort(key=lambda m: move_score(board, m), reverse=True)
-        return [pv_move] + moves
 
-    return sorted(moves, key=lambda m: move_score(board, m), reverse=True)
+    moves.sort(key=lambda m: move_score(board, m, depth), reverse=True)
+
+    if pv_move:
+        return [pv_move] + moves
+    return moves
 
 
 def quiescence(board, alpha, beta, q_depth):
@@ -133,7 +144,7 @@ def quiescence(board, alpha, beta, q_depth):
 
     stand_pat = evaluate_material(board)
 
-    if kpi['dnn_eval'] < MAX_DNN_EAVALS and q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
+    if dnn_evals < MAX_DNN_EAVALS and q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
         abs(stand_pat - beta) < DNN_SCORE_DIFF_THRESH:
         stand_pat = evaluate_dnn(board)
 
@@ -141,14 +152,14 @@ def quiescence(board, alpha, beta, q_depth):
         kpi['beta_cutoff'] += 1
         return beta
 
-    if  kpi['dnn_eval'] < MAX_DNN_EAVALS and q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
+    if  dnn_evals < MAX_DNN_EAVALS and q_depth <= DNN_MAX_Q_DEPTH and not is_capture(board) and \
             (abs(stand_pat - alpha) < DNN_SCORE_DIFF_THRESH or alpha < stand_pat):
         stand_pat = evaluate_dnn(board)
 
     if alpha < stand_pat:
         alpha = stand_pat
 
-    for move in ordered_moves(board): #board.legal_moves:
+    for move in ordered_moves(board, depth=None): #board.legal_moves:
         if q_depth <= TACTICAL_Q_DEPTH:
             if not ((board.is_check() or board.is_capture(move) or move.promotion or
                      board.gives_check(move))):
@@ -196,7 +207,7 @@ def negamax(board, depth, alpha, beta):
 
     max_eval = -INF
 
-    for move in ordered_moves(board):
+    for move in ordered_moves(board, depth):
         board.push(move)
         score = -negamax(board, depth - 1, -beta, -alpha)
         board.pop()
@@ -204,9 +215,17 @@ def negamax(board, depth, alpha, beta):
         if score > max_eval:
             max_eval = score
 
-        alpha = max(alpha, score)
+        if score > alpha:
+            alpha = score
+
         if alpha >= beta:
-            break  # Beta cutoff
+            # -------- KILLER MOVE UPDATE --------
+            if not board.is_capture(move):
+                if killer_moves[depth][0] != move:
+                    killer_moves[depth][1] = killer_moves[depth][0]
+                    killer_moves[depth][0] = move
+            # -----------------------------------
+            break
 
     # Store in TT
     if max_eval <= alpha_orig:
@@ -228,6 +247,10 @@ def negamax(board, depth, alpha, beta):
 # ----------------------------------
 
 def find_best_move(fen, max_depth=MAX_DEPTH):
+    global dnn_evals, killer_moves
+    dnn_evals = 0
+    killer_moves = [[None, None] for _ in range(MAX_DEPTH + 1)]
+
     board = chess.Board(fen)
     best_move = None
     best_score = -INF
@@ -239,7 +262,7 @@ def find_best_move(fen, max_depth=MAX_DEPTH):
         current_best_move = None
         current_best_score = -INF
 
-        for move in ordered_moves(board, pv_move):
+        for move in ordered_moves(board, depth, pv_move):
             board.push(move)
             score = -negamax(board, depth - 1, -beta, -alpha)
             board.pop()
@@ -268,12 +291,15 @@ def  main():
                 continue
             if fen == "exit" or fen == "Exit":
                 break
+
             for key in kpi:
                 kpi[key] = 0
 
             start_time = time.perf_counter()
             move, score = find_best_move(fen)
             end_time = time.perf_counter()
+
+            kpi['dnn_evals'] = dnn_evals
             kpi['tt_size'] = len(transposition_table)
             kpi['met_size'] = len(material_eval_table)
             kpi['det_size'] = len(dnn_eval_table)
@@ -294,3 +320,9 @@ if __name__ == '__main__':
 
 # {'dnn_eval': 300, 'mat_eval': 928971, 'beta_cutoff': 841436, 'tt_hits': 2084, 'met_hits': 203026, 'det_hits': 28,
 # 'q_depth': 20, 'tt_size': 15424, 'met_size': 128967, 'det_size': 300, 'time': 356}
+
+# {'dnn_eval': 300, 'mat_eval': 456811, 'beta_cutoff': 427040, 'tt_hits': 1590, 'met_hits': 130554, 'det_hits': 157,
+# 'q_depth': 20, 'tt_size': 7185, 'met_size': 56809, 'det_size': 300, 'time': 186} - Iterative deepening
+
+# {'mat_eval': 178543, 'beta_cutoff': 162776, 'tt_hits': 1203, 'met_hits': 42916, 'det_hits': 90, 'q_depth': 21,
+# 'dnn_evals': 300, 'tt_size': 4053, 'met_size': 178543, 'det_size': 300, 'time': 79} - Killer moves

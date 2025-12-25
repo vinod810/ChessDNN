@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimized depth=2, most &lt; 10 sec">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Iterative deepening">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/best_move.py" afterDir="false" />
     </list>
@@ -193,7 +193,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766606714325</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="Iterative deepening">
+      <option name="closed" value="true" />
+      <created>1766616189251</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1766616189251</updated>
+    </task>
+    <option name="localTasksCounter" value="14" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -220,6 +228,7 @@
     <MESSAGE value="uci_engine.py" />
     <MESSAGE value="before reducing DNN eval." />
     <MESSAGE value="Optimized depth=2, most &lt; 10 sec" />
-    <option name="LAST_COMMIT_MESSAGE" value="Optimized depth=2, most &lt; 10 sec" />
+    <MESSAGE value="Iterative deepening" />
+    <option name="LAST_COMMIT_MESSAGE" value="Iterative deepening" />
   </component>
 </project>
