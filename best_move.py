@@ -21,6 +21,8 @@ TACTICAL_Q_DEPTH = 5
 MAX_DNN_EAVALS = 300
 ASPIRATION_WINDOW = 50   # centipawns
 MAX_RETRIES = 4
+LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
+LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 EXACT, LOWERBOUND, UPPERBOUND = 0, 1, 2
@@ -183,15 +185,11 @@ def quiescence(board, alpha, beta, q_depth):
 
     return alpha
 
-# ----------------------------------
-# Negamax with Alpha-Beta + TT
-# ----------------------------------
-
 def negamax(board, depth, alpha, beta):
     alpha_orig = alpha
     key = chess.polyglot.zobrist_hash(board)
 
-    # Transposition table lookup
+    # -------- Transposition Table --------
     if key in transposition_table:
         kpi['tt_hits'] += 1
         entry = transposition_table[key]
@@ -208,11 +206,50 @@ def negamax(board, depth, alpha, beta):
     if depth == 0:
         return quiescence(board, alpha, beta, 1)
 
+    in_check = board.is_check()
     max_eval = -INF
 
-    for move in ordered_moves(board, depth):
+    moves = ordered_moves(board, depth)
+
+    for move_index, move in enumerate(moves):
         board.push(move)
-        score = -negamax(board, depth - 1, -beta, -alpha)
+
+        # -------- LMR Decision --------
+        reduce = (
+            depth >= LMR_MIN_DEPTH
+            and move_index >= LMR_MOVE_THRESHOLD
+            and not in_check
+            and not board.is_capture(move)
+            and not board.gives_check(move)
+            and move != killer_moves[depth][0]
+            and move != killer_moves[depth][1]
+        )
+
+        if reduce:
+            # Reduced-depth search (null-window)
+            score = -negamax(
+                board,
+                depth - 2,
+                -alpha - 1,
+                -alpha
+            )
+
+            # Re-search if promising
+            if score > alpha:
+                score = -negamax(
+                    board,
+                    depth - 1,
+                    -beta,
+                    -alpha
+                )
+        else:
+            score = -negamax(
+                board,
+                depth - 1,
+                -beta,
+                -alpha
+            )
+
         board.pop()
 
         if score > max_eval:
@@ -221,20 +258,20 @@ def negamax(board, depth, alpha, beta):
         if score > alpha:
             alpha = score
 
+        # -------- Beta cutoff --------
         if alpha >= beta:
-            # -------- KILLER MOVE UPDATE --------
             if not board.is_capture(move):
+                # Killer update
                 if killer_moves[depth][0] != move:
                     killer_moves[depth][1] = killer_moves[depth][0]
                     killer_moves[depth][0] = move
 
-                # -------- History Heuristic Update --------
-                    key = (move.from_square, move.to_square)
-                    history_heuristic[key] = history_heuristic.get(key, 0) + depth * depth
-                # ----------------------------------------
+                # History update
+                key_hist = (move.from_square, move.to_square)
+                history_heuristic[key_hist] = history_heuristic.get(key_hist, 0) + depth * depth
             break
 
-    # Store in TT
+    # -------- TT Store --------
     if max_eval <= alpha_orig:
         flag = UPPERBOUND
     elif max_eval >= beta:
@@ -246,8 +283,8 @@ def negamax(board, depth, alpha, beta):
         kpi['tt_clears'] += 1
         transposition_table.clear()
     transposition_table[key] = TTEntry(depth, max_eval, flag)
-
     return max_eval
+
 
 def age_history():
     for k in history_heuristic:
@@ -387,3 +424,6 @@ if __name__ == '__main__':
 
 # {'mat_eval': 118717, 'beta_cutoff': 111007, 'tt_hits': 691, 'met_hits': 30916, 'det_hits': 133, 'q_depth': 21,
 # 'dnn_evals': 300, 'tt_size': 3309, 'met_size': 118717, 'det_size': 300, 'time': 60} - Aspiration window
+
+# {'mat_eval': 116721, 'beta_cutoff': 111522, 'tt_hits': 722, 'met_hits': 33994, 'det_hits': 133, 'q_depth': 21,
+# 'dnn_evals': 300, 'tt_size': 3508, 'met_size': 116721, 'det_size': 300, 'time': 62}- LMR

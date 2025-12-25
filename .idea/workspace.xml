@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Hueristic">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Aspiration window">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/best_move.py" afterDir="false" />
     </list>
@@ -217,7 +217,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766621809939</updated>
     </task>
-    <option name="localTasksCounter" value="16" />
+    <task id="LOCAL-00016" summary="Aspiration window">
+      <option name="closed" value="true" />
+      <created>1766627469076</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1766627469076</updated>
+    </task>
+    <option name="localTasksCounter" value="17" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -247,6 +255,7 @@
     <MESSAGE value="Iterative deepening" />
     <MESSAGE value="Killer move" />
     <MESSAGE value="Hueristic" />
-    <option name="LAST_COMMIT_MESSAGE" value="Hueristic" />
+    <MESSAGE value="Aspiration window" />
+    <option name="LAST_COMMIT_MESSAGE" value="Aspiration window" />
   </component>
 </project>
