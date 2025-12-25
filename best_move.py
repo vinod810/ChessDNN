@@ -34,6 +34,7 @@ kpi = {
     "pos_eval": 0,
     "beta_cutoffs": 0,
     "tt_hits": 0,
+    "qs_tt_hits": 0,
     "pec_hits": 0, # positional evaluation cache hits
     "dec_hits": 0,  # DNN evaluation cache hits
     "q_depth": 0,
@@ -61,9 +62,6 @@ def evaluate_positional(board: chess.Board) -> int:
 
     kpi['pos_eval'] += 1
     score = positional_eval(board)
-
-    if len(positional_eval_cache) > MAX_TABLE_SIZE:
-        positional_eval_cache.clear()
     positional_eval_cache[key] = score
 
     return score
@@ -86,10 +84,7 @@ def evaluate_dnn(board: chess.Board) -> int:
     if not board.turn: # black's move
         score = -score
 
-    if len(dnn_eval_cache) > MAX_TABLE_SIZE:
-        dnn_eval_cache.clear()
     dnn_eval_cache[key] = score
-
     return int(score)
 
 def move_score_q_search(board: chess.Board, move) -> int:
@@ -176,7 +171,9 @@ def quiescence(board, alpha, beta, q_depth):
         alpha = stand_pat
 
     for move in ordered_moves_q_search(board): #board.legal_moves:
-        if q_depth <= TACTICAL_Q_DEPTH:
+        if board.is_check():
+            pass  # allow all legal moves
+        elif q_depth <= TACTICAL_Q_DEPTH:
             if not ((board.is_check() or board.is_capture(move) or move.promotion or
                      board.gives_check(move))):
                 continue
@@ -191,10 +188,17 @@ def quiescence(board, alpha, beta, q_depth):
         if score >= beta:
             kpi['beta_cutoffs'] += 1
             return beta
+
         if score > alpha:
             alpha = score
 
     return alpha
+
+def has_non_pawn_material(board):
+    for piece_type in [chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
+        if board.pieces(piece_type, board.turn):
+            return True
+    return False
 
 def negamax(board, depth, alpha, beta):
     alpha_orig = alpha
@@ -221,10 +225,11 @@ def negamax(board, depth, alpha, beta):
     max_eval = -INF
 
     # Null Move Pruning
+    assert (NULL_MOVE_MIN_DEPTH - 1 >= NULL_MOVE_REDUCTION)
     if (
-        depth >= NULL_MOVE_MIN_DEPTH
-        and not in_check
-        and not board.is_checkmate()
+            depth >= NULL_MOVE_MIN_DEPTH #+ NULL_MOVE_REDUCTION
+            and not in_check
+            and has_non_pawn_material(board)
     ):
         board.push(chess.Move.null())
         score = -negamax(
@@ -235,26 +240,27 @@ def negamax(board, depth, alpha, beta):
         )
         board.pop()
 
-        # -------- Fail-high → prune --------
         if score >= beta:
             return beta
-
 
     # Normal Move Search (with LMR)
     moves = ordered_moves(board, depth)
 
     for move_index, move in enumerate(moves):
         board.push(move)
+        child_in_check = board.is_check()
 
         # -------- LMR Decision --------
+        is_pv = (move_index == 0)
         reduce = (
-            depth >= LMR_MIN_DEPTH
-            and move_index >= LMR_MOVE_THRESHOLD
-            and not in_check
-            and not board.is_capture(move)
-            and not board.gives_check(move)
-            and move != killer_moves[depth][0]
-            and move != killer_moves[depth][1]
+                depth >= LMR_MIN_DEPTH
+                and move_index >= LMR_MOVE_THRESHOLD
+                and not is_pv
+                and not child_in_check
+                and not board.is_capture(move)
+                and not board.gives_check(move)
+                and move != killer_moves[depth][0]
+                and move != killer_moves[depth][1]
         )
 
         if reduce:
@@ -308,16 +314,20 @@ def negamax(board, depth, alpha, beta):
     else:
         flag = TT_EXACT
 
-    if len(transposition_table) > MAX_TABLE_SIZE:
-        kpi['tt_clears'] += 1
-        transposition_table.clear()
     transposition_table[key] = TTEntry(depth, max_eval, flag)
+
+
     return max_eval
 
 
 def age_heuristic_history():
-    for k in history_heuristic:
+    for k in list(history_heuristic.keys()):
         history_heuristic[k] //= 2
+
+def control_dict_size(table, max_dict_size):
+    if len(table) > max_dict_size:
+        for _ in range(max_dict_size // 4):
+            table.pop(next(iter(table)))
 
 
 def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH):
@@ -325,6 +335,10 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH):
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
     history_heuristic.clear()
+
+    control_dict_size(transposition_table, MAX_TABLE_SIZE)
+    control_dict_size(positional_eval_cache, MAX_TABLE_SIZE)
+    control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
     board = chess.Board(fen)
     best_move = None
@@ -422,8 +436,8 @@ def  main():
 
             kpi['dnn_evals'] = resources_usage['dnn_evals']
             kpi['tt_size'] = len(transposition_table)
-            kpi['met_size'] = len(positional_eval_cache)
-            kpi['det_size'] = len(dnn_eval_cache)
+            kpi['mec_size'] = len(positional_eval_cache)
+            kpi['dec_size'] = len(dnn_eval_cache)
             kpi['time'] = int(end_time - start_time)
             print(kpi)
             print(f"Best move: {move}")
