@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Aspiration window">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="LMR">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/best_move.py" afterDir="false" />
     </list>
@@ -225,7 +225,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766627469076</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL-00017" summary="LMR">
+      <option name="closed" value="true" />
+      <created>1766628666006</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1766628666006</updated>
+    </task>
+    <option name="localTasksCounter" value="18" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -256,6 +264,7 @@
     <MESSAGE value="Killer move" />
     <MESSAGE value="Hueristic" />
     <MESSAGE value="Aspiration window" />
-    <option name="LAST_COMMIT_MESSAGE" value="Aspiration window" />
+    <MESSAGE value="LMR" />
+    <option name="LAST_COMMIT_MESSAGE" value="LMR" />
   </component>
 </project>

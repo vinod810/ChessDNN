@@ -23,6 +23,8 @@ ASPIRATION_WINDOW = 50   # centipawns
 MAX_RETRIES = 4
 LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
 LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
+NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
+NULL_MOVE_MIN_DEPTH = 3
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 EXACT, LOWERBOUND, UPPERBOUND = 0, 1, 2
@@ -203,12 +205,37 @@ def negamax(board, depth, alpha, beta):
             if alpha >= beta:
                 return entry.score
 
+    # -------- Leaf --------
     if depth == 0:
         return quiescence(board, alpha, beta, 1)
 
     in_check = board.is_check()
     max_eval = -INF
 
+    # =====================================
+    # Null Move Pruning
+    # =====================================
+    if (
+        depth >= NULL_MOVE_MIN_DEPTH
+        and not in_check
+        and not board.is_checkmate()
+    ):
+        board.push(chess.Move.null())
+        score = -negamax(
+            board,
+            depth - 1 - NULL_MOVE_REDUCTION,
+            -beta,
+            -beta + 1
+        )
+        board.pop()
+
+        # -------- Fail-high → prune --------
+        if score >= beta:
+            return beta
+
+    # =====================================
+    # Normal Move Search (with LMR)
+    # =====================================
     moves = ordered_moves(board, depth)
 
     for move_index, move in enumerate(moves):
@@ -226,15 +253,12 @@ def negamax(board, depth, alpha, beta):
         )
 
         if reduce:
-            # Reduced-depth search (null-window)
             score = -negamax(
                 board,
                 depth - 2,
                 -alpha - 1,
                 -alpha
             )
-
-            # Re-search if promising
             if score > alpha:
                 score = -negamax(
                     board,
@@ -258,7 +282,7 @@ def negamax(board, depth, alpha, beta):
         if score > alpha:
             alpha = score
 
-        # -------- Beta cutoff --------
+        # -------- Beta Cutoff --------
         if alpha >= beta:
             if not board.is_capture(move):
                 # Killer update
@@ -427,3 +451,6 @@ if __name__ == '__main__':
 
 # {'mat_eval': 116721, 'beta_cutoff': 111522, 'tt_hits': 722, 'met_hits': 33994, 'det_hits': 133, 'q_depth': 21,
 # 'dnn_evals': 300, 'tt_size': 3508, 'met_size': 116721, 'det_size': 300, 'time': 62}- LMR
+
+# {'mat_eval': 96027, 'beta_cutoff': 89159, 'tt_hits': 352, 'met_hits': 23022, 'det_hits': 133, 'q_depth': 20,
+# 'dnn_evals': 300, 'tt_size': 2799, 'met_size': 96027, 'det_size': 300, 'time': 49} _ Null move pruning
