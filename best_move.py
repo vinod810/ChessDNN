@@ -7,7 +7,8 @@ from material import positional_eval # Returns positional evaluation using piece
 from predict_score import dnn_evaluation # Returns positional evaluation using a DNN model.
 from prepare_data import is_capture
 
-MAX_NEGAMAX_DEPTH = 4
+MAX_NEGAMAX_DEPTH = 20
+MAX_TIME = 30
 INF = 10_000
 MAX_TABLE_SIZE = 200_000
 DELTA_THRESH_DNN_EVAL = 50 # Score difference that will trigger a DNM evaluation
@@ -19,6 +20,11 @@ LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
 LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
 NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 3
+
+class TimeControl:
+    time_limit = None  # in seconds
+    start_time = None
+    stop_search = False
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
@@ -48,6 +54,12 @@ PIECE_VALUES = {
     chess.QUEEN: 900,
     chess.KING: 0
 }
+
+def check_time():
+    if TimeControl.time_limit is None:
+        return
+    if (time.perf_counter() - TimeControl.start_time) >= TimeControl.time_limit:
+        TimeControl.stop_search = True
 
 def evaluate_positional(board: chess.Board) -> int:
     if board.is_checkmate():
@@ -139,18 +151,20 @@ def ordered_moves(board, depth, pv_move=None):
         return [pv_move] + moves
     return moves
 
-
 def ordered_moves_q_search(board):
     moves = list(board.legal_moves)
     moves.sort(key=lambda m: move_score_q_search(board, m), reverse=True)
     return moves
 
-
 def quiescence(board, alpha, beta, q_depth):
     if q_depth > kpi['q_depth']:
         kpi['q_depth'] = q_depth
 
-    # Call positional evaluation first to mreduce computing. We will cann DNN evaluation latr if necessary.
+    check_time()
+    if TimeControl.stop_search:
+        raise TimeoutError()
+
+        # Call positional evaluation first to mreduce computing. We will cann DNN evaluation latr if necessary.
     stand_pat = evaluate_positional(board)
 
     # Call DNN evaluation when the scores are within a threshold.
@@ -203,6 +217,10 @@ def has_non_pawn_material(board):
 def negamax(board, depth, alpha, beta):
     alpha_orig = alpha
     key = chess.polyglot.zobrist_hash(board)
+
+    check_time()
+    if TimeControl.stop_search:
+        raise TimeoutError()
 
     # -------- Transposition Table --------
     if key in transposition_table:
@@ -330,7 +348,11 @@ def control_dict_size(table, max_dict_size):
             table.pop(next(iter(table)))
 
 
-def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH):
+def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, max_time=MAX_TIME):
+    TimeControl.time_limit = max_time
+    TimeControl.stop_search = False
+    TimeControl.start_time = time.perf_counter()
+
     resources_usage['dnn_evals'] = 0
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
@@ -345,55 +367,29 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH):
     best_score = 0
     pv_move = None
 
-    for depth in range(1, max_depth + 1):
-        age_heuristic_history()
+    try:
+        for depth in range(1, max_depth + 1):
+            check_time()
+            if TimeControl.stop_search:
+                break  # exit if time is up
 
-        window = ASPIRATION_WINDOW
-        retries = 0
-
-        while True:
-            alpha = best_score - window
-            beta = best_score + window
-            alpha_orig = alpha
-
-            current_best_move = None
-            current_best_score = -INF
-
-            for move in ordered_moves(board, depth, pv_move):
-                board.push(move)
-                score = -negamax(board, depth - 1, -beta, -alpha)
-                board.pop()
-
-                if score > current_best_score:
-                    current_best_score = score
-                    current_best_move = move
-
-                if score > alpha:
-                    alpha = score
-
-            # -------- SUCCESS --------
-            if current_best_score > alpha_orig and current_best_score < beta:
-                best_move = current_best_move
-                best_score = current_best_score
-                pv_move = best_move
+            if (time.perf_counter() - TimeControl.start_time) * 4 > TimeControl.time_limit:
+                # Unlikely to complete the next depth iteration
                 break
 
-            # -------- FAIL-LOW --------
-            if current_best_score <= alpha_orig:
-                window *= 2
+            age_heuristic_history()
 
-            # -------- FAIL-HIGH --------
-            elif current_best_score >= beta:
-                window *= 2
+            window = ASPIRATION_WINDOW
+            retries = 0
 
-            retries += 1
+            while True:
+                alpha = best_score - window
+                beta = best_score + window
+                alpha_orig = alpha
 
-            # -------- FALLBACK --------
-            if retries >= MAX_AW_RETRIES:
-                alpha = -INF
-                beta = INF
-
+                current_best_move = None
                 current_best_score = -INF
+
                 for move in ordered_moves(board, depth, pv_move):
                     board.push(move)
                     score = -negamax(board, depth - 1, -beta, -alpha)
@@ -406,12 +402,56 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH):
                     if score > alpha:
                         alpha = score
 
-                best_move = current_best_move
-                best_score = current_best_score
-                pv_move = best_move
-                break
+                # -------- SUCCESS --------
+                if current_best_score > alpha_orig and current_best_score < beta:
+                    best_move = current_best_move
+                    best_score = current_best_score
+                    pv_move = best_move
+                    break
 
-        print(f"Depth {depth}: Best={best_move}, Score={best_score}")
+                # -------- FAIL-LOW --------
+                if current_best_score <= alpha_orig:
+                    window *= 2
+
+                # -------- FAIL-HIGH --------
+                elif current_best_score >= beta:
+                    window *= 2
+
+                retries += 1
+
+                # -------- FALLBACK --------
+                if retries >= MAX_AW_RETRIES:
+                    alpha = -INF
+                    beta = INF
+
+                    current_best_score = -INF
+                    for move in ordered_moves(board, depth, pv_move):
+                        board.push(move)
+                        score = -negamax(board, depth - 1, -beta, -alpha)
+                        board.pop()
+
+                        if score > current_best_score:
+                            current_best_score = score
+                            current_best_move = move
+
+                        if score > alpha:
+                            alpha = score
+
+                    best_move = current_best_move
+                    best_score = current_best_score
+                    pv_move = best_move
+                    break
+
+            print(f"Depth {depth}: Best={best_move}, Score={best_score}")
+
+    except TimeoutError:
+        # Time up — return last completed depth's best move
+        pass
+
+    if best_move is None:
+        # fallback if nothing searched
+        best_move = list(board.legal_moves)[0]
+        best_score = evaluate_positional(board)
 
     return best_move, best_score
 
