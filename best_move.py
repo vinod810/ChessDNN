@@ -19,6 +19,8 @@ DNN_MAX_Q_DEPTH = 20
 DNN_SCORE_DIFF_THRESH = 50
 TACTICAL_Q_DEPTH = 5
 MAX_DNN_EAVALS = 300
+ASPIRATION_WINDOW = 50   # centipawns
+MAX_RETRIES = 4
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 EXACT, LOWERBOUND, UPPERBOUND = 0, 1, 2
@@ -251,42 +253,88 @@ def age_history():
     for k in history_heuristic:
         history_heuristic[k] //= 2
 
+
 def find_best_move(fen, max_depth=MAX_DEPTH):
-    global dnn_evals, killer_moves
+    global dnn_evals, killer_moves, history_heuristic
     dnn_evals = 0
     killer_moves = [[None, None] for _ in range(MAX_DEPTH + 1)]
+    history_heuristic = {}
 
     board = chess.Board(fen)
     best_move = None
-    best_score = -INF
+    best_score = 0
     pv_move = None
 
     for depth in range(1, max_depth + 1):
-        alpha = -INF
-        beta = INF
-        current_best_move = None
-        current_best_score = -INF
-
         age_history()
 
-        for move in ordered_moves(board, depth, pv_move):
-            board.push(move)
-            score = -negamax(board, depth - 1, -beta, -alpha)
-            board.pop()
+        window = ASPIRATION_WINDOW
+        retries = 0
 
-            if score > current_best_score:
-                current_best_score = score
-                current_best_move = move
+        while True:
+            alpha = best_score - window
+            beta = best_score + window
+            alpha_orig = alpha
 
-            alpha = max(alpha, score)
+            current_best_move = None
+            current_best_score = -INF
 
-        best_move = current_best_move
-        best_score = current_best_score
-        pv_move = best_move  # PV from this iteration
+            for move in ordered_moves(board, depth, pv_move):
+                board.push(move)
+                score = -negamax(board, depth - 1, -beta, -alpha)
+                board.pop()
 
-        print(f"Depth {depth}: Best move = {best_move}, Score = {best_score}")
+                if score > current_best_score:
+                    current_best_score = score
+                    current_best_move = move
+
+                if score > alpha:
+                    alpha = score
+
+            # -------- SUCCESS --------
+            if current_best_score > alpha_orig and current_best_score < beta:
+                best_move = current_best_move
+                best_score = current_best_score
+                pv_move = best_move
+                break
+
+            # -------- FAIL-LOW --------
+            if current_best_score <= alpha_orig:
+                window *= 2
+
+            # -------- FAIL-HIGH --------
+            elif current_best_score >= beta:
+                window *= 2
+
+            retries += 1
+
+            # -------- FALLBACK --------
+            if retries >= MAX_RETRIES:
+                alpha = -INF
+                beta = INF
+
+                current_best_score = -INF
+                for move in ordered_moves(board, depth, pv_move):
+                    board.push(move)
+                    score = -negamax(board, depth - 1, -beta, -alpha)
+                    board.pop()
+
+                    if score > current_best_score:
+                        current_best_score = score
+                        current_best_move = move
+
+                    if score > alpha:
+                        alpha = score
+
+                best_move = current_best_move
+                best_score = current_best_score
+                pv_move = best_move
+                break
+
+        print(f"Depth {depth}: Best={best_move}, Score={best_score}")
 
     return best_move, best_score
+
 
 def  main():
 
@@ -336,3 +384,6 @@ if __name__ == '__main__':
 
 # {'mat_eval': 160659, 'beta_cutoff': 149451, 'tt_hits': 1087, 'met_hits': 42584, 'det_hits': 149, 'q_depth': 21,
 # 'dnn_evals': 300, 'tt_size': 3737, 'met_size': 160659, 'det_size': 300, 'time': 74} - Heuristic
+
+# {'mat_eval': 118717, 'beta_cutoff': 111007, 'tt_hits': 691, 'met_hits': 30916, 'det_hits': 133, 'q_depth': 21,
+# 'dnn_evals': 300, 'tt_size': 3309, 'met_size': 118717, 'det_size': 300, 'time': 60} - Aspiration window
