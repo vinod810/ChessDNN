@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="ChatGpt review">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="QS delta pruning">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/best_move.py" afterDir="false" />
     </list>
@@ -257,7 +257,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766683377285</updated>
     </task>
-    <option name="localTasksCounter" value="21" />
+    <task id="LOCAL-00021" summary="QS delta pruning">
+      <option name="closed" value="true" />
+      <created>1766684505946</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1766684505946</updated>
+    </task>
+    <option name="localTasksCounter" value="22" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -292,6 +300,7 @@
     <MESSAGE value="Null move prunin" />
     <MESSAGE value="Clean up - 1" />
     <MESSAGE value="ChatGpt review" />
-    <option name="LAST_COMMIT_MESSAGE" value="ChatGpt review" />
+    <MESSAGE value="QS delta pruning" />
+    <option name="LAST_COMMIT_MESSAGE" value="QS delta pruning" />
   </component>
 </project>
