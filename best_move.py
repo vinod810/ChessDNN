@@ -19,6 +19,7 @@ LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
 LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
 NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 3
+QS_DELTA_PRUNING_THRESH = 100
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
@@ -145,6 +146,11 @@ def ordered_moves_q_search(board):
     moves.sort(key=lambda m: move_score_q_search(board, m), reverse=True)
     return moves
 
+def delta_margin(move, board):
+    victim = board.piece_at(move.to_square)
+    if not victim:
+        return 0
+    return PIECE_VALUES[victim.piece_type] + QS_DELTA_PRUNING_THRESH
 
 def quiescence(board, alpha, beta, q_depth):
     if q_depth > kpi['q_depth']:
@@ -170,7 +176,8 @@ def quiescence(board, alpha, beta, q_depth):
     if alpha < stand_pat:
         alpha = stand_pat
 
-    for move in ordered_moves_q_search(board): #board.legal_moves:
+    for move in ordered_moves_q_search(board): # board.legal_moves:
+
         if board.is_check():
             pass  # allow all legal moves
         elif q_depth <= TACTICAL_Q_DEPTH:
@@ -180,6 +187,12 @@ def quiescence(board, alpha, beta, q_depth):
         else: # After certain depth only captures are considered
             if not board.is_capture(move):
                 continue
+
+        # -------- Delta Pruning --------
+        if not board.is_check():
+            if board.is_capture(move) and not move.promotion and not board.gives_check(move):
+                if stand_pat + delta_margin(move, board) <= alpha:
+                    continue
 
         board.push(move)
         score = -quiescence(board, -beta, -alpha, q_depth + 1)
@@ -473,3 +486,6 @@ if __name__ == '__main__':
 
 # {'mat_eval': 96027, 'beta_cutoff': 89159, 'tt_hits': 352, 'met_hits': 23022, 'det_hits': 133, 'q_depth': 20,
 # 'dnn_evals': 300, 'tt_size': 2799, 'met_size': 96027, 'det_size': 300, 'time': 49} _ Null move pruning
+
+# {'pos_eval': 63289, 'beta_cutoffs': 48374, 'tt_hits': 353, 'qs_tt_hits': 0, 'pec_hits': 14906, 'dec_hits': 126,
+# 'q_depth': 22, 'dnn_evals': 300, 'tt_size': 2792, 'mec_size': 63289, 'dec_size': 300, 'time': 44} - QS delta pruning
