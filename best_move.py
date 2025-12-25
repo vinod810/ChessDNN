@@ -27,6 +27,7 @@ transposition_table = {}
 material_eval_table = {}
 dnn_eval_table = {}
 killer_moves = [[None, None] for _ in range(MAX_DEPTH + 1)]
+history_heuristic = {}
 dnn_evals = 0
 
 kpi = {
@@ -101,10 +102,6 @@ def evaluate_dnn(board: chess.Board) -> int:
 
 
 def move_score(board, move, depth):
-    """
-    Heuristic for move ordering:
-    Captures > Checks > Quiet moves
-    """
     score = 0
 
     # Killer moves (quiet moves only)
@@ -113,6 +110,10 @@ def move_score(board, move, depth):
             score += 9000
         elif move == killer_moves[depth][1]:
             score += 8000
+
+    score += history_heuristic.get(
+        (move.from_square, move.to_square), 0
+    )
 
     if board.is_capture(move):
         victim = board.piece_at(move.to_square)
@@ -224,7 +225,11 @@ def negamax(board, depth, alpha, beta):
                 if killer_moves[depth][0] != move:
                     killer_moves[depth][1] = killer_moves[depth][0]
                     killer_moves[depth][0] = move
-            # -----------------------------------
+
+                # -------- History Heuristic Update --------
+                    key = (move.from_square, move.to_square)
+                    history_heuristic[key] = history_heuristic.get(key, 0) + depth * depth
+                # ----------------------------------------
             break
 
     # Store in TT
@@ -242,9 +247,9 @@ def negamax(board, depth, alpha, beta):
 
     return max_eval
 
-# ----------------------------------
-# Root Search
-# ----------------------------------
+def age_history():
+    for k in history_heuristic:
+        history_heuristic[k] //= 2
 
 def find_best_move(fen, max_depth=MAX_DEPTH):
     global dnn_evals, killer_moves
@@ -261,6 +266,8 @@ def find_best_move(fen, max_depth=MAX_DEPTH):
         beta = INF
         current_best_move = None
         current_best_score = -INF
+
+        age_history()
 
         for move in ordered_moves(board, depth, pv_move):
             board.push(move)
@@ -326,3 +333,6 @@ if __name__ == '__main__':
 
 # {'mat_eval': 178543, 'beta_cutoff': 162776, 'tt_hits': 1203, 'met_hits': 42916, 'det_hits': 90, 'q_depth': 21,
 # 'dnn_evals': 300, 'tt_size': 4053, 'met_size': 178543, 'det_size': 300, 'time': 79} - Killer moves
+
+# {'mat_eval': 160659, 'beta_cutoff': 149451, 'tt_hits': 1087, 'met_hits': 42584, 'det_hits': 149, 'q_depth': 21,
+# 'dnn_evals': 300, 'tt_size': 3737, 'met_size': 160659, 'det_size': 300, 'time': 74} - Heuristic
