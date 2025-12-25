@@ -1,106 +1,86 @@
+#!/usr/bin/env python3
 import sys
+
 import chess
 
-# ------------------------------------
-# Your engine import / implementation
-# ------------------------------------
-from best_move import find_best_move, MAX_NEGAMAX_DEPTH   # or inline your code
+from best_move import find_best_move, MAX_NEGAMAX_DEPTH
 
 
-ENGINE_NAME = "DNN-Engine"
-ENGINE_AUTHOR = "EK"
+class TimeCoontrol:
+    pass
 
-# ------------------------------------
-# UCI Engine State
-# ------------------------------------
-
-board = chess.Board()
-search_depth = MAX_NEGAMAX_DEPTH
-
-# ------------------------------------
-# Helpers
-# ------------------------------------
-
-def uci_print(msg):
-    print(msg)
-    sys.stdout.flush()
-
-def set_position(tokens):
-    global board
-    idx = 0
-
-    if tokens[idx] == "startpos":
-        board = chess.Board()
-        idx += 1
-    elif tokens[idx] == "fen":
-        fen = " ".join(tokens[idx + 1:idx + 7])
-        board = chess.Board(fen)
-        idx += 7
-
-    if idx < len(tokens) and tokens[idx] == "moves":
-        for move in tokens[idx + 1:]:
-            board.push_uci(move)
-
-# ------------------------------------
-# Main UCI Loop
-# ------------------------------------
 
 def uci_loop():
-    global search_depth
+    board = chess.Board()
+
+    #print("uci")
+    #print("id name DNN Engine")
+    #print("id author Eapen")
+    #print("uciok")
+    #sys.stdout.flush()
 
     while True:
-        line = sys.stdin.readline().strip()
-        if not line:
-            continue
-
-        tokens = line.split()
-        command = tokens[0]
+        try:
+            command = input().strip()
+        except EOFError:
+            break
 
         if command == "uci":
-            uci_print(f"id name {ENGINE_NAME}")
-            uci_print(f"id author {ENGINE_AUTHOR}")
-            uci_print("uciok")
+            print("id name DNN Engine")
+            print("id author Eapen Kuruvilla")
+            print("uciok", flush=True)
 
         elif command == "isready":
-            uci_print("readyok")
+            print("readyok", flush=True)
 
-        elif command == "ucinewgame":
-            board.reset()
+        elif command.startswith("position"):
+            tokens = command.split()
 
-        elif command == "position":
-            set_position(tokens[1:])
+            if tokens[1] == "startpos":
+                board.reset()
+                move_index = 2
 
-        elif command == "go":
-            # Optional: parse depth
-            if "depth" in tokens:
-                idx = tokens.index("depth")
-                search_depth = int(tokens[idx + 1])
 
-            fen = board.fen()
-            best_move, score = find_best_move(fen, search_depth)
+            elif tokens[1] == "fen":
+                # FEN consists of the next 6 tokens AFTER "fen"
+                fen = " ".join(tokens[2:8])
+                board.set_fen(fen)
+                move_index = 8
 
-            # Convert move to UCI string if needed
-            if isinstance(best_move, chess.Move):
-                best_move_uci = best_move.uci()
             else:
-                best_move_uci = best_move
+                raise ValueError(f"Unknown position format: {command}")
 
-            # Send info (optional but recommended)
-            uci_print(f"info depth {search_depth} score cp {score}")
+            # Apply moves if present
+            if move_index < len(tokens) and tokens[move_index] == "moves":
+                for mv in tokens[move_index + 1:]:
+                    board.push_uci(mv)
 
-            uci_print(f"bestmove {best_move_uci}")
-            board.push_uci(best_move_uci)
+        elif command.startswith("go"):
+            tokens = command.split()
+            movetime = None
+
+            if "movetime" in tokens:
+                movetime = int(tokens[tokens.index("movetime") + 1]) / 1000.0
+            elif "wtime" in tokens and "btime" in tokens:
+                wtime = int(tokens[tokens.index("wtime") + 1])
+                btime = int(tokens[tokens.index("btime") + 1])
+                time_left = wtime if board.turn else btime
+                movetime = max(0.01, time_left / 30 / 1000)
+
+            best_move, _ = find_best_move(
+                board.fen(),
+                max_depth=MAX_NEGAMAX_DEPTH,
+                time_limit=movetime
+            )
+
+            print(f"bestmove {best_move.uci()}", flush=True)
+
+        elif command == "stop":
+            TimeCoontrol.stop_search = True
 
         elif command == "quit":
             break
 
-        # Optional commands (safe to ignore)
-        elif command in ("stop", "ponderhit"):
-            pass
-
-# ------------------------------------
-# Entry Point
-# ------------------------------------
 
 if __name__ == "__main__":
     uci_loop()

@@ -348,8 +348,8 @@ def control_dict_size(table, max_dict_size):
             table.pop(next(iter(table)))
 
 
-def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, max_time=MAX_TIME):
-    TimeControl.time_limit = max_time
+def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
+    TimeControl.time_limit = time_limit
     TimeControl.stop_search = False
     TimeControl.start_time = time.perf_counter()
 
@@ -471,7 +471,7 @@ def  main():
                 kpi[key] = 0
 
             start_time = time.perf_counter()
-            move, score = find_best_move(fen)
+            move, score = find_best_move(fen, time_limit=MAX_TIME)
             end_time = time.perf_counter()
 
             kpi['dnn_evals'] = resources_usage['dnn_evals']
