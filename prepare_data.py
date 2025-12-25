@@ -1,4 +1,6 @@
 import os
+import sys
+
 import tensorflow as tf
 import numpy as np
 from typing import Iterable, Tuple, List
@@ -6,7 +8,6 @@ import zstandard as zstd
 import chess.pgn
 import io
 
-# ----- CONFIG -----
 PGN_PATH = "pgn/lichess_db_standard_rated_2025-10.pgn.zst" #TODO make as command line arg
 BOARD_SHAPE = (13, 8, 8)     # TODO 13, 8, 8
 SHARD_SIZE = 1000_000 #samples per file
@@ -62,7 +63,6 @@ def _float_feature(value: float):
     return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
 
 def serialize(board: np.ndarray, score: float) -> bytes:
-    """Convert a single (board, score) sample to serialized tf.Example."""
     feature = {
         "board": _bytes_feature(board.tobytes()),
         "score": _float_feature(score)
@@ -173,7 +173,14 @@ def stream_data_from_pgn_zst(path):
                     yield board_repr, score
 
 def main():
-    write_chess_tfrecords(stream_data_from_pgn_zst(PGN_PATH))
+    if len(sys.argv) != 2:
+        print("Usage: python prepare_data.py filename.pgn.zst")
+        exit()
+    elif  sys.argv[1].endswith(".zst"):
+        print('A .pgn.zst file is expected as input')
+        exit()
+
+    write_chess_tfrecords(stream_data_from_pgn_zst(sys.argv[1]))
     print(kpi)
 
 

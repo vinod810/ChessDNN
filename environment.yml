@@ -1,0 +1,12 @@
+name: ChessDNN
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.13
+  - chess
+  - numpy
+  - tensorflow
+  - zstandard
+
+prefix: /home/eapen/anaconda3/envs/ChessDNN
