@@ -19,6 +19,8 @@ LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
 LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
 NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 3
+DELTA_PRUNING_MIN_Q_DEPTH = 5
+DELTA_PRUNING_MARGIN = 200
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -192,6 +194,15 @@ def quiescence(board, alpha, beta, q_depth):
             if not board.is_capture(move):
                 continue
 
+        # -------- Simple delta pruning --------
+        if board.is_capture(move) and q_depth > DELTA_PRUNING_MIN_Q_DEPTH:
+            victim = board.piece_at(move.to_square)
+            if not victim: # en-passant test
+                attacker = board.piece_at(move.from_square)
+                gain = PIECE_VALUES[victim.piece_type] - (PIECE_VALUES[attacker.piece_type] if attacker else 0)
+                if stand_pat + gain + DELTA_PRUNING_MARGIN < alpha:
+                    continue
+
         board.push(move)
         score = -quiescence(board, -beta, -alpha, q_depth + 1)
         board.pop()
@@ -338,8 +349,6 @@ def negamax(board, depth, alpha, beta):
         flag = TT_EXACT
 
     transposition_table[key] = TTEntry(depth, max_eval, flag)
-
-
     return max_eval
 
 
@@ -479,7 +488,7 @@ def  main():
                 kpi[key] = 0
 
             start_time = time.perf_counter()
-            move, score = find_best_move(fen, max_depth=4, time_limit=60)
+            move, score = find_best_move(fen, max_depth=20, time_limit=60)
             end_time = time.perf_counter()
 
             kpi['tt_size'] = len(transposition_table)
@@ -532,3 +541,6 @@ if __name__ == '__main__':
 
 #{'pos_eval': 88132, 'dnn_evals': 218, 'beta_cutoffs': 80613, 'tt_hits': 377, 'qs_tt_hits': 0, 'pec_hits': 21661,
 # 'dec_hits': 85, 'q_depth': 22, 'tt_size': 2798, 'mec_size': 88132, 'dec_size': 218, 'time': 44}
+
+# {'pos_eval': 71397, 'dnn_evals': 134, 'beta_cutoffs': 63370, 'tt_hits': 270, 'qs_tt_hits': 0, 'pec_hits': 14842,
+# 'dec_hits': 49, 'q_depth': 12, 'tt_size': 2399, 'mec_size': 71397, 'dec_size': 134, 'time': 35} - Delta pruning
