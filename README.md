@@ -1,67 +1,59 @@
 # DNN Chess Engine
 
-The purpose of this project is to demonstrate 1) chess position evaluation using deep nueral netwrok (DNN) and 2) a chess engine that can play at a strength equal to an experience club player, i.e., about 1500 ELO rating strength.
+The purpose of this project is to demonstrate 1) chess position evaluation using deep neural network (DNN) 
+and 2) a chess engine that can play at a strength equal to an experience club player, i.e., about 1500 ELO 
+rating strength.
 
 ## Description
 
-The projects uses about 100 million chess postions to train a DNN that can evaluate a chess position. The chess engine ususes the chess postion evaluation provided by the DNN to decide the best move by eavaluating and ranking the resulting chess postions for each legal move.
+The projects uses about 100 million chess positions to train a DNN that can evaluate a chess position. The 
+chess engine us uses the chess position evaluation provided by the DNN to decide the best move by evaluating 
+and ranking the resulting chess positions for each legal move.
+
+The Python-based chess engine that combines classical alpha–beta negamax search with modern heuristics.
+The engine speaks the UCI (Universal Chess Interface) protocol and can be used with chess GUIs such as 
+PyChess as well other chess GUI that support UCI. The feature of the chess engine are:
+*UCI-compatible chess engine
+*Negamax + Alpha–Beta pruning
+*Iterative Deepening
+*Quiescence Search
+*Killer Move heuristic
+*History heuristic
+*Late Move Reductions (LMR)
+*Null Move Pruning
+*Aspiration Windows
+*Time-controlled search
+*Transposition Tables
 
 ## Getting Started
 * Clone the repository to you computer
-  ** Build DNN model. Note: You may skip t
+* Set up the conda environment using the environment.yml file
+** Build DNN model (optional). Note: You may skip this step and use the prebuilt model/model.keras
+*** Download the most recent chess games files from https://database.lichess.org/ in pgn.zst format
+*** Convert the pgn.zst files into multiple (about 100) one-hot encoded files by running the command 
+'python prepare_day.py filename.pgn.zst'.  Note: the conversion will take 2 to 3 days.
+*** Generate the DNN model by running the command 'python build_model.py'
+** Test DNN position evaluation (optional). Run command 'python predict_score.py'
+** Test best move generation (optional). Run command 'python best_move.py'
 
-### Dependencies
 
-* Describe any prerequisites, libraries, OS version, etc., needed before installing program.
-* ex. Windows 10
-
-### Installing
-
-* How/where to download your program
-* Any modifications needed to be made to files/folders
-
-### Executing program
-
-* How to run the program
-* Step-by-step bullets
-```
-code blocks for commands
-```
-
-## Help
-
-Any advise for common problems or issues.
-```
-command to run if program contains helper info
-```
+## Executing program
+* You can play against this chess program using PyChess GUI.
+** Install the GUI using the command 'sudo apt install pychess'
+** Start PyChess by running the command 'pychess'
+** Configure PyChess to use this program as an engine.
+*** Edit->Engines>New. Then browse to the cloned directory and select uci_engine.py
 
 ## Authors
-
-Contributors names and contact info
-
-ex. Dominique Pizzie  
-ex. [@DomPizzie](https://twitter.com/dompizzie)
-
-## Version History
-
-* 0.2
-    * Various bug fixes and optimizations
-    * See [commit change]() or See [release history]()
-* 0.1
-    * Initial Release
+Eapen Kuruvilla 
+https://www.linkedin.com/in/eapenkuruvilla/
 
 ## License
+This project is free to use, modify, and redistribute for any purpose, including commercial use.  
+It is provided **“as is”**, without any warranty of any kind, and the authors assume no responsibility or liability 
+for any damages arising from its use.
 
-This project is licensed under the [NAME HERE] License - see the LICENSE.md file for details
 
-## Acknowledgments
-
-Inspiration, code snippets, etc.
-* [awesome-readme](https://github.com/matiassingers/awesome-readme)
-* [PurpleBooth](https://gist.github.com/PurpleBooth/109311bb0361f32d87a2)
-* [dbader](https://github.com/dbader/readme-template)
-* [zenorocha](https://gist.github.com/zenorocha/4526327)
-* [fvcproductions](https://gist.github.com/fvcproductions/1bfc2d4aecb01a834b46)
 
 
 
