@@ -1,6 +1,5 @@
 import os
 import sys
-
 import tensorflow as tf
 import numpy as np
 from typing import Iterable, Tuple, List
@@ -8,8 +7,7 @@ import zstandard as zstd
 import chess.pgn
 import io
 
-PGN_PATH = "pgn/lichess_db_standard_rated_2025-10.pgn.zst" #TODO make as command line arg
-BOARD_SHAPE = (13, 8, 8)     # TODO 13, 8, 8
+BOARD_SHAPE = (13, 8, 8)     #
 SHARD_SIZE = 1000_000 #samples per file
 MAX_SHARDS = 1000
 COMPRESSION = "GZIP"

@@ -25,7 +25,7 @@ The Python-based chess engine that combines classical alpha–beta negamax searc
 * Build DNN model (**optional**). Note: You may skip this step and use the prebuilt model/model.keras
   * Download the most recent chess games files from https://database.lichess.org/ in pgn.zst format
   * Convert the pgn.zst files into multiple (about 100) one-hot encoded files by running the command 'python prepare_data.py filename.pgn.zst'.  Note: the conversion will take 2 to 3 days to complete.
-  * Generate the DNN model by running the command 'python build_model.py'. Model gneration will take couple of hours to complete.
+  * Generate the DNN model by running the command 'python build_model.py'. Model generation will take a couple of hours to complete.
 * Test the DNN position evaluation (optional). Run the command 'python predict_score.py'
 * Test the best move generation (optional). Run the command 'python best_move.py'
 
