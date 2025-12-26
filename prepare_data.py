@@ -68,7 +68,6 @@ def serialize(board: np.ndarray, score: float) -> bytes:
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
 
-
 # ----- WRITE SHARDED TFRECORDS -----
 def write_chess_tfrecords(
     data_stream: Iterable[Tuple[np.ndarray, float]],
@@ -112,7 +111,7 @@ def write_chess_tfrecords(
 
     return file_paths
 
-def is_capture(board: chess.Board) -> bool:
+def is_any_move_capture(board: chess.Board) -> bool:
     capture = (any(board.is_capture(mv) for mv in board.legal_moves))
     return capture
 
@@ -147,7 +146,7 @@ def stream_data_from_pgn_zst(path):
 
                     kpi["moves"] += 1
 
-                    if is_capture(node.board()):
+                    if is_any_move_capture(node.board()):
                         kpi["moves_capture"] += 1
                         continue
 

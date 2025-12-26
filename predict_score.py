@@ -20,6 +20,8 @@ def dnn_evaluation(board: Board) -> int:
 
     score = dnn_evaluation.model.predict(board_repr, verbose=0)[0][0]
     score = tanh_to_score(score)
+    if not board.turn: # black's turn
+        score = -score
     return int(score)
 
 dnn_evaluation.model = None

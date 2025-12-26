@@ -1,6 +1,6 @@
 import chess
 
-class ChessEvaluator:
+class PositionEval:
     def __init__(self):
         # Piece values in centipawns
         self.piece_values = {
@@ -173,7 +173,6 @@ class ChessEvaluator:
         return bonus
 
     def _evaluate_mobility(self, board):
-        """Evaluate piece mobility."""
         mobility = 0
 
         # Evaluate mobility for white
@@ -192,7 +191,7 @@ class ChessEvaluator:
 
 def positional_eval(board) -> int:
     if positional_eval.evaluator is None:
-        positional_eval.evaluator = ChessEvaluator()
+        positional_eval.evaluator = PositionEval()
     return positional_eval.evaluator.evaluate_position(board)
 positional_eval.evaluator = None
 
@@ -215,7 +214,6 @@ def  main():
             if input("Type 'exit' to exit: ") != "exit":
                 continue
             break
-
 
 
 if __name__ == '__main__':

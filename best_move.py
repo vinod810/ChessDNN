@@ -3,17 +3,16 @@ import chess
 import chess.polyglot
 from collections import namedtuple
 
-from material import positional_eval # Returns positional evaluation using piece tables.
+from position_eval import positional_eval # Returns positional evaluation using piece tables.
 from predict_score import dnn_evaluation # Returns positional evaluation using a DNN model.
-from prepare_data import is_capture
+from prepare_data import is_any_move_capture
 
 MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30
 INF = 10_000
 MAX_TABLE_SIZE = 200_000
-DELTA_THRESH_DNN_EVAL = 50 # Score difference that will trigger a DNM evaluation
+DELTA_THRESH_DNN_EVAL = 25 # Score difference that will trigger a DNM evaluation
 TACTICAL_Q_DEPTH = 5 # After this quiescent search depth, only captures are considered, i.e. no checks or promotions.
-MAX_DNN_EVALS = 300 # Limit the max number of costly DNN evaluations to limit the analysis time.
 ASPIRATION_WINDOW = 50
 MAX_AW_RETRIES = 4
 LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
@@ -34,10 +33,10 @@ positional_eval_cache = {}
 dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
 history_heuristic = {}
-resources_usage = {'dnn_evals': 0}
 
 kpi = {
     "pos_eval": 0,
+    "dnn_evals": 0,
     "beta_cutoffs": 0,
     "tt_hits": 0,
     "qs_tt_hits": 0,
@@ -75,7 +74,6 @@ def evaluate_positional(board: chess.Board) -> int:
     kpi['pos_eval'] += 1
     score = positional_eval(board)
     positional_eval_cache[key] = score
-
     return score
 
 
@@ -90,14 +88,12 @@ def evaluate_dnn(board: chess.Board) -> int:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    assert(not is_capture(board))
-    resources_usage['dnn_evals'] += 1
-    score = dnn_evaluation(board)
-    if not board.turn: # black's move
-        score = -score
+    assert(not is_any_move_capture(board)) # DNN is trained for positions without captures.
+    kpi['dnn_evals'] += 1
+    score = int(dnn_evaluation(board))
 
     dnn_eval_cache[key] = score
-    return int(score)
+    return score
 
 def move_score_q_search(board: chess.Board, move) -> int:
     score = 0
@@ -164,21 +160,23 @@ def quiescence(board, alpha, beta, q_depth):
     if TimeControl.stop_search:
         raise TimeoutError()
 
-        # Call positional evaluation first to mreduce computing. We will cann DNN evaluation latr if necessary.
+        # Call positional evaluation first to reduce computing. We will cann DNN evaluation later if necessary.
     stand_pat = evaluate_positional(board)
 
-    # Call DNN evaluation when the scores are within a threshold.
-    if resources_usage['dnn_evals'] < MAX_DNN_EVALS and not is_capture(board) and \
-        abs(stand_pat - beta) < DELTA_THRESH_DNN_EVAL:
+    # Call DNN evaluation when the scores are within a threshold. Note: DNN is trained only for positions without
+    # captures.
+    if not is_any_move_capture(board) and abs(stand_pat - beta) < DELTA_THRESH_DNN_EVAL:
         stand_pat = evaluate_dnn(board)
 
     if stand_pat >= beta:
         kpi['beta_cutoffs'] += 1
         return beta
 
-    # Call DNN evaluation when the scores are within a threshold or returning evaluation
-    if  resources_usage['dnn_evals'] < MAX_DNN_EVALS and not is_capture(board) and \
-            (abs(stand_pat - alpha) < DELTA_THRESH_DNN_EVAL or alpha < stand_pat):
+    if stand_pat + 900 < alpha:
+        return alpha
+
+    # Call DNN evaluation when the scores are within a threshold or using evaluation as alpha
+    if  not is_any_move_capture(board) and (abs(stand_pat - alpha) < DELTA_THRESH_DNN_EVAL or alpha < stand_pat):
         stand_pat = evaluate_dnn(board)
 
     if alpha < stand_pat:
@@ -188,8 +186,7 @@ def quiescence(board, alpha, beta, q_depth):
         if board.is_check():
             pass  # allow all legal moves
         elif q_depth <= TACTICAL_Q_DEPTH:
-            if not ((board.is_check() or board.is_capture(move) or move.promotion or
-                     board.gives_check(move))):
+            if not ((board.is_check() or board.is_capture(move) or move.promotion or board.gives_check(move))):
                 continue
         else: # After certain depth only captures are considered
             if not board.is_capture(move):
@@ -248,6 +245,7 @@ def negamax(board, depth, alpha, beta):
             depth >= NULL_MOVE_MIN_DEPTH #+ NULL_MOVE_REDUCTION
             and not in_check
             and has_non_pawn_material(board)
+            and board.occupied_co[chess.WHITE] | board.occupied_co[chess.BLACK] > 6
     ):
         board.push(chess.Move.null())
         score = -negamax(
@@ -282,9 +280,12 @@ def negamax(board, depth, alpha, beta):
         )
 
         if reduce:
+            reduction = 1
+            if depth >= 6 and move_index >= 6:
+                reduction = 2
             score = -negamax(
                 board,
-                depth - 2,
+                depth - reduction,
                 -alpha - 1,
                 -alpha
             )
@@ -321,7 +322,11 @@ def negamax(board, depth, alpha, beta):
 
                 # History update
                 key_hist = (move.from_square, move.to_square)
-                history_heuristic[key_hist] = history_heuristic.get(key_hist, 0) + depth * depth
+                history_heuristic[key_hist] = min(
+                    history_heuristic.get(key_hist, 0) + depth * depth,
+                    10_000
+                )
+
             break
 
     # -------- TT Store --------
@@ -340,7 +345,7 @@ def negamax(board, depth, alpha, beta):
 
 def age_heuristic_history():
     for k in list(history_heuristic.keys()):
-        history_heuristic[k] //= 2
+        history_heuristic[k] >>= 2
 
 def control_dict_size(table, max_dict_size):
     if len(table) > max_dict_size:
@@ -353,7 +358,6 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
     TimeControl.stop_search = False
     TimeControl.start_time = time.perf_counter()
 
-    resources_usage['dnn_evals'] = 0
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
     history_heuristic.clear()
@@ -369,13 +373,13 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
 
     try:
         for depth in range(1, max_depth + 1):
-            check_time()
-            if TimeControl.stop_search:
-                break  # exit if time is up
+            #check_time()
+            #if TimeControl.stop_search:
+            #    break  # exit if time is up
 
-            if (time.perf_counter() - TimeControl.start_time) * 4 > TimeControl.time_limit:
+            #if (time.perf_counter() - TimeControl.start_time) * 4 > TimeControl.time_limit:
                 # Unlikely to complete the next depth iteration
-                break
+             #   break
 
             age_heuristic_history()
 
@@ -391,6 +395,10 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                 current_best_score = -INF
 
                 for move in ordered_moves(board, depth, pv_move):
+                    check_time()
+                    if TimeControl.stop_search:
+                        break
+
                     board.push(move)
                     score = -negamax(board, depth - 1, -beta, -alpha)
                     board.pop()
@@ -471,10 +479,9 @@ def  main():
                 kpi[key] = 0
 
             start_time = time.perf_counter()
-            move, score = find_best_move(fen, time_limit=MAX_TIME)
+            move, score = find_best_move(fen, max_depth=4, time_limit=60)
             end_time = time.perf_counter()
 
-            kpi['dnn_evals'] = resources_usage['dnn_evals']
             kpi['tt_size'] = len(transposition_table)
             kpi['mec_size'] = len(positional_eval_cache)
             kpi['dec_size'] = len(dnn_eval_cache)
@@ -513,3 +520,15 @@ if __name__ == '__main__':
 
 # {'mat_eval': 96027, 'beta_cutoff': 89159, 'tt_hits': 352, 'met_hits': 23022, 'det_hits': 133, 'q_depth': 20,
 # 'dnn_evals': 300, 'tt_size': 2799, 'met_size': 96027, 'det_size': 300, 'time': 49} _ Null move pruning
+
+# {'pos_eval': 97471, 'dnn_evals': 430, 'beta_cutoffs': 90781, 'tt_hits': 352, 'qs_tt_hits': 0, 'pec_hits': 23301,
+# 'dec_hits': 212, 'q_depth': 22, 'tt_size': 2799, 'mec_size': 97471, 'dec_size': 430, 'time': 58} - No DNN restrictions
+
+# {'pos_eval': 89480, 'dnn_evals': 412, 'beta_cutoffs': 81128, 'tt_hits': 375, 'qs_tt_hits': 0, 'pec_hits': 21076,
+# 'dec_hits': 202, 'q_depth': 22, 'tt_size': 2828, 'mec_size': 89480, 'dec_size': 412, 'time': 53} - Delta pruning
+
+# {'pos_eval': 85888, 'dnn_evals': 214, 'beta_cutoffs': 78305, 'tt_hits': 376, 'qs_tt_hits': 0, 'pec_hits': 20752,
+# 'dec_hits': 78, 'q_depth': 22, 'tt_size': 2766, 'mec_size': 85888, 'dec_size': 214, 'time': 44} _ Tighter DNN calls
+
+#{'pos_eval': 88132, 'dnn_evals': 218, 'beta_cutoffs': 80613, 'tt_hits': 377, 'qs_tt_hits': 0, 'pec_hits': 21661,
+# 'dec_hits': 85, 'q_depth': 22, 'tt_size': 2798, 'mec_size': 88132, 'dec_size': 218, 'time': 44}

@@ -4,9 +4,8 @@ import numpy as np
 from tensorflow.keras.callbacks import ModelCheckpoint
 from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE
 
-MAX_SHARDS = 14 # For faster hyper param tuning
-DATA_DIR = OUT_DIR #"tfrecords_18planes" # OUT_DIR
-
+MAX_SHARDS = 1000 # Use a smaller number for quicker hyper param tuning
+DATA_DIR = OUT_DIR
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
 TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))
 N_TRAIN = int(len(DATA_FILES) * TRAIN_FACTOR)
@@ -19,8 +18,6 @@ TANH_MIN = -TANH_MAX
 
 def score_to_tf_tanh(score):
     tanh = tf.tanh(score / TANH_SCALE)
-    #tanh = TANH_MIN if tanh < TANH_MIN else tanh
-    #tanh = TANH_MAX if tanh > TANH_MAX else tanh
     return tanh
 
 def tanh_to_score(tanh):
