@@ -12,14 +12,15 @@ MAX_TIME = 30
 INF = 10_000
 MAX_TABLE_SIZE = 200_000
 DELTA_THRESH_DNN_EVAL = 25 # Score difference that will trigger a DNM evaluation
-TACTICAL_Q_DEPTH = 5 # After this quiescent search depth, only captures are considered, i.e. no checks or promotions.
+# TODO DNN only when the position is balanced
+TACTICAL_QS_MAX_DEPTH = 5 # After this quiescent search depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 50
 MAX_AW_RETRIES = 4
 LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
 LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
 NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 3
-DELTA_PRUNING_MIN_Q_DEPTH = 5
+DELTA_PRUNING_QS_MIN_DEPTH = 5
 DELTA_PRUNING_MARGIN = 50
 
 class TimeControl:
@@ -80,6 +81,19 @@ def evaluate_positional(board: chess.Board) -> int:
 
 
 def evaluate_dnn(board: chess.Board) -> int:
+    # TODO
+    # from stockfish import Stockfish
+    # # Specify the path to your Stockfish executable
+    # stockfish = Stockfish(path="/path/to/stockfish_executable")
+    #stockfish.update_engine_parameters({"Use NNUE": "true"})
+    # stockfish.set_fen_position("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1")
+    # best_move = stockfish.get_best_move()
+    # print(f"Best move: {best_move}")
+    #
+    # # Get evaluation (returns score in centipawns or mate score)
+    # evaluation = stockfish.get_evaluation()
+    # print(f"Evaluation: {evaluation}")
+
     if board.is_checkmate():
         return -INF
     if board.is_stalemate():
@@ -167,6 +181,7 @@ def quiescence(board, alpha, beta, q_depth):
 
     # Call DNN evaluation when the scores are within a threshold. Note: DNN is trained only for positions without
     # captures.
+    # TODO DNN only when the position is balanced
     if not is_any_move_capture(board) and abs(stand_pat - beta) < DELTA_THRESH_DNN_EVAL:
         stand_pat = evaluate_dnn(board)
 
@@ -187,15 +202,15 @@ def quiescence(board, alpha, beta, q_depth):
     for move in ordered_moves_q_search(board): #board.legal_moves:
         if board.is_check():
             pass  # allow all legal moves
-        elif q_depth <= TACTICAL_Q_DEPTH:
-            if not ((board.is_check() or board.is_capture(move) or move.promotion or board.gives_check(move))):
+        elif q_depth <= TACTICAL_QS_MAX_DEPTH:
+            if not (board.is_capture(move) or move.promotion or board.gives_check(move)):
                 continue
         else: # After certain depth only captures are considered
             if not board.is_capture(move):
                 continue
 
         # -------- Simple delta pruning --------
-        if board.is_capture(move) and q_depth > DELTA_PRUNING_MIN_Q_DEPTH:
+        if board.is_capture(move) and q_depth >= DELTA_PRUNING_QS_MIN_DEPTH:
             victim = board.piece_at(move.to_square)
             if not victim: # en-passant test
                 attacker = board.piece_at(move.from_square)

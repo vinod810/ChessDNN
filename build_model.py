@@ -9,7 +9,7 @@ DATA_DIR = OUT_DIR
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
 TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))
 N_TRAIN = int(len(DATA_FILES) * TRAIN_FACTOR)
-MODEL_FILEPATH = "model/model.keras"  # or "best_model.h5" for HDF5 format
+MODEL_FILEPATH = "model/model.keras"
 
 BATCH_SIZE = 256 * 4 # AVX2 CPU = 256
 NUM_EPOCHS = 100
@@ -64,10 +64,10 @@ def get_train_val_datasets(batch_size=256):
     train_files = DATA_FILES[:N_TRAIN]
     val_files = DATA_FILES[N_TRAIN:]
 
-    train_ds = load_dataset(train_files, batch_size=batch_size, shuffle=True)
-    val_ds   = load_dataset(val_files, batch_size=batch_size, shuffle=False)
+    train = load_dataset(train_files, batch_size=batch_size, shuffle=True)
+    val   = load_dataset(val_files, batch_size=batch_size, shuffle=False)
 
-    return train_ds, val_ds
+    return train, val
 
 if __name__ == '__main__':
 
@@ -77,10 +77,8 @@ if __name__ == '__main__':
         tf.keras.layers.Input(shape=BOARD_SHAPE,),
         tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(512, activation="tanh"), # Fist layer tanh activation
-        tf.keras.layers.Dense(256, activation="relu"), # TODO try, 512
+        tf.keras.layers.Dense(256, activation="relu"),
         tf.keras.layers.Dense(128, activation="relu"),
-        #tf.keras.layers.Dense(64, activation="relu"),
-        #tf.keras.layers.Dense(32, activation="relu"),
         tf.keras.layers.Dense(1, activation='tanh')
     ])
 
@@ -100,7 +98,7 @@ if __name__ == '__main__':
     early_stopping_callback = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss',
         min_delta=0.001,
-        patience=3,
+        patience=5,
         verbose=0,
         mode='auto',
         baseline=None,

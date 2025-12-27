@@ -4,10 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="delta pruning margin - 50 - 68.33">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Before building noe DNN model">
+      <change afterPath="$PROJECT_DIR$/model/model.keras" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/position_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/position_eval.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/best_move.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -347,7 +349,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766795096270</updated>
     </task>
-    <option name="localTasksCounter" value="32" />
+    <task id="LOCAL-00032" summary="Before building noe DNN model">
+      <option name="closed" value="true" />
+      <created>1766796402291</created>
+      <option name="number" value="00032" />
+      <option name="presentableId" value="LOCAL-00032" />
+      <option name="project" value="LOCAL" />
+      <updated>1766796402291</updated>
+    </task>
+    <option name="localTasksCounter" value="33" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -362,7 +372,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Uses material search inside quiescent searach." />
     <MESSAGE value="best_move.py initial version" />
     <MESSAGE value="13 plane encoding" />
     <MESSAGE value="13 plane encoding - v2" />
@@ -387,6 +396,7 @@
     <MESSAGE value="Code clean up by ChatGpt" />
     <MESSAGE value="Engine test" />
     <MESSAGE value="delta pruning margin - 50 - 68.33" />
-    <option name="LAST_COMMIT_MESSAGE" value="delta pruning margin - 50 - 68.33" />
+    <MESSAGE value="Before building noe DNN model" />
+    <option name="LAST_COMMIT_MESSAGE" value="Before building noe DNN model" />
   </component>
 </project>
