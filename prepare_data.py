@@ -1,19 +1,20 @@
+import io
 import os
 import sys
-import tensorflow as tf
-import numpy as np
 from typing import Iterable, Tuple, List
-import zstandard as zstd
-import chess.pgn
-import io
 
-BOARD_SHAPE = (13, 8, 8)     #
-SHARD_SIZE = 1000_000 #samples per file
+import chess.pgn
+import numpy as np
+import tensorflow as tf
+import zstandard as zstd
+
+BOARD_SHAPE = (13, 8, 8)  #
+SHARD_SIZE = 1000_000  # samples per file
 MAX_SHARDS = 1000
 COMPRESSION = "GZIP"
 OUT_DIR = "tfrecords"
-TANH_SCALE = 400 # 1200(CP) = 3 = ~pi = 0.99
-MAX_SCORE = 10 * TANH_SCALE # tanh(10) is almost 1
+TANH_SCALE = 400  # 1200(CP) = 3 = ~pi = 0.99
+MAX_SCORE = 10 * TANH_SCALE  # tanh(10) is almost 1
 MATE_FACTOR = 100
 MAX_MATE_DEPTH = 5
 MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
@@ -29,13 +30,14 @@ kpi = {
 }
 
 PIECE_TO_PLANE = {
-    chess.PAWN:   0,
+    chess.PAWN: 0,
     chess.KNIGHT: 1,
     chess.BISHOP: 2,
-    chess.ROOK:   3,
-    chess.QUEEN:  4,
-    chess.KING:   5,
+    chess.ROOK: 3,
+    chess.QUEEN: 4,
+    chess.KING: 5,
 }
+
 
 def get_board_repr(board: chess.Board):
     planes = np.zeros(BOARD_SHAPE, dtype=np.uint8)
@@ -53,12 +55,15 @@ def get_board_repr(board: chess.Board):
 
     return planes
 
+
 # ----- TF Example Helpers -----
 def _bytes_feature(value: bytes):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
+
 def _float_feature(value: float):
     return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
+
 
 def serialize(board: np.ndarray, score: float) -> bytes:
     feature = {
@@ -68,12 +73,12 @@ def serialize(board: np.ndarray, score: float) -> bytes:
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
 
+
 # ----- WRITE SHARDED TFRECORDS -----
 def write_chess_tfrecords(
-    data_stream: Iterable[Tuple[np.ndarray, float]],
-    out_dir: str = OUT_DIR,
-    shard_size: int = SHARD_SIZE) -> List[str]:
-
+        data_stream: Iterable[Tuple[np.ndarray, float]],
+        out_dir: str = OUT_DIR,
+        shard_size: int = SHARD_SIZE) -> List[str]:
     os.makedirs(out_dir, exist_ok=True)
     shard_id = 0
     samples_written = 0
@@ -110,6 +115,7 @@ def write_chess_tfrecords(
         print(f"Closed final shard {shard_id}")
 
     return file_paths
+
 
 def is_any_move_capture(board: chess.Board) -> bool:
     capture = (any(board.is_capture(mv) for mv in board.legal_moves))
@@ -154,10 +160,10 @@ def stream_data_from_pgn_zst(path):
                         kpi["moves_mate"] += 1
                         score = node.eval().white().mate()
                         if score < 0:
-                            score = min(-MAX_MATE_DEPTH, score) # score will be -ve if mate by black
+                            score = min(-MAX_MATE_DEPTH, score)  # score will be -ve if mate by black
                             score = -MAX_SCORE - score * MATE_FACTOR
                         else:
-                            score = max(MAX_MATE_DEPTH, score) # score will be -ve if mate by black
+                            score = max(MAX_MATE_DEPTH, score)  # score will be -ve if mate by black
                             score = MAX_SCORE - score * MATE_FACTOR
                     else:
                         score = node.eval().white().score()
@@ -169,11 +175,12 @@ def stream_data_from_pgn_zst(path):
 
                     yield board_repr, score
 
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: python prepare_data.py filename.pgn.zst")
         exit()
-    elif  sys.argv[1].endswith(".zst"):
+    elif not sys.argv[1].endswith(".zst"):
         print('A .pgn.zst file is expected as input')
         exit()
 

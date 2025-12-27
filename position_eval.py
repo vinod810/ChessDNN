@@ -1,5 +1,6 @@
 import chess
 
+
 class PositionEval:
     def __init__(self):
         # Piece values in centipawns
@@ -139,7 +140,8 @@ class PositionEval:
 
         return 0
 
-    def _evaluate_rook_position(self, board, rook, square):
+    @staticmethod
+    def _evaluate_rook_position(board, rook, square):
         """Evaluate rook position bonuses."""
         bonus = 0
         file_idx = chess.square_file(square)
@@ -172,9 +174,8 @@ class PositionEval:
 
         return bonus
 
-    def _evaluate_mobility(self, board):
-        mobility = 0
-
+    @staticmethod
+    def _evaluate_mobility(board):
         # Evaluate mobility for white
         temp_board = board.copy()
         temp_board.turn = chess.WHITE
@@ -193,11 +194,12 @@ def positional_eval(board) -> int:
     if positional_eval.evaluator is None:
         positional_eval.evaluator = PositionEval()
     return positional_eval.evaluator.evaluate_position(board)
+
+
 positional_eval.evaluator = None
 
 
-def  main():
-
+def main():
     while True:
         try:
             fen = input("FEN: ")
@@ -218,4 +220,3 @@ def  main():
 
 if __name__ == '__main__':
     main()
-
