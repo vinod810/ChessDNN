@@ -4,18 +4,20 @@ import chess.polyglot
 from collections import namedtuple
 
 from position_eval import positional_eval # Returns positional evaluation using piece tables.
-from predict_score import dnn_evaluation # Returns positional evaluation using a DNN model.
+from dnn_eval import dnn_eval # Returns positional evaluation using a DNN model.
 from prepare_data import is_any_move_capture
 
+INF = 10_000
 MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30
-INF = 10_000
 MAX_TABLE_SIZE = 200_000
-DELTA_THRESH_DNN_EVAL = 25 # Score difference that will trigger a DNM evaluation
-# TODO DNN only when the position is balanced
-TACTICAL_QS_MAX_DEPTH = 5 # After this quiescent search depth, only captures are considered, i.e. no checks or promotions.
-ASPIRATION_WINDOW = 50
-MAX_AW_RETRIES = 4
+
+DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNM evaluation
+STAND_PAT_MAX_DNN_EVAL = 200
+IS_MATERIAL_ONLY_EVAL = False
+TACTICAL_QS_MAX_DEPTH = 3 # After this quiescent search depth, only captures are considered, i.e. no checks or promotions.
+ASPIRATION_WINDOW = 100
+MAX_AW_RETRIES = 2
 LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
 LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
 NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
@@ -32,7 +34,7 @@ TTEntry = namedtuple("TTEntry", ["depth", "score", "flag"])
 TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
 
 transposition_table = {}
-positional_eval_cache = {}
+pos_eval_cache = {}
 dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
 history_heuristic = {}
@@ -60,42 +62,32 @@ PIECE_VALUES = {
 def check_time():
     if TimeControl.time_limit is None:
         return
+
     if (time.perf_counter() - TimeControl.start_time) >= TimeControl.time_limit:
         TimeControl.stop_search = True
 
 def evaluate_positional(board: chess.Board) -> int:
     if board.is_checkmate():
         return -INF
+
     if board.is_stalemate():
         return 0
 
     key = chess.polyglot.zobrist_hash(board)
-    if key in positional_eval_cache:
+    if key in pos_eval_cache:
         kpi['pec_hits'] += 1
-        return positional_eval_cache[key]
+        return pos_eval_cache[key]
 
     kpi['pos_eval'] += 1
-    score = positional_eval(board)
-    positional_eval_cache[key] = score
+    score = positional_eval(board, IS_MATERIAL_ONLY_EVAL)
+    pos_eval_cache[key] = score
     return score
 
 
 def evaluate_dnn(board: chess.Board) -> int:
-    # TODO
-    # from stockfish import Stockfish
-    # # Specify the path to your Stockfish executable
-    # stockfish = Stockfish(path="/path/to/stockfish_executable")
-    #stockfish.update_engine_parameters({"Use NNUE": "true"})
-    # stockfish.set_fen_position("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1")
-    # best_move = stockfish.get_best_move()
-    # print(f"Best move: {best_move}")
-    #
-    # # Get evaluation (returns score in centipawns or mate score)
-    # evaluation = stockfish.get_evaluation()
-    # print(f"Evaluation: {evaluation}")
-
     if board.is_checkmate():
         return -INF
+
     if board.is_stalemate():
         return 0
 
@@ -106,7 +98,7 @@ def evaluate_dnn(board: chess.Board) -> int:
 
     assert(not is_any_move_capture(board)) # DNN is trained for positions without captures.
     kpi['dnn_evals'] += 1
-    score = int(dnn_evaluation(board))
+    score = int(dnn_eval(board))
 
     dnn_eval_cache[key] = score
     return score
@@ -181,9 +173,11 @@ def quiescence(board, alpha, beta, q_depth):
 
     # Call DNN evaluation when the scores are within a threshold. Note: DNN is trained only for positions without
     # captures.
-    # TODO DNN only when the position is balanced
-    if not is_any_move_capture(board) and abs(stand_pat - beta) < DELTA_THRESH_DNN_EVAL:
+    is_dnn_eval = False
+    if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL and
+            not is_any_move_capture(board)):
         stand_pat = evaluate_dnn(board)
+        is_dnn_eval = True
 
     if stand_pat >= beta:
         kpi['beta_cutoffs'] += 1
@@ -193,7 +187,8 @@ def quiescence(board, alpha, beta, q_depth):
         return alpha
 
     # Call DNN evaluation when the scores are within a threshold or using evaluation as alpha
-    if  not is_any_move_capture(board) and (abs(stand_pat - alpha) < DELTA_THRESH_DNN_EVAL or alpha < stand_pat):
+    if (not is_dnn_eval and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL and
+            (abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL or alpha < stand_pat) and not is_any_move_capture(board)):
         stand_pat = evaluate_dnn(board)
 
     if alpha < stand_pat:
@@ -266,9 +261,9 @@ def negamax(board, depth, alpha, beta):
     max_eval = -INF
 
     # Null Move Pruning
-    assert (NULL_MOVE_MIN_DEPTH - 1 >= NULL_MOVE_REDUCTION)
     if (
             depth >= NULL_MOVE_MIN_DEPTH #+ NULL_MOVE_REDUCTION
+            and depth - 1 - NULL_MOVE_REDUCTION >= 0
             and not in_check
             and has_non_pawn_material(board)
             and board.occupied_co[chess.WHITE] | board.occupied_co[chess.BLACK] > 6
@@ -387,7 +382,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
     history_heuristic.clear()
     transposition_table.clear()
 
-    control_dict_size(positional_eval_cache, MAX_TABLE_SIZE)
+    control_dict_size(pos_eval_cache, MAX_TABLE_SIZE)
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
     board = chess.Board(fen)
@@ -435,7 +430,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                         alpha = score
 
                 # -------- SUCCESS --------
-                if current_best_score > alpha_orig and current_best_score < beta:
+                if alpha_orig < current_best_score < beta:
                     best_move = current_best_move
                     best_score = current_best_score
                     pv_move = best_move
@@ -507,7 +502,7 @@ def  main():
             end_time = time.perf_counter()
 
             kpi['tt_size'] = len(transposition_table)
-            kpi['mec_size'] = len(positional_eval_cache)
+            kpi['mec_size'] = len(pos_eval_cache)
             kpi['dec_size'] = len(dnn_eval_cache)
             kpi['time'] = int(end_time - start_time)
             print(kpi)

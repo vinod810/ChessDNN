@@ -58,26 +58,25 @@ class PositionEval:
             20, 30, 10, 0, 0, 10, 30, 20
         ]
 
-    def evaluate_position(self, board):
-        """
-        Evaluate the position from the perspective of the side to move.
-        Returns evaluation in centipawns.
-        """
+    def evaluate_position(self, board, is_material_only):
+        """ Evaluate the position from the perspective of the side to move."""
         if board.is_game_over():
             result = board.result()
             if result == "1-0":
                 return 10000 if board.turn == chess.WHITE else -10000
+
             elif result == "0-1":
                 return -10000 if board.turn == chess.WHITE else 10000
+
             else:
                 return 0  # Draw
 
         evaluation = 0
-
-        # Material and positional evaluation
         evaluation += self._evaluate_material(board)
-        evaluation += self._evaluate_positional(board)
-        evaluation += self._evaluate_mobility(board)
+
+        if not is_material_only:
+            evaluation += self._evaluate_positional(board)
+            evaluation += self._evaluate_mobility(board)
 
         # Adjust perspective: if it's black's turn, negate the evaluation
         if not board.turn:
@@ -190,11 +189,10 @@ class PositionEval:
         return mobility
 
 
-def positional_eval(board) -> int:
+def positional_eval(board, is_material_only=False) -> int:
     if positional_eval.evaluator is None:
         positional_eval.evaluator = PositionEval()
-    return positional_eval.evaluator.evaluate_position(board)
-
+    return positional_eval.evaluator.evaluate_position(board, is_material_only)
 
 positional_eval.evaluator = None
 

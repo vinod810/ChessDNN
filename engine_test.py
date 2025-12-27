@@ -428,7 +428,7 @@ test_suites = {
     "eigenmann": (eigenmann_rapid_engine_test, r'";', 60, 60)
 }
 
-def evaluate_engine_strength(test_suite):
+def run_engine_tests(test_suite):
 
     tests_total = 0
     tests_passed =0
@@ -443,9 +443,7 @@ def evaluate_engine_strength(test_suite):
         with redirect_stdout(f):
             found_move, score = find_best_move(fen, max_depth=30, time_limit=test_suite[3])
 
-        #print("fen", fen)
         board = chess.Board(fen)
-        #print("found_move", found_move)
         found_move = board.san(found_move)
 
         if found_move in best_moves:
@@ -454,7 +452,7 @@ def evaluate_engine_strength(test_suite):
         print(f"total={tests_total}, passed={tests_passed}, success-rate={round(tests_passed / tests_total * 100, 2)}%")
 
 def main():
-    evaluate_engine_strength(test_suites['wac'])
+    run_engine_tests(test_suites['wac'])
 
 
 if __name__ == '__main__':

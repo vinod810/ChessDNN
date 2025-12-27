@@ -9,7 +9,7 @@ DATA_DIR = OUT_DIR
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
 TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))
 N_TRAIN = int(len(DATA_FILES) * TRAIN_FACTOR)
-MODEL_FILEPATH = "model/model.keras"
+DNN_MODEL_FILEPATH = "model/model.keras"
 
 BATCH_SIZE = 256 * 4 # AVX2 CPU = 256
 NUM_EPOCHS = 100
@@ -86,9 +86,9 @@ if __name__ == '__main__':
 
     model.compile(optimizer="adam", loss="mae", metrics=['mae'])
 
-    os.makedirs(os.path.dirname(MODEL_FILEPATH), exist_ok=True)
+    os.makedirs(os.path.dirname(DNN_MODEL_FILEPATH), exist_ok=True)
     checkpoint = ModelCheckpoint(
-        MODEL_FILEPATH,
+        DNN_MODEL_FILEPATH,
         monitor='val_loss',
         save_best_only=True,
         mode='min',
