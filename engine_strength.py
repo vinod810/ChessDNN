@@ -423,14 +423,17 @@ r2r2k1/pq2bppp/1np1bN2/1p2B1P1/5Q2/P4P2/1PP4P/2KR1B1R b - - bm Bxf6; id "ERET 10
 4r1k1/1bq2r1p/p2p1np1/3Pppb1/P1P5/1N3P2/1R2B1PP/1Q1R2BK w - - bm c5; id "ERET 110 - Passed Pawn";\
 8/8/8/8/4kp2/1R6/P2q1PPK/8 w - - bm a3; id "ERET 111 - Fortress";'
 
+test_suites = {
+    "wac": (win_at_chess_positions, r'\d{3}\';', 60, 10),
+    "eigenmann": (eigenmann_rapid_engine_test, r'";', 60, 60)
+}
 
-def evaluate_engine_strength():
+def evaluate_engine_strength(test_suite):
 
     tests_total = 0
     tests_passed =0
 
-    for line in re.split(r'\d{3}\';', win_at_chess_positions)[:60]:
-    #for line in re.split(r'";', eigenmann_rapid_engine_test)[:-1]:
+    for line in re.split(test_suite[1], test_suite[0])[:test_suite[2]]:
         tests_total += 1
 
         fen = line.split('- -')[0].strip()
@@ -438,7 +441,7 @@ def evaluate_engine_strength():
 
         f = io.StringIO()
         with redirect_stdout(f):
-            found_move, score = find_best_move(fen, max_depth=20, time_limit=10)
+            found_move, score = find_best_move(fen, max_depth=30, time_limit=test_suite[3])
 
         #print("fen", fen)
         board = chess.Board(fen)
@@ -451,7 +454,7 @@ def evaluate_engine_strength():
         print(f"total={tests_total}, passed={tests_passed}, success-rate={round(tests_passed / tests_total * 100, 2)}%")
 
 def main():
-    evaluate_engine_strength()
+    evaluate_engine_strength(test_suites['wac'])
 
 
 if __name__ == '__main__':

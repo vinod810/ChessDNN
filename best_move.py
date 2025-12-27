@@ -20,7 +20,7 @@ LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
 NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 3
 DELTA_PRUNING_MIN_Q_DEPTH = 5
-DELTA_PRUNING_MARGIN = 200
+DELTA_PRUNING_MARGIN = 50
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -370,8 +370,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
     history_heuristic.clear()
+    transposition_table.clear()
 
-    control_dict_size(transposition_table, MAX_TABLE_SIZE)
     control_dict_size(positional_eval_cache, MAX_TABLE_SIZE)
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
