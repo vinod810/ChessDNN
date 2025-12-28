@@ -26,7 +26,7 @@ NULL_MOVE_MIN_DEPTH = 3
 DELTA_PRUNING_QS_MIN_DEPTH = 10
 DELTA_PRUNING_MARGIN = 50
 SINGULAR_MARGIN = 150  # Score difference in centipawns to trigger singular extension
-SINGULAR_EXTENSION = 1  # Extra depth
+SINGULAR_EXTENSION = 3  # Extra depth
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -180,8 +180,7 @@ def ordered_moves_q_search(board):
 
 
 def quiescence(board, alpha, beta, q_depth, on_expected_pv):
-    if q_depth > kpi['q_depth']:
-        kpi['q_depth'] = q_depth
+    kpi['q_depth'] = max(kpi['q_depth'], q_depth)
 
     check_time()
     if TimeControl.stop_search:
@@ -190,16 +189,14 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     key = chess.polyglot.zobrist_hash(board)
     if key in qs_transposition_table:
         kpi['qs_tt_hits'] += 1
-        return qs_transposition_table[key]
+        return max(alpha, qs_transposition_table[key])
 
-    # Call positional evaluation first to reduce computing. We will call DNN evaluation later if necessary.
     stand_pat = evaluate_positional(board)
 
-    # Call DNN evaluation when the scores are within a threshold. Note: DNN is trained only for positions without
-    # captures.
     is_dnn_eval = False
-    if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL and
-            not is_any_move_capture(board)):
+    if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
+        and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
+        and not is_any_move_capture(board)):
         stand_pat = evaluate_dnn(board)
         is_dnn_eval = True
 
@@ -207,42 +204,45 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
         kpi['beta_cutoffs'] += 1
         return beta
 
-    # If already a queen down, no capture will improve the situation
     if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
         return alpha
 
-    # Call DNN evaluation when the scores are within a threshold or using evaluation as alpha
-    if (not is_dnn_eval and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL and
-            (abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL or alpha < stand_pat) and not is_any_move_capture(board)):
+    if (not is_dnn_eval
+        and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
+        and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)
+        and not is_any_move_capture(board)):
         stand_pat = evaluate_dnn(board)
 
-    if alpha < stand_pat:
-        alpha = stand_pat
+    alpha = max(alpha, stand_pat)
 
     is_check = board.is_check()
     expected_move = pv_move_for_node(board, on_expected_pv)
-    for move in ordered_moves_q_search(board): #board.legal_moves:
-        if is_check:
-            pass  # allow all legal moves
-        elif not board.is_capture(move):
-            if q_depth > TACTICAL_QS_MAX_DEPTH:
-                continue
-            if not board.gives_check(move):
-                continue
 
-        # -------- Simple delta pruning --------
-        if board.is_capture(move) and q_depth >= DELTA_PRUNING_QS_MIN_DEPTH:
-            victim = board.piece_at(move.to_square)
-            if victim: # Not en-passant
-                attacker = board.piece_at(move.from_square)
-                gain = PIECE_VALUES[victim.piece_type] - (PIECE_VALUES[attacker.piece_type] if attacker else 0)
-                if stand_pat + gain + DELTA_PRUNING_MARGIN < alpha:
-                    if on_expected_pv and move == expected_move:
-                        print("⚠ QS DELTA PRUNED PV")
+    for move in ordered_moves_q_search(board):
+        if not is_check:
+            if not board.is_capture(move):
+                if q_depth > TACTICAL_QS_MAX_DEPTH:
+                    continue
+                if not board.gives_check(move):
                     continue
 
-        is_expected = (expected_move == move)
+        # -------- Safe delta pruning --------
+        if (board.is_capture(move)
+            and not board.gives_check(move)
+            and q_depth >= DELTA_PRUNING_QS_MIN_DEPTH):
+
+            victim = board.piece_at(move.to_square)
+            if victim:
+                attacker = board.piece_at(move.from_square)
+                gain = PIECE_VALUES[victim.piece_type] - (
+                    PIECE_VALUES[attacker.piece_type] if attacker else 0
+                )
+                if stand_pat + gain + DELTA_PRUNING_MARGIN < alpha:
+                    continue
+
+        is_expected = (move == expected_move)
         child_on_pv = on_expected_pv and is_expected
+
         board.push(move)
         score = -quiescence(board, -beta, -alpha, q_depth + 1, child_on_pv)
         board.pop()
@@ -251,8 +251,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
             kpi['beta_cutoffs'] += 1
             return beta
 
-        if score > alpha:
-            alpha = score
+        alpha = max(alpha, score)
 
     qs_transposition_table[key] = alpha
     return alpha
@@ -440,7 +439,7 @@ def control_dict_size(table, max_dict_size):
             table.pop(next(iter(table)))
 
 
-def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_moves=None):
+def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_best_moves=None):
     """
     Finds the best move for a given FEN using iterative deepening negamax with alpha-beta pruning,
     aspiration windows, TT, quiescence, null-move pruning, LMR, singular extensions, and heuristics.
@@ -563,7 +562,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_m
                     break
 
             print(f"Depth {depth}: Best={best_move}, Score={best_score}")
-            if best_move is not None and expected_moves is not None and best_move in expected_moves:
+
+            # Early break to speed up testing
+            if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
                 break
 
     except TimeoutError:

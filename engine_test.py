@@ -4,7 +4,9 @@ from contextlib import redirect_stdout
 
 import chess
 
-from engine import find_best_move, kpi
+from engine import find_best_move, kpi, DELTA_MAX_DNN_EVAL, STAND_PAT_MAX_DNN_EVAL, TACTICAL_QS_MAX_DEPTH, \
+    ASPIRATION_WINDOW, MAX_AW_RETRIES, LMR_MOVE_THRESHOLD, LMR_MIN_DEPTH, NULL_MOVE_REDUCTION, NULL_MOVE_MIN_DEPTH, \
+    DELTA_PRUNING_QS_MIN_DEPTH, DELTA_PRUNING_MARGIN, SINGULAR_MARGIN, SINGULAR_EXTENSION
 from uci_engine import TimeCoontrol
 
 # https://www.chessprogramming.org/Test-Positions
@@ -449,7 +451,7 @@ def run_engine_tests(test_suite):
         f = io.StringIO()
         with redirect_stdout(f):
             found_move, score = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
-                                               expected_moves=expected_moves)
+                                               expected_best_moves=expected_moves)
 
         found_move = board.san(found_move)
 
@@ -459,7 +461,15 @@ def run_engine_tests(test_suite):
             print(f"Failed test: fen={fen}, expected_moves={expected_moves}, found_move={found_move}")
 
         print(f"total={tests_total}, passed={tests_passed}, "
-              f"success-rate={round(tests_passed / tests_total * 100, 2)}%, kpi: {kpi}")
+              f"success-rate={round(tests_passed / tests_total * 100, 2)}%")
+
+    print(f"DELTA_MAX_DNN_EVAL={DELTA_MAX_DNN_EVAL}, STAND_PAT_MAX_DNN_EVAL={STAND_PAT_MAX_DNN_EVAL}")
+    print(f"TACTICAL_QS_MAX_DEPTH={TACTICAL_QS_MAX_DEPTH}")
+    print(f"ASPIRATION_WINDOW={ASPIRATION_WINDOW}, MAX_AW_RETRIES={MAX_AW_RETRIES}")
+    print(f"LMR_MOVE_THRESHOLD={LMR_MOVE_THRESHOLD}, LMR_MIN_DEPTH={LMR_MIN_DEPTH}")
+    print(f"NULL_MOVE_REDUCTION={NULL_MOVE_REDUCTION}, NULL_MOVE_MIN_DEPTH={NULL_MOVE_MIN_DEPTH}")
+    print(f"DELTA_PRUNING_QS_MIN_DEPTH={DELTA_PRUNING_QS_MIN_DEPTH}, DELTA_PRUNING_MARGIN={DELTA_PRUNING_MARGIN}")
+    print(f"SINGULAR_MARGIN={SINGULAR_MARGIN}, SINGULAR_EXTENSION={SINGULAR_EXTENSION}")
 
     return round(tests_passed / tests_total * 100, 2)
 
