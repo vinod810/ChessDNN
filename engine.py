@@ -521,9 +521,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                     if alpha >= beta:
                         break
 
-                if current_best_score <= alpha_orig:
+                if current_best_score <= alpha_orig and SEARCH_CONTEXT["expected_pv"]:
                     print("⚠ FAIL-LOW – PV MAY BE LOST")
-                elif current_best_score >= beta:
+                elif current_best_score >= beta and SEARCH_CONTEXT["expected_pv"]:
                     print("⚠ FAIL-HIGH – PV MAY BE LOST")
 
                 # -------- SUCCESS: within aspiration window --------
