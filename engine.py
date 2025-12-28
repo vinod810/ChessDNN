@@ -24,6 +24,8 @@ NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 3
 DELTA_PRUNING_QS_MIN_DEPTH = 10
 DELTA_PRUNING_MARGIN = 50
+SINGULAR_MARGIN = 150  # Score difference in centipawns to trigger singular extension
+SINGULAR_EXTENSION = 1  # Extra depth
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -253,15 +255,26 @@ def has_non_pawn_material(board):
 
 
 def negamax(board, depth, alpha, beta):
-    alpha_orig = alpha
-    key = chess.polyglot.zobrist_hash(board)
-    best_move = None
-
+    """
+    Negamax search with:
+        - Alpha-Beta pruning
+        - Transposition Table
+        - Null-move pruning
+        - Late Move Reductions (LMR)
+        - Singular extensions
+        - Killer moves & history heuristic
+        - Quiescence search at depth 0
+    """
     check_time()
     if TimeControl.stop_search:
         raise TimeoutError()
 
-    # -------- Transposition Table --------
+    key = chess.polyglot.zobrist_hash(board)
+    alpha_orig = alpha
+    best_move = None
+    first_score = None
+
+    # -------- Transposition Table Lookup --------
     if key in transposition_table:
         kpi['tt_hits'] += 1
         entry = transposition_table[key]
@@ -273,80 +286,72 @@ def negamax(board, depth, alpha, beta):
             elif entry.flag == TT_UPPER_BOUND:
                 beta = min(beta, entry.score)
             if alpha >= beta:
-                if entry.flag == TT_LOWER_BOUND:
-                    return alpha
-                elif entry.flag == TT_UPPER_BOUND:
-                    return beta
-                else:
-                    return entry.score
+                return entry.score if entry.flag == TT_EXACT else (alpha if entry.flag == TT_LOWER_BOUND else beta)
 
+        tt_move = entry.best_move
+    else:
+        tt_move = None
+
+    # -------- Quiescence if depth == 0 --------
     if depth == 0:
         return quiescence(board, alpha, beta, 1)
 
     in_check = board.is_check()
     max_eval = -INF
 
-    # Null Move Pruning
-    if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and has_non_pawn_material(board) and
-            board.occupied.bit_count() > 6):
+    # -------- Null Move Pruning --------
+    if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and has_non_pawn_material(board)
+            and board.occupied.bit_count() > 6):
         board.push(chess.Move.null())
         score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1)
         board.pop()
-
         if score >= beta:
             return beta
 
-    # Normal Move Search (with LMR)
-    entry = transposition_table.get(key)
-    tt_move = entry.best_move if entry else None
+    # -------- Move Ordering --------
     moves = ordered_moves(board, depth, tt_move=tt_move)
 
     for move_index, move in enumerate(moves):
         is_capture = board.is_capture(move)
         gives_check = board.gives_check(move)
+
         board.push(move)
         child_in_check = board.is_check()
 
         # -------- LMR Decision --------
         is_pv = (move_index == 0)
         reduce = (
-                depth >= LMR_MIN_DEPTH
-                and move_index >= LMR_MOVE_THRESHOLD
-                and not is_pv
-                and not child_in_check
-                and not is_capture
-                and not gives_check
-                and move != killer_moves[depth][0]
-                and move != killer_moves[depth][1]
+            depth >= LMR_MIN_DEPTH
+            and move_index >= LMR_MOVE_THRESHOLD
+            and not is_pv
+            and not child_in_check
+            and not is_capture
+            and not gives_check
+            and move != killer_moves[depth][0]
+            and move != killer_moves[depth][1]
         )
 
         if reduce:
             reduction = 1
             if depth >= 6 and move_index >= 6:
                 reduction = 2
-            score = -negamax(
-                board,
-                depth - reduction,
-                -alpha - 1,
-                -alpha
-            )
+            score = -negamax(board, depth - reduction, -alpha - 1, -alpha)
+            # If it fails high, re-search full window
             if score > alpha:
-                score = -negamax(
-                    board,
-                    depth - 1,
-                    -beta,
-                    -alpha
-                )
+                score = -negamax(board, depth - 1, -beta, -alpha)
         else:
-            score = -negamax(
-                board,
-                depth - 1,
-                -beta,
-                -alpha
-            )
+            score = -negamax(board, depth - 1, -beta, -alpha)
+
+        # -------- Singular Extension --------
+        if move_index == 0:
+            first_score = score
+        elif first_score is not None:
+            if (first_score - score >= SINGULAR_MARGIN and not in_check and not is_capture and not gives_check):
+                score = -negamax(board, depth - 1 + SINGULAR_EXTENSION, -beta, -alpha)
 
         board.pop()
 
+        # -------- Update best move --------
         if score > max_eval:
             max_eval = score
             best_move = move
@@ -356,22 +361,17 @@ def negamax(board, depth, alpha, beta):
 
         # -------- Beta Cutoff --------
         if alpha >= beta:
-            if not board.is_capture(move):
-                # Killer update
+            if not is_capture:
+                # Update killer moves
                 if killer_moves[depth][0] != move:
                     killer_moves[depth][1] = killer_moves[depth][0]
                     killer_moves[depth][0] = move
-
-                # History update
+                # Update history heuristic
                 key_hist = (move.from_square, move.to_square)
-                history_heuristic[key_hist] = min(
-                    history_heuristic.get(key_hist, 0) + depth * depth,
-                    10_000
-                )
-
+                history_heuristic[key_hist] = min(history_heuristic.get(key_hist, 0) + depth * depth, 10_000)
             break
 
-    # -------- TT Store --------
+    # -------- Transposition Table Store --------
     if max_eval <= alpha_orig:
         flag = TT_UPPER_BOUND
     elif max_eval >= beta:
@@ -386,6 +386,7 @@ def negamax(board, depth, alpha, beta):
     return max_eval
 
 
+
 def age_heuristic_history():
     for k in list(history_heuristic.keys()):
         history_heuristic[k] = history_heuristic[k] * 3 // 4
@@ -398,10 +399,17 @@ def control_dict_size(table, max_dict_size):
 
 
 def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
+    """
+    Finds the best move for a given FEN using iterative deepening negamax with alpha-beta pruning,
+    aspiration windows, TT, quiescence, null-move pruning, LMR, singular extensions, and heuristics.
+    """
+
+    # -------- Initialize time control --------
     TimeControl.time_limit = time_limit
     TimeControl.stop_search = False
     TimeControl.start_time = time.perf_counter()
 
+    # -------- Clear search tables & heuristics --------
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
     history_heuristic.clear()
@@ -410,7 +418,6 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
 
     control_dict_size(pos_eval_cache, MAX_TABLE_SIZE)
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
-    control_dict_size(qs_transposition_table, MAX_TABLE_SIZE)
 
     board = chess.Board(fen)
     best_move = None
@@ -419,24 +426,18 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
 
     try:
         for depth in range(1, max_depth + 1):
-            #check_time()
-            #if TimeControl.stop_search:
-            #    break  # exit if time is up
-
-            #if (time.perf_counter() - TimeControl.start_time) * 4 > TimeControl.time_limit:
-                # Unlikely to complete the next depth iteration
-             #   break
-
             check_time()
             if TimeControl.stop_search:
                 break
 
             age_heuristic_history()
 
+            # -------- Root TT move --------
             root_key = chess.polyglot.zobrist_hash(board)
             entry = transposition_table.get(root_key)
             tt_move = entry.best_move if entry and entry.best_move in board.legal_moves else None
 
+            # -------- Aspiration window --------
             window = ASPIRATION_WINDOW
             retries = 0
 
@@ -445,17 +446,18 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                 beta = best_score + window
                 alpha_orig = alpha
 
-                current_best_move = None
                 current_best_score = -INF
+                current_best_move = None
 
-                for i, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
+                for move_index, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
                     check_time()
                     if TimeControl.stop_search:
                         break
 
                     board.push(move)
 
-                    if i == 0:
+                    # Principal variation first, then late moves with PVS
+                    if move_index == 0:
                         score = -negamax(board, depth - 1, -beta, -alpha)
                     else:
                         score = -negamax(board, depth - 1, -alpha - 1, -alpha)
@@ -474,28 +476,21 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                     if alpha >= beta:
                         break
 
-                # -------- SUCCESS --------
+                # -------- SUCCESS: within aspiration window --------
                 if alpha_orig < current_best_score < beta:
                     best_move = current_best_move
                     best_score = current_best_score
                     pv_move = best_move
                     break
 
-                # -------- FAIL-LOW --------
-                if current_best_score <= alpha_orig:
-                    window *= 2
-
-                # -------- FAIL-HIGH --------
-                elif current_best_score >= beta:
-                    window *= 2
-
+                # -------- FAIL-LOW or FAIL-HIGH: widen window --------
+                window *= 2
                 retries += 1
 
-                # -------- FALLBACK --------
+                # -------- FALLBACK: full window search --------
                 if retries >= MAX_AW_RETRIES:
                     alpha = -INF
                     beta = INF
-
                     current_best_score = -INF
                     for move in ordered_moves(board, depth, pv_move, tt_move):
                         board.push(move)
@@ -517,7 +512,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
             print(f"Depth {depth}: Best={best_move}, Score={best_score}")
 
     except TimeoutError:
-        # Time up — return last completed depth's best move
+        # Return last completed depth's best move
         pass
 
     if best_move is None:
@@ -528,36 +523,56 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
     return best_move, best_score
 
 
-def  main():
+def main():
+    """
+    Interactive loop to input FEN positions and get the best move and evaluation.
+    Tracks KPIs and handles timeouts and interruptions gracefully.
+    """
 
     while True:
         try:
-            fen = input("FEN: ")
-            if fen == "":
-                print("Type 'exit' to exit")
-                continue
-            if fen == "exit" or fen == "Exit":
+            fen = input("FEN: ").strip()
+            if fen.lower() == "exit":
                 break
+            if fen == "":
+                print("Type 'exit' to quit")
+                continue
 
+            # Reset KPIs
             for key in kpi:
                 kpi[key] = 0
 
+            # Start timer
             start_time = time.perf_counter()
             move, score = find_best_move(fen, max_depth=20, time_limit=60)
             end_time = time.perf_counter()
 
-            kpi['tt_size'] = len(transposition_table)
-            kpi['mec_size'] = len(pos_eval_cache)
-            kpi['dec_size'] = len(dnn_eval_cache)
-            kpi['time'] = int(end_time - start_time)
-            print(kpi)
-            print(f"Best move: {move}")
-            print(f"Evaluation: {score}")
+            # Record cache sizes and time
+            kpi.update({
+                'tt_size': len(transposition_table),
+                'mec_size': len(pos_eval_cache),
+                'dec_size': len(dnn_eval_cache),
+                'time': round(end_time - start_time, 2)
+            })
+
+            # Print KPIs
+            print("\n--- Search KPIs ---")
+            for key, value in kpi.items():
+                print(f"{key}: {value}")
+
+            print("\nBest move:", move)
+            print("Evaluation:", score)
+            print("-------------------\n")
 
         except KeyboardInterrupt:
-            if input("Type 'exit' to exit: ") != "exit":
-                continue
-            break
+            response = input("\nKeyboardInterrupt detected. Type 'exit' to quit, Enter to continue: ").strip()
+            if response.lower() == "exit":
+                break
+            print("Resuming...\n")
+        except Exception as e:
+            print("Error:", e)
+            continue
+
 
 if __name__ == '__main__':
     main()
