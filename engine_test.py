@@ -4,7 +4,8 @@ from contextlib import redirect_stdout
 
 import chess
 
-from best_move import find_best_move
+from engine import find_best_move
+from uci_engine import TimeCoontrol
 
 # https://www.chessprogramming.org/Test-Positions
 win_at_chess_positions = \
@@ -451,8 +452,13 @@ def run_engine_tests(test_suite):
 
         print(f"total={tests_total}, passed={tests_passed}, success-rate={round(tests_passed / tests_total * 100, 2)}%")
 
+
 def main():
-    run_engine_tests(test_suites['wac'])
+    try:
+        run_engine_tests(test_suites['wac'])
+    except KeyboardInterrupt:
+        print("Interrupted, stopping engine")
+        TimeCoontrol.stop_search = True
 
 
 if __name__ == '__main__':

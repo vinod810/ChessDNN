@@ -3,7 +3,7 @@ import sys
 
 import chess
 
-from best_move import find_best_move, MAX_NEGAMAX_DEPTH
+from engine import find_best_move, MAX_NEGAMAX_DEPTH
 
 
 class TimeCoontrol:

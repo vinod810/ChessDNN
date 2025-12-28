@@ -4,13 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="DNN, 512-256-128-1, loss-0.08166,rate-71.67">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Engine tuning rate-73.67">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/best_move.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine_strength.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/position_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/position_eval.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/predict_score.py" beforeDir="false" afterPath="$PROJECT_DIR$/dnn_eval.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/best_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -58,7 +56,7 @@
   }
 }</component>
   <component name="RunManager">
-    <configuration name="best_move" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="engine" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="ChessDNN" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -72,7 +70,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/best_move.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/engine.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -83,7 +81,7 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.best_move" />
+        <item itemvalue="Python.engine" />
       </list>
     </recent_temporary>
   </component>
@@ -366,7 +364,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766837711593</updated>
     </task>
-    <option name="localTasksCounter" value="34" />
+    <task id="LOCAL-00034" summary="Engine tuning rate-73.67">
+      <option name="closed" value="true" />
+      <created>1766875167433</created>
+      <option name="number" value="00034" />
+      <option name="presentableId" value="LOCAL-00034" />
+      <option name="project" value="LOCAL" />
+      <updated>1766875167433</updated>
+    </task>
+    <option name="localTasksCounter" value="35" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -381,7 +387,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="13 plane encoding" />
     <MESSAGE value="13 plane encoding - v2" />
     <MESSAGE value="best_move.py" />
     <MESSAGE value="uci_engine.py" />
@@ -406,6 +411,7 @@
     <MESSAGE value="delta pruning margin - 50 - 68.33" />
     <MESSAGE value="Before building noe DNN model" />
     <MESSAGE value="DNN, 512-256-128-1, loss-0.08166,rate-71.67" />
-    <option name="LAST_COMMIT_MESSAGE" value="DNN, 512-256-128-1, loss-0.08166,rate-71.67" />
+    <MESSAGE value="Engine tuning rate-73.67" />
+    <option name="LAST_COMMIT_MESSAGE" value="Engine tuning rate-73.67" />
   </component>
 </project>
