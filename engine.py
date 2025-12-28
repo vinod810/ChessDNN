@@ -346,7 +346,7 @@ def negamax(board, depth, alpha, beta):
         if move_index == 0:
             first_score = score
         elif first_score is not None:
-            if (first_score - score >= SINGULAR_MARGIN and not in_check and not is_capture and not gives_check):
+            if first_score - score >= SINGULAR_MARGIN and not in_check and not is_capture and not gives_check:
                 score = -negamax(board, depth - 1 + SINGULAR_EXTENSION, -beta, -alpha)
 
         board.pop()

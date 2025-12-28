@@ -455,7 +455,7 @@ def run_engine_tests(test_suite):
 
 def main():
     try:
-        run_engine_tests(test_suites['wac'])
+        run_engine_tests(test_suites['eigenmann'])
     except KeyboardInterrupt:
         print("Interrupted, stopping engine")
         TimeCoontrol.stop_search = True

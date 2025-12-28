@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import sys
-
 import chess
 
 from engine import find_best_move, MAX_NEGAMAX_DEPTH
@@ -12,12 +10,6 @@ class TimeCoontrol:
 
 def uci_loop():
     board = chess.Board()
-
-    #print("uci")
-    #print("id name DNN Engine")
-    #print("id author Eapen")
-    #print("uciok")
-    #sys.stdout.flush()
 
     while True:
         try:

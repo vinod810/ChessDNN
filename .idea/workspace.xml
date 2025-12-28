@@ -4,9 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="ChatGpt improvements 73.33">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="ChatGpt improvements 71.67">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -386,7 +387,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766891312144</updated>
     </task>
-    <option name="localTasksCounter" value="37" />
+    <task id="LOCAL-00037" summary="ChatGpt improvements 71.67">
+      <option name="closed" value="true" />
+      <created>1766893849591</created>
+      <option name="number" value="00037" />
+      <option name="presentableId" value="LOCAL-00037" />
+      <option name="project" value="LOCAL" />
+      <updated>1766893849591</updated>
+    </task>
+    <option name="localTasksCounter" value="38" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -424,8 +433,8 @@
     <MESSAGE value="Before building noe DNN model" />
     <MESSAGE value="DNN, 512-256-128-1, loss-0.08166,rate-71.67" />
     <MESSAGE value="Engine tuning rate-73.67" />
-    <MESSAGE value="ChatGpt improvements 71.67" />
     <MESSAGE value="ChatGpt improvements 73.33" />
-    <option name="LAST_COMMIT_MESSAGE" value="ChatGpt improvements 73.33" />
+    <MESSAGE value="ChatGpt improvements 71.67" />
+    <option name="LAST_COMMIT_MESSAGE" value="ChatGpt improvements 71.67" />
   </component>
 </project>
