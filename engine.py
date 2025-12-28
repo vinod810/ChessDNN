@@ -34,6 +34,7 @@ TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move"])
 TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
 
 transposition_table = {}
+qs_transposition_table = {}
 pos_eval_cache = {}
 dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
@@ -178,6 +179,11 @@ def quiescence(board, alpha, beta, q_depth):
     if TimeControl.stop_search:
         raise TimeoutError()
 
+    key = chess.polyglot.zobrist_hash(board)
+    if key in qs_transposition_table:
+        kpi['qs_tt_hits'] += 1
+        return qs_transposition_table[key]
+
     # Call positional evaluation first to reduce computing. We will call DNN evaluation later if necessary.
     stand_pat = evaluate_positional(board)
 
@@ -235,6 +241,7 @@ def quiescence(board, alpha, beta, q_depth):
         if score > alpha:
             alpha = score
 
+    qs_transposition_table[key] = alpha
     return alpha
 
 
@@ -383,6 +390,7 @@ def age_heuristic_history():
     for k in list(history_heuristic.keys()):
         history_heuristic[k] = history_heuristic[k] * 3 // 4
 
+
 def control_dict_size(table, max_dict_size):
     if len(table) > max_dict_size:
         for _ in range(max_dict_size // 4):
@@ -398,9 +406,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
         killer_moves[i] = [None, None]
     history_heuristic.clear()
     transposition_table.clear()
+    qs_transposition_table.clear()
 
     control_dict_size(pos_eval_cache, MAX_TABLE_SIZE)
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
+    control_dict_size(qs_transposition_table, MAX_TABLE_SIZE)
 
     board = chess.Board(fen)
     best_move = None
