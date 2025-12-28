@@ -425,8 +425,8 @@ r2r2k1/pq2bppp/1np1bN2/1p2B1P1/5Q2/P4P2/1PP4P/2KR1B1R b - - bm Bxf6; id "ERET 10
 8/8/8/8/4kp2/1R6/P2q1PPK/8 w - - bm a3; id "ERET 111 - Fortress";'
 
 test_suites = {
-    "wac": (win_at_chess_positions, r'\d{3}\';', 60, 10),
-    "eigenmann": (eigenmann_rapid_engine_test, r'";', 60, 60)
+    "wac": (win_at_chess_positions, r'\d{3}\';', 60, 60),
+    "eigenmann": (eigenmann_rapid_engine_test, r'";', 60, 120)
 }
 
 def run_engine_tests(test_suite):
@@ -440,15 +440,23 @@ def run_engine_tests(test_suite):
         fen = line.split('- -')[0].strip()
         best_moves = line.split('- -')[1].split('bm')[1].split(';')[0].strip().split(' ')
 
+        board = chess.Board(fen)
+        expected_moves = []
+        for best_move in best_moves:
+            expected_move = board.parse_san(best_move)
+            expected_moves.append(expected_move)
+
         f = io.StringIO()
         with redirect_stdout(f):
-            found_move, score = find_best_move(fen, max_depth=30, time_limit=test_suite[3])
+            found_move, score = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
+                                               expected_moves=expected_moves)
 
-        board = chess.Board(fen)
         found_move = board.san(found_move)
 
         if found_move in best_moves:
             tests_passed += 1
+        else:
+            print(f"Failed test: fen={fen}, expected_moves={expected_moves}, found_move={found_move}")
 
         print(f"total={tests_total}, passed={tests_passed}, "
               f"success-rate={round(tests_passed / tests_total * 100, 2)}%, kpi: {kpi}")

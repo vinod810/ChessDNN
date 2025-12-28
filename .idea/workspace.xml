@@ -4,9 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="ChatGpt improvements 71.67">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Troubleshooting code">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model/model.keras" beforeDir="false" afterPath="$PROJECT_DIR$/model/model.keras" afterDir="false" />
@@ -397,7 +396,23 @@
       <option name="project" value="LOCAL" />
       <updated>1766893849591</updated>
     </task>
-    <option name="localTasksCounter" value="38" />
+    <task id="LOCAL-00038" summary="Troubleshooting code">
+      <option name="closed" value="true" />
+      <created>1766938661428</created>
+      <option name="number" value="00038" />
+      <option name="presentableId" value="LOCAL-00038" />
+      <option name="project" value="LOCAL" />
+      <updated>1766938661428</updated>
+    </task>
+    <task id="LOCAL-00039" summary="Troubleshooting code">
+      <option name="closed" value="true" />
+      <created>1766938961677</created>
+      <option name="number" value="00039" />
+      <option name="presentableId" value="LOCAL-00039" />
+      <option name="project" value="LOCAL" />
+      <updated>1766938961677</updated>
+    </task>
+    <option name="localTasksCounter" value="40" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -412,7 +427,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="uci_engine.py" />
     <MESSAGE value="before reducing DNN eval." />
     <MESSAGE value="Optimized depth=2, most &lt; 10 sec" />
     <MESSAGE value="Iterative deepening" />
@@ -437,7 +451,8 @@
     <MESSAGE value="Engine tuning rate-73.67" />
     <MESSAGE value="ChatGpt improvements 73.33" />
     <MESSAGE value="ChatGpt improvements 71.67" />
-    <option name="LAST_COMMIT_MESSAGE" value="ChatGpt improvements 71.67" />
+    <MESSAGE value="Troubleshooting code" />
+    <option name="LAST_COMMIT_MESSAGE" value="Troubleshooting code" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -449,12 +464,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>
-          <line>32</line>
-          <option name="timeStamp" value="2" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/engine.py</url>
-          <line>635</line>
+          <line>637</line>
           <option name="timeStamp" value="4" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">

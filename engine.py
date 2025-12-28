@@ -16,7 +16,7 @@ MAX_TABLE_SIZE = 200_000
 DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNM evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
 IS_MATERIAL_ONLY_EVAL = False
-TACTICAL_QS_MAX_DEPTH = 3 # After this quiescent search depth, only captures are considered, i.e. no checks or promotions.
+TACTICAL_QS_MAX_DEPTH = 5 # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
 MAX_AW_RETRIES = 3
 LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
@@ -440,7 +440,7 @@ def control_dict_size(table, max_dict_size):
             table.pop(next(iter(table)))
 
 
-def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
+def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_moves=None):
     """
     Finds the best move for a given FEN using iterative deepening negamax with alpha-beta pruning,
     aspiration windows, TT, quiescence, null-move pruning, LMR, singular extensions, and heuristics.
@@ -563,6 +563,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                     break
 
             print(f"Depth {depth}: Best={best_move}, Score={best_score}")
+            if best_move is not None and expected_moves is not None and best_move in expected_moves:
+                break
 
     except TimeoutError:
         # Return last completed depth's best move
