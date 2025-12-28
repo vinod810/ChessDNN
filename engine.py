@@ -1,3 +1,4 @@
+import re
 import time
 import chess
 import chess.polyglot
@@ -41,6 +42,11 @@ pos_eval_cache = {}
 dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
 history_heuristic = {}
+
+SEARCH_CONTEXT: dict[str, int | None | list[chess.Move]] = {
+    "expected_pv": None,
+    "root_ply": 0,
+}
 
 kpi = {
     "pos_eval": 0,
@@ -173,7 +179,7 @@ def ordered_moves_q_search(board):
     return moves
 
 
-def quiescence(board, alpha, beta, q_depth):
+def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     if q_depth > kpi['q_depth']:
         kpi['q_depth'] = q_depth
 
@@ -214,6 +220,7 @@ def quiescence(board, alpha, beta, q_depth):
         alpha = stand_pat
 
     is_check = board.is_check()
+    expected_move = pv_move_for_node(board, on_expected_pv)
     for move in ordered_moves_q_search(board): #board.legal_moves:
         if is_check:
             pass  # allow all legal moves
@@ -230,10 +237,14 @@ def quiescence(board, alpha, beta, q_depth):
                 attacker = board.piece_at(move.from_square)
                 gain = PIECE_VALUES[victim.piece_type] - (PIECE_VALUES[attacker.piece_type] if attacker else 0)
                 if stand_pat + gain + DELTA_PRUNING_MARGIN < alpha:
+                    if on_expected_pv and move == expected_move:
+                        print("⚠ QS DELTA PRUNED PV")
                     continue
 
+        is_expected = (expected_move == move)
+        child_on_pv = on_expected_pv and is_expected
         board.push(move)
-        score = -quiescence(board, -beta, -alpha, q_depth + 1)
+        score = -quiescence(board, -beta, -alpha, q_depth + 1, child_on_pv)
         board.pop()
 
         if score >= beta:
@@ -254,7 +265,19 @@ def has_non_pawn_material(board):
     return False
 
 
-def negamax(board, depth, alpha, beta):
+def pv_move_for_node(board, on_expected_pv: bool):
+    if not on_expected_pv:
+        return None
+
+    pv = SEARCH_CONTEXT["expected_pv"]
+    if not pv:
+        return None
+
+    ply = board.ply() - SEARCH_CONTEXT["root_ply"]
+    return pv[ply] if 0 <= ply < len(pv) else None
+
+
+def negamax(board, depth, alpha, beta, on_expected_pv):
     """
     Negamax search with:
         - Alpha-Beta pruning
@@ -294,7 +317,7 @@ def negamax(board, depth, alpha, beta):
 
     # -------- Quiescence if depth == 0 --------
     if depth == 0:
-        return quiescence(board, alpha, beta, 1)
+        return quiescence(board, alpha, beta, 1, on_expected_pv)
 
     in_check = board.is_check()
     max_eval = -INF
@@ -303,13 +326,18 @@ def negamax(board, depth, alpha, beta):
     if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and has_non_pawn_material(board)
             and board.occupied.bit_count() > 6):
         board.push(chess.Move.null())
-        score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1)
+        score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False)
         board.pop()
         if score >= beta:
             return beta
 
     # -------- Move Ordering --------
     moves = ordered_moves(board, depth, tt_move=tt_move)
+    expected_move = pv_move_for_node(board, on_expected_pv)
+
+    if expected_move and expected_move not in moves:
+        print(f"⚠ PV MOVE MISSING FROM LEGAL MOVES at ply {board.ply}, depth {depth}")
+        print("FEN:", board.fen())
 
     for move_index, move in enumerate(moves):
         is_capture = board.is_capture(move)
@@ -320,6 +348,7 @@ def negamax(board, depth, alpha, beta):
 
         # -------- LMR Decision --------
         is_pv = (move_index == 0)
+
         reduce = (
             depth >= LMR_MIN_DEPTH
             and move_index >= LMR_MOVE_THRESHOLD
@@ -331,23 +360,31 @@ def negamax(board, depth, alpha, beta):
             and move != killer_moves[depth][1]
         )
 
+        is_expected = (expected_move == move)
+        child_on_pv = on_expected_pv and is_expected
+
         if reduce:
             reduction = 1
             if depth >= 6 and move_index >= 6:
                 reduction = 2
-            score = -negamax(board, depth - reduction, -alpha - 1, -alpha)
+            score = -negamax(board, depth - reduction, -alpha - 1, -alpha, child_on_pv)
             # If it fails high, re-search full window
             if score > alpha:
-                score = -negamax(board, depth - 1, -beta, -alpha)
+                score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
+            else:
+                if on_expected_pv and reduce and is_expected:
+                    print("⚠ LMR REDUCED PV MOVE")
+                    print("Depth:", depth)
+                    print("Move:", move)
         else:
-            score = -negamax(board, depth - 1, -beta, -alpha)
+            score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
 
         # -------- Singular Extension --------
         if move_index == 0:
             first_score = score
         elif first_score is not None:
             if first_score - score >= SINGULAR_MARGIN and not in_check and not is_capture and not gives_check:
-                score = -negamax(board, depth - 1 + SINGULAR_EXTENSION, -beta, -alpha)
+                score = -negamax(board, depth - 1 + SINGULAR_EXTENSION, -beta, -alpha, child_on_pv)
 
         board.pop()
 
@@ -369,6 +406,12 @@ def negamax(board, depth, alpha, beta):
                 # Update history heuristic
                 key_hist = (move.from_square, move.to_square)
                 history_heuristic[key_hist] = min(history_heuristic.get(key_hist, 0) + depth * depth, 10_000)
+
+            if on_expected_pv and expected_move and move != expected_move:
+                print("⚠ BETA CUTOFF KILLED PV")
+                print("Cut by:", move)
+                print("Expected:", expected_move)
+
             break
 
     # -------- Transposition Table Store --------
@@ -384,7 +427,6 @@ def negamax(board, depth, alpha, beta):
         transposition_table[key] = TTEntry(depth, max_eval, flag, best_move)
 
     return max_eval
-
 
 
 def age_heuristic_history():
@@ -423,6 +465,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
     best_move = None
     best_score = 0
     pv_move = None
+    SEARCH_CONTEXT["root_ply"] = board.ply()
 
     try:
         for depth in range(1, max_depth + 1):
@@ -448,6 +491,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
 
                 current_best_score = -INF
                 current_best_move = None
+                expected_move = pv_move_for_node(board, True)
 
                 for move_index, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
                     check_time()
@@ -455,14 +499,15 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                         break
 
                     board.push(move)
+                    child_on_pv = (expected_move == move)
 
                     # Principal variation first, then late moves with PVS
                     if move_index == 0:
-                        score = -negamax(board, depth - 1, -beta, -alpha)
+                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
                     else:
-                        score = -negamax(board, depth - 1, -alpha - 1, -alpha)
+                        score = -negamax(board, depth - 1, -alpha - 1, -alpha, child_on_pv)
                         if score > alpha:
-                            score = -negamax(board, depth - 1, -beta, -alpha)
+                            score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
 
                     board.pop()
 
@@ -475,6 +520,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
 
                     if alpha >= beta:
                         break
+
+                if current_best_score <= alpha_orig:
+                    print("⚠ FAIL-LOW – PV MAY BE LOST")
+                elif current_best_score >= beta:
+                    print("⚠ FAIL-HIGH – PV MAY BE LOST")
 
                 # -------- SUCCESS: within aspiration window --------
                 if alpha_orig < current_best_score < beta:
@@ -492,9 +542,12 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
                     alpha = -INF
                     beta = INF
                     current_best_score = -INF
+                    expected_move = pv_move_for_node(board, True)
+
                     for move in ordered_moves(board, depth, pv_move, tt_move):
                         board.push(move)
-                        score = -negamax(board, depth - 1, -beta, -alpha)
+                        child_on_pv = (expected_move == move)
+                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
                         board.pop()
 
                         if score > current_best_score:
@@ -517,10 +570,33 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None):
 
     if best_move is None:
         # fallback if nothing searched
+        board = chess.Board(fen)
         best_move = list(board.legal_moves)[0]
         best_score = evaluate_positional(board)
 
     return best_move, best_score
+
+
+def tokenize_san_string(san_string: str) -> list[str]:
+    tokens = san_string.strip().split()
+    san_moves = []
+    for tok in tokens:
+        if re.match(r"^\d+\.+$", tok):
+            continue
+        if re.match(r"^\d+\.\.\.$", tok):
+            continue
+        san_moves.append(tok)
+    return san_moves
+
+
+def pv_from_san_string(fen: str, san_string: str) -> list[chess.Move]:
+    board = chess.Board(fen)
+    pv = []
+    for ply, san in enumerate(tokenize_san_string(san_string)):
+        move = board.parse_san(san)
+        pv.append(move)
+        board.push(move)
+    return pv
 
 
 def main():
@@ -537,6 +613,14 @@ def main():
             if fen == "":
                 print("Type 'exit' to quit")
                 continue
+
+            expected_pv = input("Expected pv: ").strip()
+
+            if expected_pv:
+                SEARCH_CONTEXT["expected_pv"] = pv_from_san_string(fen, expected_pv)
+            else:
+                SEARCH_CONTEXT["expected_pv"] = None
+            SEARCH_CONTEXT["root_ply"] = 0
 
             # Reset KPIs
             for key in kpi:

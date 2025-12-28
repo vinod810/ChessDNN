@@ -76,7 +76,7 @@ if __name__ == '__main__':
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=BOARD_SHAPE,),
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(512, activation="tanh"), # Fist layer tanh activation
+        tf.keras.layers.Dense(1024, activation="tanh"), # Fist layer tanh activation
         tf.keras.layers.Dense(256, activation="relu"),
         tf.keras.layers.Dense(128, activation="relu"),
         tf.keras.layers.Dense(1, activation='tanh')
