@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Claude - 2">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="SINGULAR_MARGIN=130,81.85">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
     </list>
@@ -450,7 +450,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767076595645</updated>
     </task>
-    <option name="localTasksCounter" value="45" />
+    <task id="LOCAL-00045" summary="SINGULAR_MARGIN=130,81.85">
+      <option name="closed" value="true" />
+      <created>1767113602020</created>
+      <option name="number" value="00045" />
+      <option name="presentableId" value="LOCAL-00045" />
+      <option name="project" value="LOCAL" />
+      <updated>1767113602020</updated>
+    </task>
+    <option name="localTasksCounter" value="46" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -465,7 +473,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Aspiration window" />
     <MESSAGE value="LMR" />
     <MESSAGE value="Null move prunin" />
     <MESSAGE value="Clean up - 1" />
@@ -490,7 +497,8 @@
     <MESSAGE value="Optimization uptoLMR_MOVE_THRESHOLD=2 from bottom. total=300, passed=193, success-rate=64.33%" />
     <MESSAGE value="Claude - 1" />
     <MESSAGE value="Claude - 2" />
-    <option name="LAST_COMMIT_MESSAGE" value="Claude - 2" />
+    <MESSAGE value="SINGULAR_MARGIN=130,81.85" />
+    <option name="LAST_COMMIT_MESSAGE" value="SINGULAR_MARGIN=130,81.85" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

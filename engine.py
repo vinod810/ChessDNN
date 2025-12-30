@@ -4,9 +4,8 @@ import chess
 import chess.polyglot
 from collections import namedtuple
 
-from position_eval import positional_eval # Returns positional evaluation using piece tables.
+from cached_board import CachedBoard
 from dnn_eval import dnn_eval # Returns positional evaluation using a DNN model.
-from prepare_data import is_any_move_capture
 
 INF = 10_000
 MAX_NEGAMAX_DEPTH = 20
@@ -78,25 +77,25 @@ def check_time():
         TimeControl.stop_search = True
 
 
-def evaluate_positional(board: chess.Board) -> int:
-    key = chess.polyglot.zobrist_hash(board)
+def evaluate_positional(board: CachedBoard) -> int:
+    key = board.zobrist_hash()
     if key in pos_eval_cache:
         kpi['pec_hits'] += 1
         return pos_eval_cache[key]
 
     kpi['pos_eval'] += 1
-    score = positional_eval(board, IS_MATERIAL_ONLY_EVAL)
+    score = board.material_evaluation()
     pos_eval_cache[key] = score
     return score
 
 
-def evaluate_dnn(board: chess.Board) -> int:
-    key = chess.polyglot.zobrist_hash(board)
+def evaluate_dnn(board: CachedBoard) -> int:
+    key = board.zobrist_hash()
     if key in dnn_eval_cache:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    assert(not is_any_move_capture(board)) # todo minimize DNN is trained for positions without captures.
+    assert(not board.is_any_capture_available()) # todo minimize DNN is trained for positions without captures.
     kpi['dnn_evals'] += 1
     score = int(dnn_eval(board, DNN_MODEL_FILEPATH))
 
@@ -104,7 +103,7 @@ def evaluate_dnn(board: chess.Board) -> int:
     return score
 
 
-def move_score_q_search(board: chess.Board, move) -> int:
+def move_score_q_search(board: CachedBoard, move) -> int:
     score = 0
 
     if board.is_capture(move):
@@ -147,7 +146,7 @@ def move_score(board, move, depth):
 
 def ordered_moves(board, depth, pv_move=None, tt_move=None):
     scored_moves = []
-    for move in board.legal_moves:
+    for move in board.get_legal_moves_list():
         if move == tt_move:
             score = 1000000
         elif move == pv_move:
@@ -161,7 +160,7 @@ def ordered_moves(board, depth, pv_move=None, tt_move=None):
 
 
 def ordered_moves_q_search(board):
-    moves = list(board.legal_moves)
+    moves = list(board.get_legal_moves_list())
     moves.sort(key=lambda m: move_score_q_search(board, m), reverse=True)
     return moves
 
@@ -174,7 +173,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
         raise TimeoutError()
 
     # todo try avoiding calculating zobrist_hash in quiscent excpet for caching DNN
-    key = chess.polyglot.zobrist_hash(board)
+    key = board.zobrist_hash()
     if key in qs_transposition_table:
         kpi['qs_tt_hits'] += 1
         stored_score = qs_transposition_table[key]
@@ -187,7 +186,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     is_dnn_eval = False
     if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
         and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
-        and not is_any_move_capture(board)):
+        and not board.is_any_capture_available()):
         stand_pat = evaluate_dnn(board)
         is_dnn_eval = True
 
@@ -201,7 +200,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     if (not is_dnn_eval
         and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
         and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)
-        and not is_any_move_capture(board)):
+        and not board.is_any_capture_available()):
         stand_pat = evaluate_dnn(board)
 
     alpha = max(alpha, stand_pat)
@@ -248,13 +247,6 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     return alpha
 
 
-def has_non_pawn_material(board):
-    for piece_type in [chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
-        if board.pieces(piece_type, board.turn):
-            return True
-    return False
-
-
 def pv_move_for_node(board, on_expected_pv: bool):
     if not on_expected_pv:
         return None
@@ -275,7 +267,7 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     if TimeControl.stop_search:
         raise TimeoutError()
 
-    key = chess.polyglot.zobrist_hash(board)
+    key = board.zobrist_hash()
     alpha_orig = alpha
     best_move = None
 
@@ -305,7 +297,7 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     max_eval = -INF
 
     # -------- Null Move Pruning --------
-    if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and has_non_pawn_material(board)
+    if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and board.has_non_pawn_material()
             and board.occupied.bit_count() > 6 and depth - NULL_MOVE_REDUCTION >= 1):
         board.push(chess.Move.null())
         score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False, allow_singular=False)
@@ -326,7 +318,7 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
 
         highest_score = -INF
 
-        for move in board.legal_moves:
+        for move in board.get_legal_moves_list():
             if move == tt_move:
                 continue
 
@@ -475,7 +467,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     control_dict_size(pos_eval_cache, MAX_TABLE_SIZE)
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
-    board = chess.Board(fen)
+    board = CachedBoard(fen)
     best_move = None
     best_score = 0
     pv_move = None
@@ -490,9 +482,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
             age_heuristic_history()
 
             # -------- Root TT move --------
-            root_key = chess.polyglot.zobrist_hash(board)
+            root_key = board.zobrist_hash()
             entry = transposition_table.get(root_key)
-            tt_move = entry.best_move if entry and entry.best_move in board.legal_moves else None
+            tt_move = entry.best_move if entry and entry.best_move in board.get_legal_moves_list() else None
 
             # -------- Aspiration window --------
             window = ASPIRATION_WINDOW
@@ -593,8 +585,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
 
     if best_move is None:
         # fallback if nothing searched
-        board = chess.Board(fen)
-        best_move = list(board.legal_moves)[0]
+        board = CachedBoard(fen)
+        best_move = board.get_legal_moves_list()[0]
         best_score = evaluate_positional(board)
 
     return best_move, best_score
@@ -613,7 +605,7 @@ def tokenize_san_string(san_string: str) -> list[str]:
 
 
 def pv_from_san_string(fen: str, san_string: str) -> list[chess.Move]:
-    board = chess.Board(fen)
+    board = CachedBoard(fen)
     pv = []
     for ply, san in enumerate(tokenize_san_string(san_string)):
         move = board.parse_san(san)
