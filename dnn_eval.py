@@ -37,7 +37,6 @@ dnn_eval.model = None
 
 
 def  main():
-
     while True:
         try:
             fen = input("FEN: ")
