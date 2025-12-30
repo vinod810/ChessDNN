@@ -26,8 +26,8 @@ NULL_MOVE_REDUCTION = 3   # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 4
 DELTA_PRUNING_QS_MIN_DEPTH = 6
 DELTA_PRUNING_MARGIN = 75
-SINGULAR_MARGIN = 150  # Score difference in centipawns to trigger singular extension
-SINGULAR_EXTENSION = 4 # Extra depth, 0 disables feature
+SINGULAR_MARGIN = 130  # Score difference in centipawns to trigger singular extension
+SINGULAR_EXTENSION = 1 # Extra depth
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -173,6 +173,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     if TimeControl.stop_search:
         raise TimeoutError()
 
+    # todo try avoiding calculating zobrist_hash in quiscent excpet for caching DNN
     key = chess.polyglot.zobrist_hash(board)
     if key in qs_transposition_table:
         kpi['qs_tt_hits'] += 1
