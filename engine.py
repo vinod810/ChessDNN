@@ -13,6 +13,7 @@ MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
+DNN_MODEL_FILEPATH = "model/small.keras"
 DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNM evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
 IS_MATERIAL_ONLY_EVAL = False
@@ -26,7 +27,7 @@ NULL_MOVE_MIN_DEPTH = 4
 DELTA_PRUNING_QS_MIN_DEPTH = 6
 DELTA_PRUNING_MARGIN = 75
 SINGULAR_MARGIN = 150  # Score difference in centipawns to trigger singular extension
-SINGULAR_EXTENSION = 0 # Extra depth, 0 disables feature
+SINGULAR_EXTENSION = 4 # Extra depth, 0 disables feature
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -97,7 +98,7 @@ def evaluate_dnn(board: chess.Board) -> int:
 
     assert(not is_any_move_capture(board)) # todo minimize DNN is trained for positions without captures.
     kpi['dnn_evals'] += 1
-    score = int(dnn_eval(board))
+    score = int(dnn_eval(board, DNN_MODEL_FILEPATH))
 
     dnn_eval_cache[key] = score
     return score
@@ -175,7 +176,10 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     key = chess.polyglot.zobrist_hash(board)
     if key in qs_transposition_table:
         kpi['qs_tt_hits'] += 1
-        return max(alpha, qs_transposition_table[key])
+        stored_score = qs_transposition_table[key]
+        if stored_score >= beta:
+            return beta
+        alpha = max(alpha, stored_score)
 
     stand_pat = evaluate_positional(board)
 
@@ -262,9 +266,9 @@ def pv_move_for_node(board, on_expected_pv: bool):
     return pv[ply] if 0 <= ply < len(pv) else None
 
 
-def negamax(board, depth, alpha, beta, on_expected_pv):
+def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     """
-    Negamax with corrected Singular Extension implementation.
+    Negamax search with all fixes applied.
     """
     check_time()
     if TimeControl.stop_search:
@@ -286,7 +290,7 @@ def negamax(board, depth, alpha, beta, on_expected_pv):
             elif entry.flag == TT_UPPER_BOUND:
                 beta = min(beta, entry.score)
             if alpha >= beta:
-                return entry.score  # Fixed: always return entry.score on cutoff
+                return entry.score
 
         tt_move = entry.best_move
     else:
@@ -301,46 +305,39 @@ def negamax(board, depth, alpha, beta, on_expected_pv):
 
     # -------- Null Move Pruning --------
     if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and has_non_pawn_material(board)
-            and board.occupied.bit_count() > 6 and depth - NULL_MOVE_REDUCTION >= 1):  # Fixed condition
+            and board.occupied.bit_count() > 6 and depth - NULL_MOVE_REDUCTION >= 1):
         board.push(chess.Move.null())
-        score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False)
+        score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False, allow_singular=False)
         board.pop()
         if score >= beta:
             return beta
 
-    # -------- Singular Extension Check (BEFORE move loop) --------
+    # -------- Singular Extension Check --------
     singular_extension_applicable = False
     singular_move = None
 
-    if (SINGULAR_EXTENSION >= 1
-            and depth >= 6  # Only apply at sufficient depth
-            and tt_move is not None
-            and not in_check):
+    if (allow_singular and SINGULAR_EXTENSION >= 1 and depth >= 6
+            and tt_move is not None and not in_check):
 
-        # Reduced-depth search EXCLUDING the TT move to get a "baseline" score
-        reduced_depth = depth - 3  # Reduced search depth
+        reduced_depth = depth - 3
         reduced_beta = (transposition_table[key].score if key in transposition_table
                         else alpha) - SINGULAR_MARGIN
 
-        # Search all moves EXCEPT tt_move at reduced depth
         highest_score = -INF
-        board_copy_needed = True
 
         for move in board.legal_moves:
             if move == tt_move:
-                continue  # Skip the TT move
+                continue
 
             board.push(move)
-            score = -negamax(board, reduced_depth, -reduced_beta - 1, -reduced_beta, False)
+            score = -negamax(board, reduced_depth, -reduced_beta - 1, -reduced_beta, False, allow_singular=False)
             board.pop()
 
             highest_score = max(highest_score, score)
 
-            # Early exit if we find a move nearly as good
             if highest_score >= reduced_beta:
                 break
 
-        # If ALL other moves failed low, the TT move is "singular"
         if highest_score < reduced_beta:
             singular_extension_applicable = True
             singular_move = tt_move
@@ -363,29 +360,23 @@ def negamax(board, depth, alpha, beta, on_expected_pv):
         # -------- Determine search depth --------
         extension = 0
 
-        # Apply singular extension to the singular move
         if singular_extension_applicable and move == singular_move:
             extension = SINGULAR_EXTENSION
-
-        # Check extension (standard)
-        if child_in_check:
-            extension = max(extension, 1)
+        elif child_in_check:
+            extension = 1
 
         new_depth = depth - 1 + extension
 
         # -------- LMR Decision --------
-        is_pv = (move_index == 0)
-
         reduce = (
                 depth >= LMR_MIN_DEPTH
                 and move_index >= LMR_MOVE_THRESHOLD
-                and not is_pv
                 and not child_in_check
                 and not is_capture
                 and not gives_check
                 and move != killer_moves[depth][0]
                 and move != killer_moves[depth][1]
-                and extension == 0  # Don't reduce if we're extending
+                and extension == 0
         )
 
         is_expected = (expected_move == move)
@@ -395,27 +386,22 @@ def negamax(board, depth, alpha, beta, on_expected_pv):
             reduction = 1
             if depth >= 6 and move_index >= 6:
                 reduction = 2
-            score = -negamax(board, new_depth - reduction, -alpha - 1, -alpha, child_on_pv)
-            # If it fails high, re-search at full depth
+            score = -negamax(board, new_depth - reduction, -alpha - 1, -alpha, child_on_pv, allow_singular=True)
             if score > alpha:
-                score = -negamax(board, new_depth, -beta, -alpha, child_on_pv)
+                score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
             else:
                 if on_expected_pv and reduce and is_expected:
                     print("⚠ LMR REDUCED PV MOVE")
-                    print("Depth:", depth)
-                    print("Move:", move)
         else:
-            # PVS for non-first moves
-            if move_index > 0 and not is_pv:
-                score = -negamax(board, new_depth, -alpha - 1, -alpha, child_on_pv)
+            if move_index > 0:
+                score = -negamax(board, new_depth, -alpha - 1, -alpha, child_on_pv, allow_singular=True)
                 if score > alpha and score < beta:
-                    score = -negamax(board, new_depth, -beta, -alpha, child_on_pv)
+                    score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
             else:
-                score = -negamax(board, new_depth, -beta, -alpha, child_on_pv)
+                score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
 
         board.pop()
 
-        # -------- Update best move --------
         if score > max_eval:
             max_eval = score
             best_move = move
@@ -423,14 +409,11 @@ def negamax(board, depth, alpha, beta, on_expected_pv):
         if score > alpha:
             alpha = score
 
-        # -------- Beta Cutoff --------
         if alpha >= beta:
             if not is_capture:
-                # Update killer moves
                 if killer_moves[depth][0] != move:
                     killer_moves[depth][1] = killer_moves[depth][0]
                     killer_moves[depth][0] = move
-                # Update history heuristic
                 key_hist = (move.from_square, move.to_square)
                 history_heuristic[key_hist] = min(
                     history_heuristic.get(key_hist, 0) + depth * depth, 10_000
@@ -515,8 +498,13 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
             retries = 0
 
             while True:
-                alpha = best_score - window
-                beta = best_score + window
+                # First iteration should use full window
+                if depth == 1:
+                    alpha = -INF
+                    beta = INF
+                else:
+                    alpha = best_score - window
+                    beta = best_score + window
                 alpha_orig = alpha
 
                 current_best_score = -INF
@@ -533,11 +521,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
 
                     # Principal variation first, then late moves with PVS
                     if move_index == 0:
-                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
+                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
                     else:
-                        score = -negamax(board, depth - 1, -alpha - 1, -alpha, child_on_pv)
+                        score = -negamax(board, depth - 1, -alpha - 1, -alpha, child_on_pv, allow_singular=True)
                         if score > alpha:
-                            score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
+                            score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
 
                     board.pop()
 
@@ -577,7 +565,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                     for move in ordered_moves(board, depth, pv_move, tt_move):
                         board.push(move)
                         child_on_pv = (expected_move == move)
-                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv)
+                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
                         board.pop()
 
                         if score > current_best_score:

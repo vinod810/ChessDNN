@@ -4,10 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimization uptoLMR_MOVE_THRESHOLD=2 from bottom. total=300, passed=193, success-rate=64.33%">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Claude - 1">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/dnn_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/dnn_eval.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -435,7 +436,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767056688109</updated>
     </task>
-    <option name="localTasksCounter" value="43" />
+    <task id="LOCAL-00043" summary="Claude - 1">
+      <option name="closed" value="true" />
+      <created>1767069822487</created>
+      <option name="number" value="00043" />
+      <option name="presentableId" value="LOCAL-00043" />
+      <option name="project" value="LOCAL" />
+      <updated>1767069822487</updated>
+    </task>
+    <option name="localTasksCounter" value="44" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -450,7 +459,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Killer move" />
     <MESSAGE value="Hueristic" />
     <MESSAGE value="Aspiration window" />
     <MESSAGE value="LMR" />
@@ -475,7 +483,8 @@
     <MESSAGE value="Early break from test" />
     <MESSAGE value="Printing parameters to aid testing" />
     <MESSAGE value="Optimization uptoLMR_MOVE_THRESHOLD=2 from bottom. total=300, passed=193, success-rate=64.33%" />
-    <option name="LAST_COMMIT_MESSAGE" value="Optimization uptoLMR_MOVE_THRESHOLD=2 from bottom. total=300, passed=193, success-rate=64.33%" />
+    <MESSAGE value="Claude - 1" />
+    <option name="LAST_COMMIT_MESSAGE" value="Claude - 1" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

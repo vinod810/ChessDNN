@@ -7,7 +7,7 @@ from build_model import DNN_MODEL_FILEPATH, tanh_to_score
 from prepare_data import get_board_repr, MAX_SCORE
 
 
-def dnn_eval(board: Board) -> int:
+def dnn_eval(board: Board, model_filepath=DNN_MODEL_FILEPATH) -> int:
 
     if board.is_game_over():
         result = board.result()
@@ -21,7 +21,7 @@ def dnn_eval(board: Board) -> int:
             return 0  # Draw
 
     if dnn_eval.model is None:
-        dnn_eval.model = tf.keras.models.load_model(DNN_MODEL_FILEPATH)
+        dnn_eval.model = tf.keras.models.load_model(model_filepath)
         dnn_eval.model.summary()
 
     board_repr = get_board_repr(board)
