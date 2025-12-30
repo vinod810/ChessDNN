@@ -19,14 +19,14 @@ IS_MATERIAL_ONLY_EVAL = False
 TACTICAL_QS_MAX_DEPTH = 5 # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
 MAX_AW_RETRIES = 3
-LMR_MOVE_THRESHOLD = 3   # reduce moves after this index
+LMR_MOVE_THRESHOLD = 2
 LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
-NULL_MOVE_REDUCTION = 2   # R value (usually 2 or 3)
-NULL_MOVE_MIN_DEPTH = 3
-DELTA_PRUNING_QS_MIN_DEPTH = 10
-DELTA_PRUNING_MARGIN = 50
+NULL_MOVE_REDUCTION = 3   # R value (usually 2 or 3)
+NULL_MOVE_MIN_DEPTH = 4
+DELTA_PRUNING_QS_MIN_DEPTH = 6
+DELTA_PRUNING_MARGIN = 75
 SINGULAR_MARGIN = 150  # Score difference in centipawns to trigger singular extension
-SINGULAR_EXTENSION = 3  # Extra depth
+SINGULAR_EXTENSION = 0 # Extra depth, 0 disables feature
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -95,7 +95,7 @@ def evaluate_dnn(board: chess.Board) -> int:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    assert(not is_any_move_capture(board)) # DNN is trained for positions without captures.
+    assert(not is_any_move_capture(board)) # todo minimize DNN is trained for positions without captures.
     kpi['dnn_evals'] += 1
     score = int(dnn_eval(board))
 
@@ -323,7 +323,7 @@ def negamax(board, depth, alpha, beta, on_expected_pv):
 
     # -------- Null Move Pruning --------
     if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and has_non_pawn_material(board)
-            and board.occupied.bit_count() > 6):
+            and board.occupied.bit_count() > 6 and depth - 1 - NULL_MOVE_REDUCTION >= 1):
         board.push(chess.Move.null())
         score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False)
         board.pop()
@@ -382,7 +382,8 @@ def negamax(board, depth, alpha, beta, on_expected_pv):
         if move_index == 0:
             first_score = score
         elif first_score is not None:
-            if first_score - score >= SINGULAR_MARGIN and not in_check and not is_capture and not gives_check:
+            if (SINGULAR_EXTENSION >= 1 and first_score - score >= SINGULAR_MARGIN and not in_check
+                    and not is_capture and not gives_check):
                 score = -negamax(board, depth - 1 + SINGULAR_EXTENSION, -beta, -alpha, child_on_pv)
 
         board.pop()

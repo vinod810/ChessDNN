@@ -4,10 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Early break from test">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Printing parameters to aid testing">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model/model.keras" beforeDir="false" afterPath="$PROJECT_DIR$/model/model.keras" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -419,7 +421,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766944826517</updated>
     </task>
-    <option name="localTasksCounter" value="41" />
+    <task id="LOCAL-00041" summary="Printing parameters to aid testing">
+      <option name="closed" value="true" />
+      <created>1766958083796</created>
+      <option name="number" value="00041" />
+      <option name="presentableId" value="LOCAL-00041" />
+      <option name="project" value="LOCAL" />
+      <updated>1766958083796</updated>
+    </task>
+    <option name="localTasksCounter" value="42" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -434,7 +444,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Optimized depth=2, most &lt; 10 sec" />
     <MESSAGE value="Iterative deepening" />
     <MESSAGE value="Killer move" />
     <MESSAGE value="Hueristic" />
@@ -459,7 +468,8 @@
     <MESSAGE value="ChatGpt improvements 71.67" />
     <MESSAGE value="Troubleshooting code" />
     <MESSAGE value="Early break from test" />
-    <option name="LAST_COMMIT_MESSAGE" value="Early break from test" />
+    <MESSAGE value="Printing parameters to aid testing" />
+    <option name="LAST_COMMIT_MESSAGE" value="Printing parameters to aid testing" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -471,7 +481,7 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>
-          <line>638</line>
+          <line>639</line>
           <option name="timeStamp" value="4" />
         </line-breakpoint>
       </breakpoints>

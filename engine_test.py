@@ -427,14 +427,27 @@ r2r2k1/pq2bppp/1np1bN2/1p2B1P1/5Q2/P4P2/1PP4P/2KR1B1R b - - bm Bxf6; id "ERET 10
 8/8/8/8/4kp2/1R6/P2q1PPK/8 w - - bm a3; id "ERET 111 - Fortress";'
 
 test_suites = {
-    "wac": (win_at_chess_positions, r'\d{3}\';', 60, 60),
+    "wac": (win_at_chess_positions, r'\d{3}\';', -1, 60),
     "eigenmann": (eigenmann_rapid_engine_test, r'";', 60, 120)
 }
+
+
+def dump_parameters():
+    print(f"DELTA_MAX_DNN_EVAL={DELTA_MAX_DNN_EVAL}, STAND_PAT_MAX_DNN_EVAL={STAND_PAT_MAX_DNN_EVAL}")
+    print(f"TACTICAL_QS_MAX_DEPTH={TACTICAL_QS_MAX_DEPTH}")
+    print(f"ASPIRATION_WINDOW={ASPIRATION_WINDOW}, MAX_AW_RETRIES={MAX_AW_RETRIES}")
+    print(f"LMR_MOVE_THRESHOLD={LMR_MOVE_THRESHOLD}, LMR_MIN_DEPTH={LMR_MIN_DEPTH}")
+    print(f"NULL_MOVE_REDUCTION={NULL_MOVE_REDUCTION}, NULL_MOVE_MIN_DEPTH={NULL_MOVE_MIN_DEPTH}")
+    print(f"DELTA_PRUNING_QS_MIN_DEPTH={DELTA_PRUNING_QS_MIN_DEPTH}, DELTA_PRUNING_MARGIN={DELTA_PRUNING_MARGIN}")
+    print(f"SINGULAR_MARGIN={SINGULAR_MARGIN}, SINGULAR_EXTENSION={SINGULAR_EXTENSION}")
+
 
 def run_engine_tests(test_suite):
 
     tests_total = 0
     tests_passed =0
+
+    dump_parameters()
 
     for line in re.split(test_suite[1], test_suite[0])[:test_suite[2]]:
         tests_total += 1
@@ -463,13 +476,7 @@ def run_engine_tests(test_suite):
         print(f"total={tests_total}, passed={tests_passed}, "
               f"success-rate={round(tests_passed / tests_total * 100, 2)}%")
 
-    print(f"DELTA_MAX_DNN_EVAL={DELTA_MAX_DNN_EVAL}, STAND_PAT_MAX_DNN_EVAL={STAND_PAT_MAX_DNN_EVAL}")
-    print(f"TACTICAL_QS_MAX_DEPTH={TACTICAL_QS_MAX_DEPTH}")
-    print(f"ASPIRATION_WINDOW={ASPIRATION_WINDOW}, MAX_AW_RETRIES={MAX_AW_RETRIES}")
-    print(f"LMR_MOVE_THRESHOLD={LMR_MOVE_THRESHOLD}, LMR_MIN_DEPTH={LMR_MIN_DEPTH}")
-    print(f"NULL_MOVE_REDUCTION={NULL_MOVE_REDUCTION}, NULL_MOVE_MIN_DEPTH={NULL_MOVE_MIN_DEPTH}")
-    print(f"DELTA_PRUNING_QS_MIN_DEPTH={DELTA_PRUNING_QS_MIN_DEPTH}, DELTA_PRUNING_MARGIN={DELTA_PRUNING_MARGIN}")
-    print(f"SINGULAR_MARGIN={SINGULAR_MARGIN}, SINGULAR_EXTENSION={SINGULAR_EXTENSION}")
+    dump_parameters()
 
     return round(tests_passed / tests_total * 100, 2)
 
