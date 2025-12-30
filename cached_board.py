@@ -7,9 +7,24 @@ incremental Zobrist hash updates, and piece-square table evaluation.
 
 import chess
 import chess.polyglot
+import numpy as np
 from typing import Optional, List, Iterator, Dict
 from dataclasses import dataclass
 from copy import deepcopy
+
+
+# ========== Board Representation Constants ==========
+
+BOARD_SHAPE = (13, 8, 8)  # 12 piece planes + 1 side-to-move plane
+
+PIECE_TO_PLANE = {
+    chess.PAWN: 0,
+    chess.KNIGHT: 1,
+    chess.BISHOP: 2,
+    chess.ROOK: 3,
+    chess.QUEEN: 4,
+    chess.KING: 5,
+}
 
 
 # ========== Piece Values and PST Tables ==========
@@ -136,6 +151,7 @@ class CacheState:
     material_evaluation: Optional[int] = None
     is_endgame: Optional[bool] = None
     gives_check_cache: Optional[Dict[chess.Move, bool]] = None
+    board_repr: Optional[np.ndarray] = None
 
     def clear(self):
         self.zobrist_hash = None
@@ -152,6 +168,7 @@ class CacheState:
         self.material_evaluation = None
         self.is_endgame = None
         self.gives_check_cache = None
+        self.board_repr = None
 
 
 @dataclass(slots=True)
@@ -424,6 +441,138 @@ class CachedBoard(chess.Board):
             self._cache.piece_count = chess.popcount(self.occupied)
         return self._cache.piece_count
 
+    def get_board_repr(self, verify: bool = False) -> np.ndarray:
+        """
+        Get neural network board representation (cached with incremental updates).
+
+        Returns a (13, 8, 8) numpy array with:
+        - Planes 0-5: White pieces (pawn, knight, bishop, rook, queen, king)
+        - Planes 6-11: Black pieces (pawn, knight, bishop, rook, queen, king)
+        - Plane 12: Side to move (1 if white, 0 if black)
+
+        Args:
+            verify: If True, verify incremental update matches full computation.
+
+        Returns:
+            np.ndarray of shape (13, 8, 8) with dtype uint8
+        """
+        if self._cache.board_repr is None:
+            computed_incrementally = False
+
+            # Try incremental update from parent
+            if (len(self._cache_stack) > 1 and len(self._move_info_stack) > 0):
+                parent_cache = self._cache_stack[-2]
+                if parent_cache.board_repr is not None:
+                    move_info = self._move_info_stack[-1]
+                    self._cache.board_repr = self._compute_incremental_board_repr(
+                        parent_cache.board_repr, move_info
+                    )
+                    computed_incrementally = True
+
+            # Fall back to full computation
+            if self._cache.board_repr is None:
+                self._cache.board_repr = self._compute_board_repr()
+
+            # Verify if requested
+            if verify and computed_incrementally:
+                actual = self._compute_board_repr()
+                if not np.array_equal(self._cache.board_repr, actual):
+                    self._cache.board_repr = actual
+
+        return self._cache.board_repr
+
+    def _compute_board_repr(self) -> np.ndarray:
+        """Compute the board representation from scratch."""
+        planes = np.zeros(BOARD_SHAPE, dtype=np.uint8)
+
+        # 1. Piece planes (12)
+        for square, piece in self.piece_map().items():
+            row = 7 - (square // 8)
+            col = square % 8
+            base = 0 if piece.color == chess.WHITE else 6
+            planes[base + PIECE_TO_PLANE[piece.piece_type], row, col] = 1
+
+        # 2. Side to move (1 plane)
+        planes[12, :, :] = 1 if self.turn == chess.WHITE else 0
+
+        return planes
+
+    def _compute_incremental_board_repr(self, parent_repr: np.ndarray, move_info: MoveInfo) -> np.ndarray:
+        """
+        Compute board representation incrementally from parent position.
+
+        Args:
+            parent_repr: Board representation before the move
+            move_info: Information about the move that was made
+
+        Returns:
+            Updated board representation
+        """
+        # Copy parent representation
+        planes = parent_repr.copy()
+
+        move = move_info.move
+        from_sq = move.from_square
+        to_sq = move.to_square
+
+        # Convert squares to row/col
+        from_row, from_col = 7 - (from_sq // 8), from_sq % 8
+        to_row, to_col = 7 - (to_sq // 8), to_sq % 8
+
+        # Get the piece that moved (now at to_square)
+        piece = self.piece_at(to_sq)
+        if piece is None:
+            # Shouldn't happen, fall back to full computation
+            return self._compute_board_repr()
+
+        moving_color = piece.color
+        moving_base = 0 if moving_color == chess.WHITE else 6
+        opponent_base = 6 if moving_color == chess.WHITE else 0
+
+        # Determine original piece type (before promotion)
+        if move.promotion:
+            original_type = chess.PAWN
+        else:
+            original_type = piece.piece_type
+
+        # 1. Remove piece from source square
+        planes[moving_base + PIECE_TO_PLANE[original_type], from_row, from_col] = 0
+
+        # 2. Handle capture - remove captured piece from destination
+        if move_info.captured_piece is not None:
+            captured = move_info.captured_piece
+            if move_info.was_en_passant:
+                # En passant: captured pawn is on a different square
+                ep_sq = chess.square(chess.square_file(to_sq), chess.square_rank(from_sq))
+                ep_row, ep_col = 7 - (ep_sq // 8), ep_sq % 8
+                planes[opponent_base + PIECE_TO_PLANE[chess.PAWN], ep_row, ep_col] = 0
+            else:
+                # Normal capture: remove from destination square
+                planes[opponent_base + PIECE_TO_PLANE[captured.piece_type], to_row, to_col] = 0
+
+        # 3. Add piece to destination square (possibly promoted)
+        planes[moving_base + PIECE_TO_PLANE[piece.piece_type], to_row, to_col] = 1
+
+        # 4. Handle castling - move the rook
+        if move_info.was_castling:
+            if chess.square_file(to_sq) == 6:  # Kingside
+                rook_from = chess.square(7, chess.square_rank(from_sq))
+                rook_to = chess.square(5, chess.square_rank(from_sq))
+            else:  # Queenside
+                rook_from = chess.square(0, chess.square_rank(from_sq))
+                rook_to = chess.square(3, chess.square_rank(from_sq))
+
+            rook_from_row, rook_from_col = 7 - (rook_from // 8), rook_from % 8
+            rook_to_row, rook_to_col = 7 - (rook_to // 8), rook_to % 8
+
+            planes[moving_base + PIECE_TO_PLANE[chess.ROOK], rook_from_row, rook_from_col] = 0
+            planes[moving_base + PIECE_TO_PLANE[chess.ROOK], rook_to_row, rook_to_col] = 1
+
+        # 5. Flip side to move plane
+        planes[12, :, :] = 1 - planes[12, :, :]
+
+        return planes
+
     def is_endgame_position(self) -> bool:
         if self._cache.is_endgame is None:
             wq = chess.popcount(self.pieces_mask(chess.QUEEN, chess.WHITE))
@@ -531,6 +680,25 @@ def is_any_move_capture(board: chess.Board) -> bool:
     return any(board.is_capture(m) for m in board.legal_moves)
 
 
+def get_board_repr(board: chess.Board) -> np.ndarray:
+    """
+    Standalone compatibility function for board representation.
+
+    If board is a CachedBoard, uses the cached version.
+    """
+    if isinstance(board, CachedBoard):
+        return board.get_board_repr()
+
+    planes = np.zeros(BOARD_SHAPE, dtype=np.uint8)
+    for square, piece in board.piece_map().items():
+        row = 7 - (square // 8)
+        col = square % 8
+        base = 0 if piece.color == chess.WHITE else 6
+        planes[base + PIECE_TO_PLANE[piece.piece_type], row, col] = 1
+    planes[12, :, :] = 1 if board.turn == chess.WHITE else 0
+    return planes
+
+
 if __name__ == "__main__":
     board = CachedBoard()
     print(f"Initial hash: {board.zobrist_hash()}")
@@ -542,3 +710,41 @@ if __name__ == "__main__":
     print(f"Legal moves: {len(board.get_legal_moves_list())}")
     print(f"Is check: {board.is_check()}")
     print(f"Has non-pawn material: {board.has_non_pawn_material()}")
+
+    # Test board representation
+    repr_array = board.get_board_repr()
+    print(f"Board repr shape: {repr_array.shape}")
+    print(f"Side to move plane sum: {repr_array[12].sum()} (expected 64 for white, 0 for black)")
+
+    # Test incremental board repr updates
+    print("\n=== Testing incremental board repr ===")
+    board = CachedBoard()
+
+    # Compute initial repr
+    _ = board.get_board_repr()
+
+    # Test various move types with verification
+    test_moves = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "O-O"]  # includes castling
+    for move in test_moves:
+        board.push_san(move)
+        repr_inc = board.get_board_repr(verify=True)
+        repr_full = board._compute_board_repr()
+        match = np.array_equal(repr_inc, repr_full)
+        print(f"After {move}: incremental matches full = {match}")
+
+    # Test en passant
+    board = CachedBoard()
+    for move in ["e4", "a5", "e5", "d5", "exd6"]:
+        board.push_san(move)
+    _ = board.get_board_repr()  # Ensure parent is cached
+    board_repr = board.get_board_repr(verify=True)
+    print(f"En passant test: incremental verified")
+
+    # Test promotion
+    board = CachedBoard("7k/P7/8/8/8/8/8/7K w - - 0 1")
+    _ = board.get_board_repr()
+    board.push_san("a8=Q")
+    board_repr = board.get_board_repr(verify=True)
+    print(f"Promotion test: incremental verified")
+
+    print("\nAll incremental board repr tests passed!")

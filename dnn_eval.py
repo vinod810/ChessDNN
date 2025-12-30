@@ -1,13 +1,13 @@
 import chess.pgn
 import numpy as np
 import tensorflow as tf
-from chess import Board
 
 from build_model import DNN_MODEL_FILEPATH, tanh_to_score
-from prepare_data import get_board_repr, MAX_SCORE
+from cached_board import CachedBoard
+from prepare_data import MAX_SCORE
 
 
-def dnn_eval(board: Board, model_filepath=DNN_MODEL_FILEPATH) -> int:
+def dnn_eval(board: CachedBoard, model_filepath=DNN_MODEL_FILEPATH) -> int:
 
     if board.is_game_over():
         result = board.result()
@@ -24,7 +24,7 @@ def dnn_eval(board: Board, model_filepath=DNN_MODEL_FILEPATH) -> int:
         dnn_eval.model = tf.keras.models.load_model(model_filepath)
         dnn_eval.model.summary()
 
-    board_repr = get_board_repr(board)
+    board_repr = board.get_board_repr()
     board_repr = np.expand_dims(board_repr, axis=0)
 
     score = dnn_eval.model.predict(board_repr, verbose=0)[0][0]
@@ -45,7 +45,7 @@ def  main():
                 continue
             if fen == "exit" or fen == "Exit":
                 break
-            board = chess.Board(fen)
+            board = CachedBoard(fen)
             score = dnn_eval(board)
             print("predicted score: ", score)
         except KeyboardInterrupt:

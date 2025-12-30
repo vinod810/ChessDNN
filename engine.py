@@ -12,10 +12,11 @@ MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
+CACHE_MATERIAL_EVALUATION = False
+QS_TT_SUPPORTED = False
 DNN_MODEL_FILEPATH = "model/small.keras"
 DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNM evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
-IS_MATERIAL_ONLY_EVAL = False
 TACTICAL_QS_MAX_DEPTH = 5 # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
 MAX_AW_RETRIES = 3
@@ -78,14 +79,16 @@ def check_time():
 
 
 def evaluate_positional(board: CachedBoard) -> int:
-    key = board.zobrist_hash()
-    if key in pos_eval_cache:
-        kpi['pec_hits'] += 1
-        return pos_eval_cache[key]
+    if CACHE_MATERIAL_EVALUATION:
+        key = board.zobrist_hash()
+        if key in pos_eval_cache:
+            kpi['pec_hits'] += 1
+            return pos_eval_cache[key]
 
     kpi['pos_eval'] += 1
     score = board.material_evaluation()
-    pos_eval_cache[key] = score
+    if CACHE_MATERIAL_EVALUATION:
+        pos_eval_cache[key] = score # todo try removing caching
     return score
 
 
@@ -173,13 +176,14 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
         raise TimeoutError()
 
     # todo try avoiding calculating zobrist_hash in quiscent excpet for caching DNN
-    key = board.zobrist_hash()
-    if key in qs_transposition_table:
-        kpi['qs_tt_hits'] += 1
-        stored_score = qs_transposition_table[key]
-        if stored_score >= beta:
-            return beta
-        alpha = max(alpha, stored_score)
+    if QS_TT_SUPPORTED:
+        key = board.zobrist_hash()
+        if key in qs_transposition_table:
+            kpi['qs_tt_hits'] += 1
+            stored_score = qs_transposition_table[key]
+            if stored_score >= beta:
+                return beta
+            alpha = max(alpha, stored_score)
 
     stand_pat = evaluate_positional(board)
 
@@ -243,7 +247,9 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
 
         alpha = max(alpha, score)
 
-    qs_transposition_table[key] = alpha
+    if QS_TT_SUPPORTED:
+        qs_transposition_table[key] = alpha
+
     return alpha
 
 
