@@ -4,11 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="cached_board.py">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="cached board_repr">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dnn_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/dnn_eval.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/position_eval.py" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -476,7 +476,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767119836493</updated>
     </task>
-    <option name="localTasksCounter" value="48" />
+    <task id="LOCAL-00048" summary="cached board_repr">
+      <option name="closed" value="true" />
+      <created>1767121693917</created>
+      <option name="number" value="00048" />
+      <option name="presentableId" value="LOCAL-00048" />
+      <option name="project" value="LOCAL" />
+      <updated>1767121693917</updated>
+    </task>
+    <option name="localTasksCounter" value="49" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -491,7 +499,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Null move prunin" />
     <MESSAGE value="Clean up - 1" />
     <MESSAGE value="ChatGpt review" />
     <MESSAGE value="QS delta pruning" />
@@ -516,7 +523,8 @@
     <MESSAGE value="Claude - 2" />
     <MESSAGE value="SINGULAR_MARGIN=130,81.85" />
     <MESSAGE value="cached_board.py" />
-    <option name="LAST_COMMIT_MESSAGE" value="cached_board.py" />
+    <MESSAGE value="cached board_repr" />
+    <option name="LAST_COMMIT_MESSAGE" value="cached board_repr" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

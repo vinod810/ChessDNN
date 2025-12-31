@@ -12,8 +12,7 @@ MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
-CACHE_MATERIAL_EVALUATION = False
-QS_TT_SUPPORTED = False
+QS_TT_SUPPORTED = True
 DNN_MODEL_FILEPATH = "model/small.keras"
 DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNM evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
@@ -39,7 +38,6 @@ TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
 
 transposition_table = {}
 qs_transposition_table = {}
-pos_eval_cache = {}
 dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
 history_heuristic = {}
@@ -55,7 +53,6 @@ kpi = {
     "beta_cutoffs": 0,
     "tt_hits": 0,
     "qs_tt_hits": 0,
-    "pec_hits": 0, # positional evaluation cache hits
     "dec_hits": 0,  # DNN evaluation cache hits
     "q_depth": 0,
 }
@@ -79,16 +76,8 @@ def check_time():
 
 
 def evaluate_positional(board: CachedBoard) -> int:
-    if CACHE_MATERIAL_EVALUATION:
-        key = board.zobrist_hash()
-        if key in pos_eval_cache:
-            kpi['pec_hits'] += 1
-            return pos_eval_cache[key]
-
     kpi['pos_eval'] += 1
     score = board.material_evaluation()
-    if CACHE_MATERIAL_EVALUATION:
-        pos_eval_cache[key] = score # todo try removing caching
     return score
 
 
@@ -98,7 +87,7 @@ def evaluate_dnn(board: CachedBoard) -> int:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    assert(not board.is_any_capture_available()) # todo minimize DNN is trained for positions without captures.
+    assert(not board.is_any_capture_available())
     kpi['dnn_evals'] += 1
     score = int(dnn_eval(board, DNN_MODEL_FILEPATH))
 
@@ -175,7 +164,6 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     if TimeControl.stop_search:
         raise TimeoutError()
 
-    # todo try avoiding calculating zobrist_hash in quiscent excpet for caching DNN
     if QS_TT_SUPPORTED:
         key = board.zobrist_hash()
         if key in qs_transposition_table:
@@ -343,6 +331,10 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
 
     # -------- Move Ordering --------
     moves = ordered_moves(board, depth, tt_move=tt_move)
+    if not moves:
+        if in_check:
+            return -INF + board.ply()  # Checkmate (prefer shorter mates)
+        return 0  # Stalemate
     expected_move = pv_move_for_node(board, on_expected_pv)
 
     if expected_move and expected_move not in moves:
@@ -470,7 +462,6 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     transposition_table.clear()
     qs_transposition_table.clear()
 
-    control_dict_size(pos_eval_cache, MAX_TABLE_SIZE)
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
     board = CachedBoard(fen)
@@ -655,7 +646,6 @@ def main():
             # Record cache sizes and time
             kpi.update({
                 'tt_size': len(transposition_table),
-                'mec_size': len(pos_eval_cache),
                 'dec_size': len(dnn_eval_cache),
                 'time': round(end_time - start_time, 2)
             })
