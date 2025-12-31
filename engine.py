@@ -13,8 +13,8 @@ MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
-DNN_MODEL_FILEPATH = "model/small.keras"
-DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNM evaluation
+DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
+DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNN evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
 TACTICAL_QS_MAX_DEPTH = 5 # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
@@ -87,7 +87,7 @@ def evaluate_dnn(board: CachedBoard) -> int:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    assert(not board.is_any_capture_available())
+    assert(board.is_quiet_position())
     kpi['dnn_evals'] += 1
     score = int(dnn_eval(board, DNN_MODEL_FILEPATH))
 
@@ -178,7 +178,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     is_dnn_eval = False
     if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
         and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
-        and not board.is_any_capture_available()):
+        and board.is_quiet_position()):
         stand_pat = evaluate_dnn(board)
         is_dnn_eval = True
 
@@ -192,7 +192,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     if (not is_dnn_eval
         and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
         and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)
-        and not board.is_any_capture_available()):
+        and board.is_quiet_position()):
         stand_pat = evaluate_dnn(board)
 
     alpha = max(alpha, stand_pat)
@@ -201,11 +201,13 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
     expected_move = pv_move_for_node(board, on_expected_pv)
 
     for move in ordered_moves_q_search(board):
-        if not is_check:
+        if not is_check: # Checks should always be analyzed
             if not board.is_capture(move):
                 if q_depth > TACTICAL_QS_MAX_DEPTH:
+                    # For depth > TACTICAL_QS_MAX_DEPTH analyze only if capture()
                     continue
                 if not board.gives_check(move):
+                    # For depths <= TACTICAL_QS_MAX_DEPTH analyze if the move is capture, or it gives check.
                     continue
 
         # -------- Safe delta pruning --------

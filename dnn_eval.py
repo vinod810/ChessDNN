@@ -22,15 +22,15 @@ def dnn_eval(board: CachedBoard, model_filepath=DNN_MODEL_FILEPATH) -> int:
 
     if dnn_eval.model is None:
         dnn_eval.model = tf.keras.models.load_model(model_filepath)
-        dnn_eval.model.summary()
+        # dnn_eval.model.summary()
 
     board_repr = board.get_board_repr()
     board_repr = np.expand_dims(board_repr, axis=0)
 
     score = dnn_eval.model.predict(board_repr, verbose=0)[0][0]
     score = tanh_to_score(score)
-    if not board.turn: # black's turn
-        score = -score
+    #if not board.turn: # black's turn
+    #    score = -score
     return int(score)
 
 dnn_eval.model = None

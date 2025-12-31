@@ -15,7 +15,7 @@ from copy import deepcopy
 
 # ========== Board Representation Constants ==========
 
-BOARD_SHAPE = (13, 8, 8)  # 12 piece planes + 1 side-to-move plane
+BOARD_SHAPE = (12, 8, 8)  # 6 planes for "us" + 6 planes for "them" (always from side-to-move perspective)
 
 PIECE_TO_PLANE = {
     chess.PAWN: 0,
@@ -140,6 +140,7 @@ class CacheState:
     zobrist_hash: Optional[int] = None
     legal_moves: Optional[List[chess.Move]] = None
     is_any_capture_available: Optional[bool] = None
+    is_quiet: Optional[bool] = None
     has_non_pawn_material: Optional[Dict[chess.Color, bool]] = None
     is_check: Optional[bool] = None
     is_checkmate: Optional[bool] = None
@@ -157,6 +158,7 @@ class CacheState:
         self.zobrist_hash = None
         self.legal_moves = None
         self.is_any_capture_available = None
+        self.is_quiet = None
         self.has_non_pawn_material = None
         self.is_check = None
         self.is_checkmate = None
@@ -385,6 +387,39 @@ class CachedBoard(chess.Board):
 
     is_any_move_capture = is_any_capture_available
 
+    def is_quiet_position(self) -> bool:
+        """
+        Check if position is quiet (suitable for static evaluation).
+
+        A position is quiet when:
+        - Not in check
+        - No captures available
+        - No checks available
+        - No promotions available
+
+        Returns:
+            True if position is quiet, False otherwise
+        """
+        if self._cache.is_quiet is None:
+            self._cache.is_quiet = self._compute_is_quiet()
+        return self._cache.is_quiet
+
+    def _compute_is_quiet(self) -> bool:
+        """Compute if position is quiet."""
+        # In check = not quiet
+        if self.is_check():
+            return False
+
+        for move in self.get_legal_moves_list():
+            if self.is_capture(move):
+                return False
+            if self.gives_check(move):
+                return False
+            if move.promotion:
+                return False
+
+        return True
+
     def get_capture_moves(self) -> List[chess.Move]:
         return [m for m in self.get_legal_moves_list() if self.is_capture(m)]
 
@@ -445,16 +480,18 @@ class CachedBoard(chess.Board):
         """
         Get neural network board representation (cached with incremental updates).
 
-        Returns a (13, 8, 8) numpy array with:
-        - Planes 0-5: White pieces (pawn, knight, bishop, rook, queen, king)
-        - Planes 6-11: Black pieces (pawn, knight, bishop, rook, queen, king)
-        - Plane 12: Side to move (1 if white, 0 if black)
+        Board is always represented from the perspective of the side to move:
+        - Planes 0-5: "Our" pieces (pawn, knight, bishop, rook, queen, king)
+        - Planes 6-11: "Their" pieces (pawn, knight, bishop, rook, queen, king)
+
+        When Black is to move, the board is flipped vertically so rank 1 becomes
+        rank 8, making the representation symmetric.
 
         Args:
             verify: If True, verify incremental update matches full computation.
 
         Returns:
-            np.ndarray of shape (13, 8, 8) with dtype uint8
+            np.ndarray of shape (12, 8, 8) with dtype uint8
         """
         if self._cache.board_repr is None:
             computed_incrementally = False
@@ -482,18 +519,32 @@ class CachedBoard(chess.Board):
         return self._cache.board_repr
 
     def _compute_board_repr(self) -> np.ndarray:
-        """Compute the board representation from scratch."""
-        planes = np.zeros(BOARD_SHAPE, dtype=np.uint8)
+        """
+        Compute the board representation from scratch.
 
-        # 1. Piece planes (12)
+        Always from side-to-move perspective:
+        - Planes 0-5: side to move's pieces
+        - Planes 6-11: opponent's pieces
+        - Board flipped vertically when Black to move
+        """
+        planes = np.zeros(BOARD_SHAPE, dtype=np.uint8)
+        flip = not self.turn  # Flip if Black to move
+
         for square, piece in self.piece_map().items():
             row = 7 - (square // 8)
             col = square % 8
-            base = 0 if piece.color == chess.WHITE else 6
-            planes[base + PIECE_TO_PLANE[piece.piece_type], row, col] = 1
 
-        # 2. Side to move (1 plane)
-        planes[12, :, :] = 1 if self.turn == chess.WHITE else 0
+            # Flip board vertically if Black to move
+            if flip:
+                row = 7 - row
+
+            # "Us" = side to move (planes 0-5), "Them" = opponent (planes 6-11)
+            if piece.color == self.turn:
+                base = 0  # Our pieces
+            else:
+                base = 6  # Their pieces
+
+            planes[base + PIECE_TO_PLANE[piece.piece_type], row, col] = 1
 
         return planes
 
@@ -501,57 +552,67 @@ class CachedBoard(chess.Board):
         """
         Compute board representation incrementally from parent position.
 
-        Args:
-            parent_repr: Board representation before the move
-            move_info: Information about the move that was made
-
-        Returns:
-            Updated board representation
+        Since perspective flips every move, we need to:
+        1. Flip the parent board vertically
+        2. Swap "us" and "them" planes
+        3. Apply the move changes
         """
-        # Copy parent representation
-        planes = parent_repr.copy()
-
         move = move_info.move
         from_sq = move.from_square
         to_sq = move.to_square
 
-        # Convert squares to row/col
-        from_row, from_col = 7 - (from_sq // 8), from_sq % 8
-        to_row, to_col = 7 - (to_sq // 8), to_sq % 8
+        # After a move, perspective has flipped
+        # Parent's "us" becomes our "them" and vice versa
+        # Also need to flip the board vertically
+
+        # Swap planes 0-5 with 6-11 and flip vertically
+        planes = np.empty(BOARD_SHAPE, dtype=np.uint8)
+        planes[0:6, :, :] = parent_repr[6:12, ::-1, :]  # Their pieces become ours (flipped)
+        planes[6:12, :, :] = parent_repr[0:6, ::-1, :]  # Our pieces become theirs (flipped)
+
+        # Current side to move (after the move was made)
+        flip = not self.turn  # Flip if Black to move
+
+        # Convert squares to row/col from current perspective
+        def sq_to_rowcol(sq):
+            row = 7 - (sq // 8)
+            col = sq % 8
+            if flip:
+                row = 7 - row
+            return row, col
+
+        from_row, from_col = sq_to_rowcol(from_sq)
+        to_row, to_col = sq_to_rowcol(to_sq)
 
         # Get the piece that moved (now at to_square)
         piece = self.piece_at(to_sq)
         if piece is None:
-            # Shouldn't happen, fall back to full computation
             return self._compute_board_repr()
 
-        moving_color = piece.color
-        moving_base = 0 if moving_color == chess.WHITE else 6
-        opponent_base = 6 if moving_color == chess.WHITE else 0
+        # Determine bases: mover is now "them" from our perspective
+        # (since the move already happened and turn flipped)
+        mover_base = 6   # The piece that just moved is now "their" piece
+        victim_base = 0  # Any captured piece was "ours" (from new perspective)
 
-        # Determine original piece type (before promotion)
-        if move.promotion:
-            original_type = chess.PAWN
-        else:
-            original_type = piece.piece_type
+        # Original piece type (before promotion)
+        original_type = chess.PAWN if move.promotion else piece.piece_type
 
         # 1. Remove piece from source square
-        planes[moving_base + PIECE_TO_PLANE[original_type], from_row, from_col] = 0
+        planes[mover_base + PIECE_TO_PLANE[original_type], from_row, from_col] = 0
 
-        # 2. Handle capture - remove captured piece from destination
+        # 2. Handle capture
         if move_info.captured_piece is not None:
             captured = move_info.captured_piece
             if move_info.was_en_passant:
-                # En passant: captured pawn is on a different square
+                # En passant: captured pawn is on different square
                 ep_sq = chess.square(chess.square_file(to_sq), chess.square_rank(from_sq))
-                ep_row, ep_col = 7 - (ep_sq // 8), ep_sq % 8
-                planes[opponent_base + PIECE_TO_PLANE[chess.PAWN], ep_row, ep_col] = 0
+                ep_row, ep_col = sq_to_rowcol(ep_sq)
+                planes[victim_base + PIECE_TO_PLANE[chess.PAWN], ep_row, ep_col] = 0
             else:
-                # Normal capture: remove from destination square
-                planes[opponent_base + PIECE_TO_PLANE[captured.piece_type], to_row, to_col] = 0
+                planes[victim_base + PIECE_TO_PLANE[captured.piece_type], to_row, to_col] = 0
 
-        # 3. Add piece to destination square (possibly promoted)
-        planes[moving_base + PIECE_TO_PLANE[piece.piece_type], to_row, to_col] = 1
+        # 3. Add piece to destination (possibly promoted)
+        planes[mover_base + PIECE_TO_PLANE[piece.piece_type], to_row, to_col] = 1
 
         # 4. Handle castling - move the rook
         if move_info.was_castling:
@@ -562,14 +623,11 @@ class CachedBoard(chess.Board):
                 rook_from = chess.square(0, chess.square_rank(from_sq))
                 rook_to = chess.square(3, chess.square_rank(from_sq))
 
-            rook_from_row, rook_from_col = 7 - (rook_from // 8), rook_from % 8
-            rook_to_row, rook_to_col = 7 - (rook_to // 8), rook_to % 8
+            rook_from_row, rook_from_col = sq_to_rowcol(rook_from)
+            rook_to_row, rook_to_col = sq_to_rowcol(rook_to)
 
-            planes[moving_base + PIECE_TO_PLANE[chess.ROOK], rook_from_row, rook_from_col] = 0
-            planes[moving_base + PIECE_TO_PLANE[chess.ROOK], rook_to_row, rook_to_col] = 1
-
-        # 5. Flip side to move plane
-        planes[12, :, :] = 1 - planes[12, :, :]
+            planes[mover_base + PIECE_TO_PLANE[chess.ROOK], rook_from_row, rook_from_col] = 0
+            planes[mover_base + PIECE_TO_PLANE[chess.ROOK], rook_to_row, rook_to_col] = 1
 
         return planes
 
@@ -680,22 +738,57 @@ def is_any_move_capture(board: chess.Board) -> bool:
     return any(board.is_capture(m) for m in board.legal_moves)
 
 
+def is_quiet_position(board: chess.Board) -> bool:
+    """
+    Standalone function to check if position is quiet.
+
+    A position is quiet when:
+    - Not in check
+    - No captures available
+    - No checks available
+    - No promotions available
+    """
+    if isinstance(board, CachedBoard):
+        return board.is_quiet_position()
+
+    if board.is_check():
+        return False
+
+    for move in board.legal_moves:
+        if board.is_capture(move):
+            return False
+        if board.gives_check(move):
+            return False
+        if move.promotion:
+            return False
+
+    return True
+
+
 def get_board_repr(board: chess.Board) -> np.ndarray:
     """
     Standalone compatibility function for board representation.
 
-    If board is a CachedBoard, uses the cached version.
+    Returns (12, 8, 8) array from side-to-move perspective:
+    - Planes 0-5: "Our" pieces (side to move)
+    - Planes 6-11: "Their" pieces (opponent)
+    - Board flipped vertically when Black to move
     """
     if isinstance(board, CachedBoard):
         return board.get_board_repr()
 
     planes = np.zeros(BOARD_SHAPE, dtype=np.uint8)
+    flip = not board.turn  # Flip if Black to move
+
     for square, piece in board.piece_map().items():
         row = 7 - (square // 8)
         col = square % 8
-        base = 0 if piece.color == chess.WHITE else 6
+        if flip:
+            row = 7 - row
+
+        base = 0 if piece.color == board.turn else 6
         planes[base + PIECE_TO_PLANE[piece.piece_type], row, col] = 1
-    planes[12, :, :] = 1 if board.turn == chess.WHITE else 0
+
     return planes
 
 
@@ -712,39 +805,50 @@ if __name__ == "__main__":
     print(f"Has non-pawn material: {board.has_non_pawn_material()}")
 
     # Test board representation
-    repr_array = board.get_board_repr()
-    print(f"Board repr shape: {repr_array.shape}")
-    print(f"Side to move plane sum: {repr_array[12].sum()} (expected 64 for white, 0 for black)")
+    print(f"\n=== Board Representation Tests ===")
+    print(f"Board shape: {BOARD_SHAPE}")
 
-    # Test incremental board repr updates
-    print("\n=== Testing incremental board repr ===")
+    # Test from starting position
     board = CachedBoard()
+    repr_white = board.get_board_repr()
+    print(f"\nStarting position (White to move):")
+    print(f"  Our pawns (plane 0) on rank 2: {repr_white[0, 6, :].sum()} pieces")
+    print(f"  Their pawns (plane 6) on rank 7: {repr_white[6, 1, :].sum()} pieces")
 
-    # Compute initial repr
-    _ = board.get_board_repr()
+    # After e4 (Black to move, board flipped)
+    board.push_san("e4")
+    repr_black = board.get_board_repr()
+    print(f"\nAfter e4 (Black to move, board flipped):")
+    print(f"  Our pawns (plane 0) on rank 2: {repr_black[0, 6, :].sum()} pieces")
+    print(f"  Their pawns (plane 6) - includes e4: {repr_black[6, :, :].sum()} pieces")
 
-    # Test various move types with verification
-    test_moves = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "O-O"]  # includes castling
+    # Verify incremental updates
+    print(f"\n=== Incremental Update Tests ===")
+    board = CachedBoard()
+    _ = board.get_board_repr()  # Cache initial
+
+    test_moves = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "O-O"]
     for move in test_moves:
         board.push_san(move)
         repr_inc = board.get_board_repr(verify=True)
         repr_full = board._compute_board_repr()
         match = np.array_equal(repr_inc, repr_full)
-        print(f"After {move}: incremental matches full = {match}")
+        print(f"After {move}: incremental={'OK' if match else 'FAIL'}")
 
     # Test en passant
     board = CachedBoard()
-    for move in ["e4", "a5", "e5", "d5", "exd6"]:
+    for move in ["e4", "a5", "e5", "d5"]:
         board.push_san(move)
-    _ = board.get_board_repr()  # Ensure parent is cached
-    board_repr = board.get_board_repr(verify=True)
-    print(f"En passant test: incremental verified")
+        _ = board.get_board_repr()
+    board.push_san("exd6")
+    repr_ep = board.get_board_repr(verify=True)
+    print(f"En passant: {'OK' if np.array_equal(repr_ep, board._compute_board_repr()) else 'FAIL'}")
 
     # Test promotion
     board = CachedBoard("7k/P7/8/8/8/8/8/7K w - - 0 1")
     _ = board.get_board_repr()
     board.push_san("a8=Q")
-    board_repr = board.get_board_repr(verify=True)
-    print(f"Promotion test: incremental verified")
+    repr_promo = board.get_board_repr(verify=True)
+    print(f"Promotion: {'OK' if np.array_equal(repr_promo, board._compute_board_repr()) else 'FAIL'}")
 
-    print("\nAll incremental board repr tests passed!")
+    print("\nAll tests completed!")
