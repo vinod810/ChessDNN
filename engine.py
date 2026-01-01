@@ -5,16 +5,15 @@ import chess.polyglot
 from collections import namedtuple
 
 from cached_board import CachedBoard
-from dnn_eval import dnn_eval # Returns positional evaluation using a DNN model.
+from dnn_eval import dnn_eval, INF  # Returns positional evaluation using a DNN model.
 
-INF = 10_000
 MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
 DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
-DELTA_MAX_DNN_EVAL = 50 # Score difference, below which will trigger a DNN evaluation
+DELTA_MAX_DNN_EVAL = 0 # Score difference, below which will trigger a DNN evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
 TACTICAL_QS_MAX_DEPTH = 5 # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
@@ -75,7 +74,14 @@ def check_time():
         TimeControl.stop_search = True
 
 
-def evaluate_positional(board: CachedBoard) -> int:
+def evaluate_material(board: CachedBoard) -> int:
+    if board.is_game_over():
+        if board.is_checkmate():
+            # Side to move is checkmated - worst possible score
+            return -INF + board.ply()
+        else:
+            return 0  # Stalemate or other draw
+
     kpi['pos_eval'] += 1
     score = board.material_evaluation()
     return score
@@ -157,92 +163,6 @@ def ordered_moves_q_search(board):
     return moves
 
 
-def quiescence(board, alpha, beta, q_depth, on_expected_pv):
-    kpi['q_depth'] = max(kpi['q_depth'], q_depth)
-
-    check_time()
-    if TimeControl.stop_search:
-        raise TimeoutError()
-
-    if QS_TT_SUPPORTED:
-        key = board.zobrist_hash()
-        if key in qs_transposition_table:
-            kpi['qs_tt_hits'] += 1
-            stored_score = qs_transposition_table[key]
-            if stored_score >= beta:
-                return beta
-            alpha = max(alpha, stored_score)
-
-    stand_pat = evaluate_positional(board)
-
-    is_dnn_eval = False
-    if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
-        and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
-        and board.is_quiet_position()):
-        stand_pat = evaluate_dnn(board)
-        is_dnn_eval = True
-
-    if stand_pat >= beta:
-        kpi['beta_cutoffs'] += 1
-        return beta
-
-    if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
-        return alpha
-
-    if (not is_dnn_eval
-        and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
-        and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)
-        and board.is_quiet_position()):
-        stand_pat = evaluate_dnn(board)
-
-    alpha = max(alpha, stand_pat)
-
-    is_check = board.is_check()
-    expected_move = pv_move_for_node(board, on_expected_pv)
-
-    for move in ordered_moves_q_search(board):
-        if not is_check: # Checks should always be analyzed
-            if not board.is_capture(move):
-                if q_depth > TACTICAL_QS_MAX_DEPTH:
-                    # For depth > TACTICAL_QS_MAX_DEPTH analyze only if capture()
-                    continue
-                if not board.gives_check(move):
-                    # For depths <= TACTICAL_QS_MAX_DEPTH analyze if the move is capture, or it gives check.
-                    continue
-
-        # -------- Safe delta pruning --------
-        if (board.is_capture(move)
-            and not board.gives_check(move)
-            and q_depth >= DELTA_PRUNING_QS_MIN_DEPTH):
-
-            victim = board.piece_at(move.to_square)
-            if victim:
-                attacker = board.piece_at(move.from_square)
-                gain = PIECE_VALUES[victim.piece_type] - (
-                    PIECE_VALUES[attacker.piece_type] if attacker else 0
-                )
-                if stand_pat + gain + DELTA_PRUNING_MARGIN < alpha:
-                    continue
-
-        is_expected = (move == expected_move)
-        child_on_pv = on_expected_pv and is_expected
-
-        board.push(move)
-        score = -quiescence(board, -beta, -alpha, q_depth + 1, child_on_pv)
-        board.pop()
-
-        if score >= beta:
-            kpi['beta_cutoffs'] += 1
-            return beta
-
-        alpha = max(alpha, score)
-
-    if QS_TT_SUPPORTED:
-        qs_transposition_table[key] = alpha
-
-    return alpha
-
-
 def pv_move_for_node(board, on_expected_pv: bool):
     if not on_expected_pv:
         return None
@@ -255,13 +175,128 @@ def pv_move_for_node(board, on_expected_pv: bool):
     return pv[ply] if 0 <= ply < len(pv) else None
 
 
+def quiescence(board, alpha, beta, q_depth, on_expected_pv):
+    kpi['q_depth'] = max(kpi['q_depth'], q_depth)
+
+    check_time()
+    if TimeControl.stop_search:
+        raise TimeoutError()
+
+    # -------- Draw detection --------
+    if board.is_repetition(2) or board.can_claim_fifty_moves():
+        return 0
+
+    # -------- Always compute key for TT --------
+    key = board.zobrist_hash()
+
+    if QS_TT_SUPPORTED and key in qs_transposition_table:
+        kpi['qs_tt_hits'] += 1
+        stored_score = qs_transposition_table[key]
+        if stored_score >= beta:
+            return beta
+        alpha = max(alpha, stored_score)
+
+    # -------- Check for game over --------
+    if board.is_game_over():
+        if board.is_checkmate():
+            return -INF + board.ply()
+        return 0  # Stalemate or draw
+
+    is_check = board.is_check()
+
+    # -------- Stand pat (not valid when in check) --------
+    if not is_check:
+        stand_pat = evaluate_material(board)
+
+        is_dnn_eval = False
+        if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
+                and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
+                and board.is_quiet_position()):
+            stand_pat = evaluate_dnn(board)
+            is_dnn_eval = True
+
+        if stand_pat >= beta:
+            kpi['beta_cutoffs'] += 1
+            return beta
+
+        # Big delta pruning - can't possibly reach alpha
+        if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
+            return alpha
+
+        if (not is_dnn_eval
+                and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
+                and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)
+                and board.is_quiet_position()):
+            stand_pat = evaluate_dnn(board)
+
+        alpha = max(alpha, stand_pat)
+    else:
+        # When in check, we must search all evasions
+        stand_pat = -INF  # No stand pat when in check
+
+    expected_move = pv_move_for_node(board, on_expected_pv)
+    moves_searched = 0
+
+    for move in ordered_moves_q_search(board):
+        if not is_check:
+            if not board.is_capture(move):
+                if q_depth > TACTICAL_QS_MAX_DEPTH:
+                    continue
+                if not board.gives_check(move):
+                    continue
+
+            # -------- Delta pruning (only when not in check) --------
+            if (board.is_capture(move)
+                    and not board.gives_check(move)
+                    and q_depth >= DELTA_PRUNING_QS_MIN_DEPTH):
+
+                victim = board.piece_at(move.to_square)
+                if victim:
+                    gain = PIECE_VALUES[victim.piece_type]
+                    if stand_pat + gain + DELTA_PRUNING_MARGIN < alpha:
+                        continue
+
+        is_expected = (move == expected_move)
+        child_on_pv = on_expected_pv and is_expected
+
+        board.push(move)
+        score = -quiescence(board, -beta, -alpha, q_depth + 1, child_on_pv)
+        board.pop()
+        moves_searched += 1
+
+        if score >= beta:
+            kpi['beta_cutoffs'] += 1
+            if QS_TT_SUPPORTED:
+                qs_transposition_table[key] = score
+            return beta
+
+        alpha = max(alpha, score)
+
+    # -------- No moves searched when in check = checkmate --------
+    if is_check and moves_searched == 0:
+        return -INF + board.ply()
+
+    if QS_TT_SUPPORTED:
+        qs_transposition_table[key] = alpha
+
+    return alpha
+
+
 def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     """
-    Negamax search with all fixes applied.
+    Negamax search with alpha-beta pruning.
     """
     check_time()
     if TimeControl.stop_search:
         raise TimeoutError()
+
+    # -------- Draw detection (must come before TT lookup) --------
+    if board.is_repetition(2):
+        return 0
+    if board.can_claim_fifty_moves():
+        return 0
+    if board.is_insufficient_material():
+        return 0
 
     key = board.zobrist_hash()
     alpha_orig = alpha
@@ -292,38 +327,49 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     in_check = board.is_check()
     max_eval = -INF
 
-    # -------- Null Move Pruning --------
-    if (depth >= NULL_MOVE_MIN_DEPTH and not in_check and board.has_non_pawn_material()
-            and board.occupied.bit_count() > 6 and depth - NULL_MOVE_REDUCTION >= 1):
+    # -------- Null Move Pruning (not when in check or in zugzwang-prone positions) --------
+    if (depth >= NULL_MOVE_MIN_DEPTH
+            and not in_check
+            and not on_expected_pv  # Don't null-move on PV
+            and board.has_non_pawn_material()
+            and board.occupied.bit_count() > 6):
         board.push(chess.Move.null())
         score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False, allow_singular=False)
         board.pop()
         if score >= beta:
             return beta
 
-    # -------- Singular Extension Check --------
+    # -------- Singular Extension Check (simplified) --------
     singular_extension_applicable = False
     singular_move = None
 
-    if (allow_singular and SINGULAR_EXTENSION >= 1 and depth >= 6
-            and tt_move is not None and not in_check):
+    if (allow_singular
+            and depth >= 6
+            and tt_move is not None
+            and not in_check
+            and key in transposition_table
+            and transposition_table[key].flag != TT_UPPER_BOUND
+            and transposition_table[key].depth >= depth - 3):
 
-        reduced_depth = depth - 3
-        reduced_beta = (transposition_table[key].score if key in transposition_table
-                        else alpha) - SINGULAR_MARGIN
+        reduced_depth = max(1, depth // 2 - 1)
+        reduced_beta = transposition_table[key].score - SINGULAR_MARGIN
 
+        # Only search a few top moves, not all
+        move_count = 0
         highest_score = -INF
 
-        for move in board.get_legal_moves_list():
+        for move in ordered_moves(board, depth, tt_move=tt_move):
             if move == tt_move:
                 continue
+            if move_count >= 6:  # Limit moves checked
+                break
 
             board.push(move)
             score = -negamax(board, reduced_depth, -reduced_beta - 1, -reduced_beta, False, allow_singular=False)
             board.pop()
+            move_count += 1
 
             highest_score = max(highest_score, score)
-
             if highest_score >= reduced_beta:
                 break
 
@@ -335,13 +381,10 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     moves = ordered_moves(board, depth, tt_move=tt_move)
     if not moves:
         if in_check:
-            return -INF + board.ply()  # Checkmate (prefer shorter mates)
-        return 0  # Stalemate
-    expected_move = pv_move_for_node(board, on_expected_pv)
+            return -INF + board.ply()
+        return 0
 
-    if expected_move and expected_move not in moves:
-        print(f"⚠ PV MOVE MISSING FROM LEGAL MOVES at ply {board.ply}, depth {depth}")
-        print("FEN:", board.fen())
+    expected_move = pv_move_for_node(board, on_expected_pv)
 
     for move_index, move in enumerate(moves):
         is_capture = board.is_capture(move)
@@ -350,9 +393,8 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
         board.push(move)
         child_in_check = board.is_check()
 
-        # -------- Determine search depth --------
+        # -------- Extensions --------
         extension = 0
-
         if singular_extension_applicable and move == singular_move:
             extension = SINGULAR_EXTENSION
         elif child_in_check:
@@ -360,7 +402,7 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
 
         new_depth = depth - 1 + extension
 
-        # -------- LMR Decision --------
+        # -------- LMR --------
         reduce = (
                 depth >= LMR_MIN_DEPTH
                 and move_index >= LMR_MOVE_THRESHOLD
@@ -379,15 +421,12 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
             reduction = 1
             if depth >= 6 and move_index >= 6:
                 reduction = 2
-            score = -negamax(board, new_depth - reduction, -alpha - 1, -alpha, child_on_pv, allow_singular=True)
+            score = -negamax(board, new_depth - reduction, -alpha - 1, -alpha, False, allow_singular=True)
             if score > alpha:
                 score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
-            else:
-                if on_expected_pv and reduce and is_expected:
-                    print("⚠ LMR REDUCED PV MOVE")
         else:
             if move_index > 0:
-                score = -negamax(board, new_depth, -alpha - 1, -alpha, child_on_pv, allow_singular=True)
+                score = -negamax(board, new_depth, -alpha - 1, -alpha, False, allow_singular=True)
                 if score > alpha and score < beta:
                     score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
             else:
@@ -403,6 +442,7 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
             alpha = score
 
         if alpha >= beta:
+            # Update killer moves and history for quiet moves
             if not is_capture:
                 if killer_moves[depth][0] != move:
                     killer_moves[depth][1] = killer_moves[depth][0]
@@ -411,16 +451,10 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
                 history_heuristic[key_hist] = min(
                     history_heuristic.get(key_hist, 0) + depth * depth, 10_000
                 )
-
-            if on_expected_pv and expected_move and move != expected_move:
-                print("⚠ BETA CUTOFF KILLED PV")
-                print("Cut by:", move)
-                print("Expected:", expected_move)
-
             kpi['beta_cutoffs'] += 1
             break
 
-    # -------- Transposition Table Store --------
+    # -------- Store in TT --------
     if max_eval <= alpha_orig:
         flag = TT_UPPER_BOUND
     elif max_eval >= beta:
@@ -586,7 +620,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
         # fallback if nothing searched
         board = CachedBoard(fen)
         best_move = board.get_legal_moves_list()[0]
-        best_score = evaluate_positional(board)
+        best_score = evaluate_material(board)
 
     return best_move, best_score
 

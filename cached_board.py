@@ -12,20 +12,7 @@ from typing import Optional, List, Iterator, Dict
 from dataclasses import dataclass
 from copy import deepcopy
 
-
-# ========== Board Representation Constants ==========
-
-BOARD_SHAPE = (12, 8, 8)  # 6 planes for "us" + 6 planes for "them" (always from side-to-move perspective)
-
-PIECE_TO_PLANE = {
-    chess.PAWN: 0,
-    chess.KNIGHT: 1,
-    chess.BISHOP: 2,
-    chess.ROOK: 3,
-    chess.QUEEN: 4,
-    chess.KING: 5,
-}
-
+from prepare_data import BOARD_SHAPE, PIECE_TO_PLANE
 
 # ========== Piece Values and PST Tables ==========
 

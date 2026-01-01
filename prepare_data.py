@@ -28,19 +28,12 @@ MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
 MAX_MATERIAL_IMBALANCE = 250  # Skip positions with material imbalance > 250 cp
 
 # Multiprocessing settings
-NUM_WORKERS = max(1, mp.cpu_count() - 1)  # Leave one core free
+NUM_WORKERS = min(5, max(1, mp.cpu_count() - 1))  # Leave one core free, cap at 5
 BATCH_SIZE = 100  # Games per batch sent to workers
 QUEUE_MAX_SIZE = 1000  # Max items in result queue
 
-# Piece values for material calculation
-PIECE_VALUES = {
-    chess.PAWN: 100,
-    chess.KNIGHT: 320,
-    chess.BISHOP: 330,
-    chess.ROOK: 500,
-    chess.QUEEN: 900,
-    chess.KING: 0,
-}
+# Piece values for material calculation (indexed by piece_type: 1=PAWN, 2=KNIGHT, etc.)
+_PIECE_VALUES = [0, 100, 320, 330, 500, 900, 0]  # Index 0 unused, index 6 is KING
 
 PIECE_TO_PLANE = {
     chess.PAWN: 0,
@@ -55,17 +48,19 @@ PIECE_TO_PLANE = {
 _PIECE_TO_PLANE_LIST = [0, 0, 1, 2, 3, 4, 5]  # Index 0 unused
 
 
-def get_board_repr(board: chess.Board) -> np.ndarray:
+def get_board_repr_and_material(board: chess.Board) -> Tuple[np.ndarray, int]:
     """
-    Get board representation from side-to-move perspective.
+    Get board representation from side-to-move perspective and material imbalance.
 
-    Returns (12, 8, 8) array:
-    - Planes 0-5: "Our" pieces (side to move): pawn, knight, bishop, rook, queen, king
-    - Planes 6-11: "Their" pieces (opponent): pawn, knight, bishop, rook, queen, king
-    - Board flipped vertically when Black to move
+    Returns:
+        Tuple of:
+        - (12, 8, 8) array with piece planes
+        - Absolute material imbalance in centipawns
     """
     planes = np.zeros(BOARD_SHAPE, dtype=np.uint8)
     flip = not board.turn  # Flip if Black to move
+    white_material = 0
+    black_material = 0
 
     for square, piece in board.piece_map().items():
         row = 7 - (square // 8)
@@ -77,7 +72,14 @@ def get_board_repr(board: chess.Board) -> np.ndarray:
         base = 0 if piece.color == board.turn else 6
         planes[base + _PIECE_TO_PLANE_LIST[piece.piece_type], row, col] = 1
 
-    return planes
+        # Accumulate material
+        value = _PIECE_VALUES[piece.piece_type]
+        if piece.color == chess.WHITE:
+            white_material += value
+        else:
+            black_material += value
+
+    return planes, abs(white_material - black_material)
 
 
 def is_quiet_position(board: chess.Board) -> bool:
@@ -108,24 +110,16 @@ def is_quiet_position(board: chess.Board) -> bool:
     return True
 
 
-def get_material_imbalance(board: chess.Board) -> int:
+def is_drawn_position(board: chess.Board) -> bool:
     """
-    Calculate material imbalance (White material - Black material).
+    Check if a position is a draw or game is over.
 
-    Returns:
-        Absolute material difference in centipawns.
+    Returns True if:
+    - Game is over (checkmate, stalemate, insufficient material,
+      fivefold repetition, seventy-five move rule)
+    - Draw can be claimed (threefold repetition, fifty-move rule)
     """
-    white_material = 0
-    black_material = 0
-
-    for square, piece in board.piece_map().items():
-        value = PIECE_VALUES[piece.piece_type]
-        if piece.color == chess.WHITE:
-            white_material += value
-        else:
-            black_material += value
-
-    return abs(white_material - black_material)
+    return board.is_game_over() or board.can_claim_draw()
 
 
 # ----- TF Example Helpers -----
@@ -177,12 +171,20 @@ def process_game_pgn(pgn_text: str) -> Tuple[List[Tuple[np.ndarray, float]], dic
             kpi["moves"] += 1
             board = node.board()
 
+            # Check draw conditions first (cheaper than is_quiet_position)
+            if is_drawn_position(board):
+                kpi["moves_drawn"] += 1
+                continue
+
             if not is_quiet_position(board):
                 kpi["moves_not_quiet"] += 1
                 continue
 
+            # Get board representation and material imbalance in one pass
+            board_repr, material_imbalance = get_board_repr_and_material(board)
+
             # Skip positions with large material imbalance
-            if get_material_imbalance(board) > MAX_MATERIAL_IMBALANCE:
+            if material_imbalance > MAX_MATERIAL_IMBALANCE:
                 kpi["moves_material_imbalance"] += 1
                 continue
 
@@ -206,7 +208,6 @@ def process_game_pgn(pgn_text: str) -> Tuple[List[Tuple[np.ndarray, float]], dic
             if not board.turn:
                 score = -score
 
-            board_repr = get_board_repr(board)
             results.append((board_repr, score))
 
     except Exception as e:
@@ -391,12 +392,20 @@ def stream_data_single_process(path: str):
                     kpi["moves"] += 1
                     board = node.board()
 
+                    # Check draw conditions first (cheaper than is_quiet_position)
+                    if is_drawn_position(board):
+                        kpi["moves_drawn"] += 1
+                        continue
+
                     if not is_quiet_position(board):
                         kpi["moves_not_quiet"] += 1
                         continue
 
+                    # Get board representation and material imbalance in one pass
+                    board_repr, material_imbalance = get_board_repr_and_material(board)
+
                     # Skip positions with large material imbalance
-                    if get_material_imbalance(board) > MAX_MATERIAL_IMBALANCE:
+                    if material_imbalance > MAX_MATERIAL_IMBALANCE:
                         kpi["moves_material_imbalance"] += 1
                         continue
 
@@ -419,7 +428,6 @@ def stream_data_single_process(path: str):
                     if not board.turn:
                         score = -score
 
-                    board_repr = get_board_repr(board)
                     yield board_repr, score
 
                 if kpi["games"] % 10000 == 0:
