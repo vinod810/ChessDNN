@@ -4,10 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Returns PV">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="bug fix wac 58/60 1min">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/cutechess.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cutechess.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dnn_engine.sh" beforeDir="false" afterPath="$PROJECT_DIR$/dnn_engine.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -99,14 +101,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00004" summary="First working version of find best move.">
-      <option name="closed" value="true" />
-      <created>1763866032214</created>
-      <option name="number" value="00004" />
-      <option name="presentableId" value="LOCAL-00004" />
-      <option name="project" value="LOCAL" />
-      <updated>1763866032214</updated>
     </task>
     <task id="LOCAL-00005" summary="Uses material search inside quiescent searach.">
       <option name="closed" value="true" />
@@ -492,7 +486,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767241112218</updated>
     </task>
-    <option name="localTasksCounter" value="53" />
+    <task id="LOCAL-00053" summary="bug fix wac 58/60 1min">
+      <option name="closed" value="true" />
+      <created>1767251661703</created>
+      <option name="number" value="00053" />
+      <option name="presentableId" value="LOCAL-00053" />
+      <option name="project" value="LOCAL" />
+      <updated>1767251661704</updated>
+    </task>
+    <option name="localTasksCounter" value="54" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -507,7 +509,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="time control" />
     <MESSAGE value="uci" />
     <MESSAGE value="README" />
     <MESSAGE value="Code clean up" />
@@ -532,6 +533,7 @@
     <MESSAGE value="cutechess.sh" />
     <MESSAGE value="Claude improvements for detecting draw" />
     <MESSAGE value="Returns PV" />
-    <option name="LAST_COMMIT_MESSAGE" value="Returns PV" />
+    <MESSAGE value="bug fix wac 58/60 1min" />
+    <option name="LAST_COMMIT_MESSAGE" value="bug fix wac 58/60 1min" />
   </component>
 </project>

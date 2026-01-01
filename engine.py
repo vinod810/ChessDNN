@@ -14,7 +14,8 @@ MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
 DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
-DELTA_MAX_DNN_EVAL = 0  # Score difference, below which will trigger a DNN evaluation
+DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
+QS_DEPTH_MAX_DNN_EVAL = 5
 STAND_PAT_MAX_DNN_EVAL = 200
 TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
@@ -192,7 +193,7 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         raise TimeoutError()
 
     # -------- Draw detection --------
-    if board.is_repetition(2) or board.can_claim_fifty_moves():
+    if board.is_repetition(3) or board.can_claim_fifty_moves():
         return 0, []
 
     # -------- Always compute key for TT --------
@@ -202,8 +203,7 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         kpi['qs_tt_hits'] += 1
         stored_score = qs_transposition_table[key]
         if stored_score >= beta:
-            return beta, []
-        #alpha = max(alpha, stored_score)
+            return stored_score, []  # ✅ Return stored score, not beta
 
     # -------- Check for game over --------
     if board.is_game_over():
@@ -213,13 +213,15 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
 
     is_check = board.is_check()
     best_pv = []
+    best_score = -INF  # ✅ Track best score separately
 
     # -------- Stand pat (not valid when in check) --------
     if not is_check:
         stand_pat = evaluate_material(board)
 
         is_dnn_eval = False
-        if (abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
+        if (q_depth <= QS_DEPTH_MAX_DNN_EVAL
+                and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
                 and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
                 and board.is_quiet_position()):
             stand_pat = evaluate_dnn(board)
@@ -227,24 +229,23 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
 
         if stand_pat >= beta:
             kpi['beta_cutoffs'] += 1
-            return beta, []
+            return stand_pat, []  # ✅ Return stand_pat, not beta
 
         # Big delta pruning - can't possibly reach alpha
         if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
-            return alpha, []
+            return stand_pat, []  # ✅ Return stand_pat (it's the best we can do)
 
         if (not is_dnn_eval
+                and q_depth <= QS_DEPTH_MAX_DNN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
                 and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)
                 and board.is_quiet_position()):
             stand_pat = evaluate_dnn(board)
 
-        alpha = max(alpha, stand_pat)
-    else:
-        # When in check, we must search all evasions
-        stand_pat = -INF  # No stand pat when in check
+        best_score = stand_pat  # ✅ Initialize best_score with stand_pat
+        if stand_pat > alpha:
+            alpha = stand_pat
 
-    #expected_move = pv_move_for_node(board, on_expected_pv)
     moves_searched = 0
 
     for move in ordered_moves_q_search(board):
@@ -263,11 +264,8 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
                 victim = board.piece_at(move.to_square)
                 if victim:
                     gain = PIECE_VALUES[victim.piece_type]
-                    if stand_pat + gain + DELTA_PRUNING_MARGIN < alpha:
+                    if best_score + gain + DELTA_PRUNING_MARGIN < alpha:  # ✅ Use best_score
                         continue
-
-        #is_expected = (move == expected_move)
-        #child_on_pv = on_expected_pv and is_expected
 
         board.push(move)
         score, child_pv = quiescence(board, -beta, -alpha, q_depth + 1)
@@ -275,24 +273,27 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         board.pop()
         moves_searched += 1
 
+        if score > best_score:  # ✅ Track best_score
+            best_score = score
+            best_pv = [move] + child_pv
+
         if score >= beta:
             kpi['beta_cutoffs'] += 1
             if QS_TT_SUPPORTED:
                 qs_transposition_table[key] = score
-            return beta, [move] + child_pv
+            return score, best_pv  # ✅ Return score, not beta
 
         if score > alpha:
             alpha = score
-            best_pv = [move] + child_pv
 
     # -------- No moves searched when in check = checkmate --------
     if is_check and moves_searched == 0:
         return -INF + board.ply(), []
 
     if QS_TT_SUPPORTED:
-        qs_transposition_table[key] = alpha
+        qs_transposition_table[key] = best_score  # ✅ Store best_score
 
-    return alpha, best_pv
+    return best_score, best_pv  # ✅ Return best_score, not alpha
 
 
 def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[chess.Move]]:
@@ -307,7 +308,7 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         raise TimeoutError()
 
     # -------- Draw detection (must come before TT lookup) --------
-    if board.is_repetition(2):
+    if board.is_repetition(3):
         return 0, []
     if board.can_claim_fifty_moves():
         return 0, []
@@ -796,7 +797,7 @@ def main():
 
             # Start timer
             start_time = time.perf_counter()
-            move, score, pv = find_best_move(fen, max_depth=20, time_limit=60)
+            move, score, pv = find_best_move(fen, max_depth=20, time_limit=30)
             end_time = time.perf_counter()
 
             # Record cache sizes and time

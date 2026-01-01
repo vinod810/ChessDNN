@@ -3,7 +3,7 @@ import os
 import sys
 import threading
 
-from engine import find_best_move, MAX_NEGAMAX_DEPTH, TimeControl
+from engine import find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache
 from engine import transposition_table, history_heuristic, killer_moves, qs_transposition_table
 
 search_thread = None
@@ -34,11 +34,12 @@ def uci_loop():
 
         elif command == "ucinewgame":
             board.reset()
-            transposition_table.clear()
-            qs_transposition_table.clear()
-            history_heuristic.clear()
-            for i in range(len(killer_moves)):
-                killer_moves[i] = [None, None]
+            #transposition_table.clear()
+            #qs_transposition_table.clear()
+            #history_heuristic.clear()
+            #for i in range(len(killer_moves)):
+            #    killer_moves[i] = [None, None]
+            dnn_eval_cache.clear()
 
         elif command.startswith("position"):
             tokens = command.split()
