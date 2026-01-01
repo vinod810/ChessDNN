@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="QS corrected ret score wac 72.33 5min">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="MIN DEPTH=3 score wac 89.33 5min">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
@@ -98,14 +98,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00006" summary="best_move.py initial version">
-      <option name="closed" value="true" />
-      <created>1763919180937</created>
-      <option name="number" value="00006" />
-      <option name="presentableId" value="LOCAL-00006" />
-      <option name="project" value="LOCAL" />
-      <updated>1763919180937</updated>
     </task>
     <task id="LOCAL-00007" summary="13 plane encoding">
       <option name="closed" value="true" />
@@ -491,7 +483,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767277083860</updated>
     </task>
-    <option name="localTasksCounter" value="55" />
+    <task id="LOCAL-00055" summary="MIN DEPTH=3 score wac 89.33 5min">
+      <option name="closed" value="true" />
+      <created>1767286899984</created>
+      <option name="number" value="00055" />
+      <option name="presentableId" value="LOCAL-00055" />
+      <option name="project" value="LOCAL" />
+      <updated>1767286899984</updated>
+    </task>
+    <option name="localTasksCounter" value="56" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -506,7 +506,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="README" />
     <MESSAGE value="Code clean up" />
     <MESSAGE value="Code clean up by ChatGpt" />
     <MESSAGE value="Engine test" />
@@ -531,6 +530,7 @@
     <MESSAGE value="Returns PV" />
     <MESSAGE value="bug fix wac 58/60 1min" />
     <MESSAGE value="QS corrected ret score wac 72.33 5min" />
-    <option name="LAST_COMMIT_MESSAGE" value="QS corrected ret score wac 72.33 5min" />
+    <MESSAGE value="MIN DEPTH=3 score wac 89.33 5min" />
+    <option name="LAST_COMMIT_MESSAGE" value="MIN DEPTH=3 score wac 89.33 5min" />
   </component>
 </project>

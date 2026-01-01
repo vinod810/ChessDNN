@@ -322,38 +322,33 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         Tuple of (score, pv) where pv is the list of moves in the principal variation.
     """
     check_time()
-    if TimeControl.stop_search:  # ✅ Only hard stop from UCI 'stop'
+    if TimeControl.stop_search:
         raise TimeoutError()
 
-    # -------- Draw detection (must come before TT lookup) --------
-    if board.is_repetition(3):
-        return 0, []
-    if board.can_claim_fifty_moves():
-        return 0, []
-    if board.is_insufficient_material():
+    # -------- Draw detection --------
+    if board.is_repetition(3) or board.can_claim_fifty_moves() or board.is_insufficient_material():
         return 0, []
 
     key = board.zobrist_hash()
     alpha_orig = alpha
+    beta_orig = beta  # ✅ FIX 1
+
     best_move = None
     best_pv = []
+    max_eval = -INF
 
-    # -------- Transposition Table Lookup --------
-    if key in transposition_table:
+    # -------- TT Lookup --------
+    entry = transposition_table.get(key)
+    if entry and entry.depth >= depth:
         kpi['tt_hits'] += 1
-        entry = transposition_table[key]
-        if entry.depth >= depth:
-            if entry.flag == TT_EXACT:
-                # Reconstruct PV from TT
-                pv = extract_pv_from_tt(board, depth)
-                return entry.score, pv
-            elif entry.flag == TT_LOWER_BOUND:
-                alpha = max(alpha, entry.score)
-            elif entry.flag == TT_UPPER_BOUND:
-                beta = min(beta, entry.score)
-            if alpha >= beta:
-                pv = extract_pv_from_tt(board, depth)
-                return entry.score, pv
+        if entry.flag == TT_EXACT:
+            return entry.score, extract_pv_from_tt(board, depth)
+        elif entry.flag == TT_LOWER_BOUND:
+            alpha = max(alpha, entry.score)
+        elif entry.flag == TT_UPPER_BOUND:
+            beta = min(beta, entry.score)
+        if alpha >= beta:
+            return entry.score, []  # ✅ FIX 2 (no PV on cutoff)
 
         tt_move = entry.best_move
     else:
@@ -364,7 +359,6 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         return quiescence(board, alpha, beta, 1)
 
     in_check = board.is_check()
-    max_eval = -INF
 
     # -------- Null Move Pruning (not when in check or in zugzwang-prone positions) --------
     if (depth >= NULL_MOVE_MIN_DEPTH
@@ -504,7 +498,7 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
     # -------- Store in TT --------
     if max_eval <= alpha_orig:
         flag = TT_UPPER_BOUND
-    elif max_eval >= beta:
+    elif max_eval >= beta_orig:  # ✅ FIX 1
         flag = TT_LOWER_BOUND
     else:
         flag = TT_EXACT
@@ -802,11 +796,17 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
         pass
 
     if best_move is None:
-        # fallback if nothing searched
         board = CachedBoard(fen)
-        best_move = board.get_legal_moves_list()[0]
-        best_score = evaluate_material(board)
-        best_pv = [best_move]
+        legal = board.get_legal_moves_list()
+        if legal:
+            best_move = legal[0]
+            best_score = evaluate_material(board)
+            best_pv = [best_move]
+        else:
+            # No legal moves - game is over (checkmate or stalemate)
+            best_move = chess.Move.null()  # Or handle differently
+            best_score = evaluate_material(board)
+            best_pv = []
 
     return best_move, best_score, best_pv
 

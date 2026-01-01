@@ -86,7 +86,10 @@ def uci_loop():
 
             def search_and_report():
                 best_move, score, pv = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
-                print(f"bestmove {best_move.uci()}", flush=True)
+                if best_move is None:
+                    print("bestmove 0000", flush=True)  # UCI null move
+                else:
+                    print(f"bestmove {best_move.uci()}", flush=True)
 
             search_thread = threading.Thread(target=search_and_report)
             search_thread.start()
