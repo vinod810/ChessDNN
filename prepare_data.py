@@ -1,5 +1,6 @@
 import io
 import os
+import queue
 import sys
 import multiprocessing as mp
 from typing import Iterable, Tuple, List
@@ -32,8 +33,14 @@ NUM_WORKERS = min(5, max(1, mp.cpu_count() - 1))  # Leave one core free, cap at 
 BATCH_SIZE = 100  # Games per batch sent to workers
 QUEUE_MAX_SIZE = 1000  # Max items in result queue
 
-# Piece values for material calculation (indexed by piece_type: 1=PAWN, 2=KNIGHT, etc.)
-_PIECE_VALUES = [0, 100, 320, 330, 500, 900, 0]  # Index 0 unused, index 6 is KING
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0
+}
 
 PIECE_TO_PLANE = {
     chess.PAWN: 0,
@@ -73,7 +80,7 @@ def get_board_repr_and_material(board: chess.Board) -> Tuple[np.ndarray, int]:
         planes[base + _PIECE_TO_PLANE_LIST[piece.piece_type], row, col] = 1
 
         # Accumulate material
-        value = _PIECE_VALUES[piece.piece_type]
+        value = PIECE_VALUES[piece.piece_type]
         if piece.color == chess.WHITE:
             white_material += value
         else:
@@ -340,7 +347,7 @@ def stream_data_multiprocess(path: str, num_workers: int = NUM_WORKERS):
                     if batches_received % 10000 == 0:
                         print(f"Processed {batches_received}/{batches_sent} batches, {dict(total_kpi)}")
 
-                except:
+                except queue.Empty:
                     break
 
             # Check if done

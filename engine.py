@@ -7,6 +7,7 @@ from typing import List, Tuple, Optional
 
 from cached_board import CachedBoard
 from dnn_eval import dnn_eval, INF  # Returns positional evaluation using a DNN model.
+from prepare_data import PIECE_VALUES
 
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
@@ -66,15 +67,6 @@ kpi = {
     "q_depth": 0,
 }
 
-PIECE_VALUES = {
-    chess.PAWN: 100,
-    chess.KNIGHT: 320,
-    chess.BISHOP: 330,
-    chess.ROOK: 500,
-    chess.QUEEN: 900,
-    chess.KING: 0
-}
-
 
 def check_time():
     """Check if time limit exceeded. Sets soft_stop flag."""
@@ -131,7 +123,7 @@ def move_score(board, move, depth):
     score = 0
 
     # Killer moves (quiet moves only)
-    if not board.is_capture(move) and depth is not None:
+    if not board.is_capture(move) and depth is not None and 0 <= depth < len(killer_moves):
         if move == killer_moves[depth][0]:
             score += 9000
         elif move == killer_moves[depth][1]:
@@ -438,14 +430,21 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         new_depth = depth - 1 + extension
 
         # -------- LMR --------
+        if depth is not None and 0 <= depth < len(killer_moves):
+            km0 = killer_moves[depth][0]
+            km1 = killer_moves[depth][1]
+        else:
+            km0 = None
+            km1 = None
+
         reduce = (
                 depth >= LMR_MIN_DEPTH
                 and move_index >= LMR_MOVE_THRESHOLD
                 and not child_in_check
                 and not is_capture
                 and not gives_check
-                and move != killer_moves[depth][0]
-                and move != killer_moves[depth][1]
+                and move != km0
+                and move != km1
                 and extension == 0
         )
 
@@ -484,7 +483,7 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
 
         if alpha >= beta:
             # Update killer moves and history for quiet moves
-            if not is_capture:
+            if not is_capture and depth is not None and 0 <= depth < len(killer_moves):
                 if killer_moves[depth][0] != move:
                     killer_moves[depth][1] = killer_moves[depth][0]
                     killer_moves[depth][0] = move

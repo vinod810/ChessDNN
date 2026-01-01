@@ -12,15 +12,9 @@ from typing import Optional, List, Iterator, Dict
 from dataclasses import dataclass
 from copy import deepcopy
 
-from prepare_data import BOARD_SHAPE, PIECE_TO_PLANE
+from prepare_data import BOARD_SHAPE, PIECE_TO_PLANE, PIECE_VALUES
 
-# ========== Piece Values and PST Tables ==========
-
-PIECE_VALUES: Dict[chess.PieceType, int] = {
-    chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
-    chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 0,
-}
-
+# ========== PST Tables ==========
 # fmt: off
 PST_PAWN = [
       0,   0,   0,   0,   0,   0,   0,   0,
