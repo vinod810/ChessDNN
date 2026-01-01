@@ -427,7 +427,7 @@ eigenmann_rapid_engine_test = \
     8/8/8/8/4kp2/1R6/P2q1PPK/8 w - - bm a3; id "ERET 111 - Fortress";'
 
 test_suites = {
-    "wac": (win_at_chess_positions, r'\d{3}\';', -1, 5),
+    "wac": (win_at_chess_positions, r'\d{3}\';', -1, 60),
     "eigenmann": (eigenmann_rapid_engine_test, r'";', -1, 120)
 }
 

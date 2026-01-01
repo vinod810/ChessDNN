@@ -135,7 +135,3 @@ if __name__ == '__main__':
                 break
         if pairs_printed >= 40:
             break
-
-
-
-

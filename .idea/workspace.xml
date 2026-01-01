@@ -6,8 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="bug fix wac 58/60 1min">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cutechess.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cutechess.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dnn_engine.sh" beforeDir="false" afterPath="$PROJECT_DIR$/dnn_engine.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine_test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />

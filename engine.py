@@ -8,6 +8,7 @@ from typing import List, Tuple, Optional
 from cached_board import CachedBoard
 from dnn_eval import dnn_eval, INF  # Returns positional evaluation using a DNN model.
 
+MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
@@ -29,11 +30,16 @@ DELTA_PRUNING_MARGIN = 75
 SINGULAR_MARGIN = 130  # Score difference in centipawns to trigger singular extension
 SINGULAR_EXTENSION = 1  # Extra depth
 
+# Time management
+ESTIMATED_BRANCHING_FACTOR = 2.5  # Typical branching factor after pruning
+TIME_SAFETY_MARGIN = 0.7  # Only start new depth if we estimate having 70%+ of needed time
+
 
 class TimeControl:
     time_limit = None  # in seconds
     start_time = None
-    stop_search = False
+    stop_search = False  # Set by UCI 'stop' command - always honored
+    soft_stop = False    # Set by time limit - ignored until MIN_DEPTH reached
 
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move"])
@@ -71,11 +77,12 @@ PIECE_VALUES = {
 
 
 def check_time():
+    """Check if time limit exceeded. Sets soft_stop flag."""
     if TimeControl.time_limit is None:
         return
 
     if (time.perf_counter() - TimeControl.start_time) >= TimeControl.time_limit:
-        TimeControl.stop_search = True
+        TimeControl.soft_stop = True
 
 
 def evaluate_material(board: CachedBoard) -> int:
@@ -177,6 +184,17 @@ def ordered_moves_q_search(board):
 #
 #     ply = board.ply() - SEARCH_CONTEXT["root_ply"]
 #     return pv[ply] if 0 <= ply < len(pv) else None
+def should_stop_search(current_depth: int) -> bool:
+    """
+    Determine if search should stop.
+    - TimeControl.stop_search (from UCI 'stop'): Always honored immediately
+    - TimeControl.soft_stop (from time limit): Only honored after MIN_DEPTH
+    """
+    if TimeControl.stop_search:
+        return True
+    if TimeControl.soft_stop and current_depth > MIN_NEGAMAX_DEPTH:
+        return True
+    return False
 
 
 def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
@@ -307,35 +325,30 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
     if TimeControl.stop_search:
         raise TimeoutError()
 
-    # -------- Draw detection (must come before TT lookup) --------
-    if board.is_repetition(3):
-        return 0, []
-    if board.can_claim_fifty_moves():
-        return 0, []
-    if board.is_insufficient_material():
+    # -------- Draw detection --------
+    if board.is_repetition(3) or board.can_claim_fifty_moves() or board.is_insufficient_material():
         return 0, []
 
     key = board.zobrist_hash()
     alpha_orig = alpha
+    beta_orig = beta  # ✅ FIX 1
+
     best_move = None
     best_pv = []
+    max_eval = -INF
 
-    # -------- Transposition Table Lookup --------
-    if key in transposition_table:
+    # -------- TT Lookup --------
+    entry = transposition_table.get(key)
+    if entry and entry.depth >= depth:
         kpi['tt_hits'] += 1
-        entry = transposition_table[key]
-        if entry.depth >= depth:
-            if entry.flag == TT_EXACT:
-                # Reconstruct PV from TT
-                pv = extract_pv_from_tt(board, depth)
-                return entry.score, pv
-            elif entry.flag == TT_LOWER_BOUND:
-                alpha = max(alpha, entry.score)
-            elif entry.flag == TT_UPPER_BOUND:
-                beta = min(beta, entry.score)
-            if alpha >= beta:
-                pv = extract_pv_from_tt(board, depth)
-                return entry.score, pv
+        if entry.flag == TT_EXACT:
+            return entry.score, extract_pv_from_tt(board, depth)
+        elif entry.flag == TT_LOWER_BOUND:
+            alpha = max(alpha, entry.score)
+        elif entry.flag == TT_UPPER_BOUND:
+            beta = min(beta, entry.score)
+        if alpha >= beta:
+            return entry.score, []  # ✅ FIX 2 (no PV on cutoff)
 
         tt_move = entry.best_move
     else:
@@ -346,7 +359,6 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         return quiescence(board, alpha, beta, 1)
 
     in_check = board.is_check()
-    max_eval = -INF
 
     # -------- Null Move Pruning (not when in check or in zugzwang-prone positions) --------
     if (depth >= NULL_MOVE_MIN_DEPTH
@@ -486,7 +498,7 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
     # -------- Store in TT --------
     if max_eval <= alpha_orig:
         flag = TT_UPPER_BOUND
-    elif max_eval >= beta:
+    elif max_eval >= beta_orig:  # ✅ FIX 1
         flag = TT_LOWER_BOUND
     else:
         flag = TT_EXACT
@@ -591,6 +603,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     # -------- Initialize time control --------
     TimeControl.time_limit = time_limit
     TimeControl.stop_search = False
+    TimeControl.soft_stop = False  # Reset soft stop
     TimeControl.start_time = time.perf_counter()
 
     # -------- Clear search tables & heuristics --------
@@ -607,13 +620,27 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     best_score = 0
     best_pv = []
     pv_move = None
-    #SEARCH_CONTEXT["root_ply"] = board.ply()
+
+    last_depth_time = 0.0
 
     try:
         for depth in range(1, max_depth + 1):
+            depth_start_time = time.perf_counter()
             check_time()
-            if TimeControl.stop_search:
+
+            # Check if we should stop (respects MIN_DEPTH for soft_stop)
+            if should_stop_search(depth):
                 break
+
+            # After MIN_DEPTH, check if we have enough time to likely complete the next depth
+            if depth > MIN_NEGAMAX_DEPTH and time_limit is not None and last_depth_time > 0:
+                elapsed = time.perf_counter() - TimeControl.start_time
+                remaining = time_limit - elapsed
+                estimated_next_depth_time = last_depth_time * ESTIMATED_BRANCHING_FACTOR
+
+                if remaining < estimated_next_depth_time * TIME_SAFETY_MARGIN:
+                    # Not enough time to likely complete this depth
+                    break
 
             age_heuristic_history()
 
@@ -625,8 +652,10 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
             # -------- Aspiration window --------
             window = ASPIRATION_WINDOW
             retries = 0
+            depth_completed = False  # Track if this depth completed successfully
+            search_aborted = False  # Track if search was aborted mid-depth
 
-            while True:
+            while not search_aborted:
                 # First iteration should use full window
                 if depth == 1:
                     alpha = -INF
@@ -639,15 +668,19 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                 current_best_score = -INF
                 current_best_move = None
                 current_best_pv = []
-                #expected_move = pv_move_for_node(board, True)
 
                 for move_index, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
                     check_time()
+
+                    # Check for stop before searching this move
                     if TimeControl.stop_search:
+                        search_aborted = True
+                        break
+                    if depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop:
+                        search_aborted = True
                         break
 
                     board.push(move)
-                    #child_on_pv = (expected_move == move)
 
                     # Principal variation first, then late moves with PVS
                     if move_index == 0:
@@ -673,10 +706,13 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                     if alpha >= beta:
                         break
 
-                # if current_best_score <= alpha_orig and SEARCH_CONTEXT["expected_pv"]:
-                #     print("⚠ FAIL-LOW – PV MAY BE LOST")
-                # elif current_best_score >= beta and SEARCH_CONTEXT["expected_pv"]:
-                #     print("⚠ FAIL-HIGH – PV MAY BE LOST")
+                # If search was aborted, save partial result and exit
+                if search_aborted:
+                    if current_best_move is not None:
+                        best_move = current_best_move
+                        best_score = current_best_score
+                        best_pv = current_best_pv
+                    break
 
                 # -------- SUCCESS: within aspiration window --------
                 if current_best_score > alpha_orig and current_best_score < beta:
@@ -684,12 +720,14 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                     best_score = current_best_score
                     best_pv = current_best_pv
                     pv_move = best_move
+                    depth_completed = True
                     break
 
                 # -------- FAIL-LOW or FAIL-HIGH: widen window --------
                 window *= 2
                 retries += 1
-                # After the while True loop, you should still save a partial result:
+
+                # Save partial result in case we need to stop
                 if current_best_move is not None:
                     best_move = current_best_move
                     best_score = current_best_score
@@ -700,11 +738,19 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                     alpha = -INF
                     beta = INF
                     current_best_score = -INF
-                    #expected_move = pv_move_for_node(board, True)
 
                     for move in ordered_moves(board, depth, pv_move, tt_move):
+                        check_time()
+
+                        # Check for stop
+                        if TimeControl.stop_search:
+                            search_aborted = True
+                            break
+                        if depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop:
+                            search_aborted = True
+                            break
+
                         board.push(move)
-                        #child_on_pv = (expected_move == move)
                         score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
                         score = -score
                         board.pop()
@@ -717,16 +763,29 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                         if score > alpha:
                             alpha = score
 
-                    best_move = current_best_move
-                    best_score = current_best_score
-                    best_pv = current_best_pv
-                    pv_move = best_move
+                    # Save results from fallback search
+                    if current_best_move is not None:
+                        best_move = current_best_move
+                        best_score = current_best_score
+                        best_pv = current_best_pv
+                        pv_move = best_move
+
+                    # Only mark complete if we didn't abort
+                    if not search_aborted:
+                        depth_completed = True
                     break
 
-            # Print progress with PV
-            pv_san = pv_to_san(board, best_pv)
-            #print(f"Depth {depth}: Score={best_score}, PV: {pv_san}")
-            print(f"info depth {depth} score cp {best_score} pv {' '.join(m.uci() for m in best_pv)}", flush=True)
+            # Record time taken for this depth (only if completed)
+            if depth_completed:
+                last_depth_time = time.perf_counter() - depth_start_time
+
+            # Break out of depth loop if search was aborted
+            if search_aborted:
+                break
+
+            # Print progress with PV only if depth completed
+            if depth_completed and best_pv:
+                print(f"info depth {depth} score cp {best_score} pv {' '.join(m.uci() for m in best_pv)}", flush=True)
 
             # Early break to speed up testing
             if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
@@ -737,11 +796,17 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
         pass
 
     if best_move is None:
-        # fallback if nothing searched
         board = CachedBoard(fen)
-        best_move = board.get_legal_moves_list()[0]
-        best_score = evaluate_material(board)
-        best_pv = [best_move]
+        legal = board.get_legal_moves_list()
+        if legal:
+            best_move = legal[0]
+            best_score = evaluate_material(board)
+            best_pv = [best_move]
+        else:
+            # No legal moves - game is over (checkmate or stalemate)
+            best_move = chess.Move.null()  # Or handle differently
+            best_score = evaluate_material(board)
+            best_pv = []
 
     return best_move, best_score, best_pv
 
