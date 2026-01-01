@@ -85,7 +85,9 @@ def uci_loop():
             fen = board.fen()
 
             def search_and_report():
-                best_move, _ = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
+                best_move, score, pv = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
+                #pv_str = " ".join(m.uci() for m in pv) if pv else best_move.uci()
+                #print(f"info depth {max_depth} score cp {score} pv {pv_str}", flush=True)
                 print(f"bestmove {best_move.uci()}", flush=True)
 
             search_thread = threading.Thread(target=search_and_report)
