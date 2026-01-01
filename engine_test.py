@@ -1,5 +1,6 @@
 import io
 import re
+import time
 from contextlib import redirect_stdout
 
 import chess
@@ -427,7 +428,7 @@ eigenmann_rapid_engine_test = \
     8/8/8/8/4kp2/1R6/P2q1PPK/8 w - - bm a3; id "ERET 111 - Fortress";'
 
 test_suites = {
-    "wac": (win_at_chess_positions, r'\d{3}\';', -1, 60),
+    "wac": (win_at_chess_positions, r'\d{3}\';', -1, 5),
     "eigenmann": (eigenmann_rapid_engine_test, r'";', -1, 120)
 }
 
@@ -447,8 +448,11 @@ def run_engine_tests(test_suite):
 
     tests_total = 0
     tests_passed =0
+    time_max = 0.0
+    time_sum = 0.9
 
     dump_parameters()
+    print(f"time_limit={test_suite[3]}")
 
     for line in re.split(test_suite[1], test_suite[0])[:test_suite[2]]:
         tests_total += 1
@@ -464,8 +468,13 @@ def run_engine_tests(test_suite):
 
         f = io.StringIO()
         with redirect_stdout(f):
+            start_time = time.perf_counter()
             found_move, score, _ = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
                                                expected_best_moves=expected_moves)
+            end_time = time.perf_counter()
+            time_exec = end_time - start_time
+            time_max = max(time_max, time_exec)
+            time_sum += time_exec
 
         found_move = board.san(found_move)
 
@@ -478,6 +487,7 @@ def run_engine_tests(test_suite):
               f"success-rate={round(tests_passed / tests_total * 100, 2)}%")
 
     dump_parameters()
+    print(f"time-avg={round(time_sum / tests_total, 2)}, time-max={round(time_max, 2)}")
 
     return round(tests_passed / tests_total * 100, 2)
 
