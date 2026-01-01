@@ -3,6 +3,7 @@ import time
 import chess
 import chess.polyglot
 from collections import namedtuple
+from typing import List, Tuple, Optional
 
 from cached_board import CachedBoard
 from dnn_eval import dnn_eval, INF  # Returns positional evaluation using a DNN model.
@@ -13,24 +14,26 @@ MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
 DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
-DELTA_MAX_DNN_EVAL = 0 # Score difference, below which will trigger a DNN evaluation
+DELTA_MAX_DNN_EVAL = 0  # Score difference, below which will trigger a DNN evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
-TACTICAL_QS_MAX_DEPTH = 5 # After this QS depth, only captures are considered, i.e. no checks or promotions.
+TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
 MAX_AW_RETRIES = 3
 LMR_MOVE_THRESHOLD = 2
-LMR_MIN_DEPTH = 3        # minimum depth to apply LMR
-NULL_MOVE_REDUCTION = 3   # R value (usually 2 or 3)
+LMR_MIN_DEPTH = 3  # minimum depth to apply LMR
+NULL_MOVE_REDUCTION = 3  # R value (usually 2 or 3)
 NULL_MOVE_MIN_DEPTH = 4
 DELTA_PRUNING_QS_MIN_DEPTH = 6
 DELTA_PRUNING_MARGIN = 75
 SINGULAR_MARGIN = 130  # Score difference in centipawns to trigger singular extension
-SINGULAR_EXTENSION = 1 # Extra depth
+SINGULAR_EXTENSION = 1  # Extra depth
+
 
 class TimeControl:
     time_limit = None  # in seconds
     start_time = None
     stop_search = False
+
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move"])
 TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
@@ -93,7 +96,7 @@ def evaluate_dnn(board: CachedBoard) -> int:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    assert(board.is_quiet_position())
+    assert (board.is_quiet_position())
     kpi['dnn_evals'] += 1
     score = int(dnn_eval(board, DNN_MODEL_FILEPATH))
 
@@ -175,7 +178,13 @@ def pv_move_for_node(board, on_expected_pv: bool):
     return pv[ply] if 0 <= ply < len(pv) else None
 
 
-def quiescence(board, alpha, beta, q_depth, on_expected_pv):
+def quiescence(board, alpha, beta, q_depth, on_expected_pv) -> Tuple[int, List[chess.Move]]:
+    """
+    Quiescence search.
+
+    Returns:
+        Tuple of (score, pv) where pv is the list of moves in the principal variation.
+    """
     kpi['q_depth'] = max(kpi['q_depth'], q_depth)
 
     check_time()
@@ -184,7 +193,7 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
 
     # -------- Draw detection --------
     if board.is_repetition(2) or board.can_claim_fifty_moves():
-        return 0
+        return 0, []
 
     # -------- Always compute key for TT --------
     key = board.zobrist_hash()
@@ -193,16 +202,17 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
         kpi['qs_tt_hits'] += 1
         stored_score = qs_transposition_table[key]
         if stored_score >= beta:
-            return beta
+            return beta, []
         alpha = max(alpha, stored_score)
 
     # -------- Check for game over --------
     if board.is_game_over():
         if board.is_checkmate():
-            return -INF + board.ply()
-        return 0  # Stalemate or draw
+            return -INF + board.ply(), []
+        return 0, []  # Stalemate or draw
 
     is_check = board.is_check()
+    best_pv = []
 
     # -------- Stand pat (not valid when in check) --------
     if not is_check:
@@ -217,11 +227,11 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
 
         if stand_pat >= beta:
             kpi['beta_cutoffs'] += 1
-            return beta
+            return beta, []
 
         # Big delta pruning - can't possibly reach alpha
         if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
-            return alpha
+            return alpha, []
 
         if (not is_dnn_eval
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
@@ -260,7 +270,8 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
         child_on_pv = on_expected_pv and is_expected
 
         board.push(move)
-        score = -quiescence(board, -beta, -alpha, q_depth + 1, child_on_pv)
+        score, child_pv = quiescence(board, -beta, -alpha, q_depth + 1, child_on_pv)
+        score = -score
         board.pop()
         moves_searched += 1
 
@@ -268,23 +279,28 @@ def quiescence(board, alpha, beta, q_depth, on_expected_pv):
             kpi['beta_cutoffs'] += 1
             if QS_TT_SUPPORTED:
                 qs_transposition_table[key] = score
-            return beta
+            return beta, [move] + child_pv
 
-        alpha = max(alpha, score)
+        if score > alpha:
+            alpha = score
+            best_pv = [move] + child_pv
 
     # -------- No moves searched when in check = checkmate --------
     if is_check and moves_searched == 0:
-        return -INF + board.ply()
+        return -INF + board.ply(), []
 
     if QS_TT_SUPPORTED:
         qs_transposition_table[key] = alpha
 
-    return alpha
+    return alpha, best_pv
 
 
-def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
+def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True) -> Tuple[int, List[chess.Move]]:
     """
     Negamax search with alpha-beta pruning.
+
+    Returns:
+        Tuple of (score, pv) where pv is the list of moves in the principal variation.
     """
     check_time()
     if TimeControl.stop_search:
@@ -292,15 +308,16 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
 
     # -------- Draw detection (must come before TT lookup) --------
     if board.is_repetition(2):
-        return 0
+        return 0, []
     if board.can_claim_fifty_moves():
-        return 0
+        return 0, []
     if board.is_insufficient_material():
-        return 0
+        return 0, []
 
     key = board.zobrist_hash()
     alpha_orig = alpha
     best_move = None
+    best_pv = []
 
     # -------- Transposition Table Lookup --------
     if key in transposition_table:
@@ -308,13 +325,16 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
         entry = transposition_table[key]
         if entry.depth >= depth:
             if entry.flag == TT_EXACT:
-                return entry.score
+                # Reconstruct PV from TT
+                pv = extract_pv_from_tt(board, depth)
+                return entry.score, pv
             elif entry.flag == TT_LOWER_BOUND:
                 alpha = max(alpha, entry.score)
             elif entry.flag == TT_UPPER_BOUND:
                 beta = min(beta, entry.score)
             if alpha >= beta:
-                return entry.score
+                pv = extract_pv_from_tt(board, depth)
+                return entry.score, pv
 
         tt_move = entry.best_move
     else:
@@ -334,10 +354,11 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
             and board.has_non_pawn_material()
             and board.occupied.bit_count() > 6):
         board.push(chess.Move.null())
-        score = -negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False, allow_singular=False)
+        score, _ = negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, False, allow_singular=False)
+        score = -score
         board.pop()
         if score >= beta:
-            return beta
+            return beta, []
 
     # -------- Singular Extension Check (simplified) --------
     singular_extension_applicable = False
@@ -365,7 +386,8 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
                 break
 
             board.push(move)
-            score = -negamax(board, reduced_depth, -reduced_beta - 1, -reduced_beta, False, allow_singular=False)
+            score, _ = negamax(board, reduced_depth, -reduced_beta - 1, -reduced_beta, False, allow_singular=False)
+            score = -score
             board.pop()
             move_count += 1
 
@@ -381,8 +403,8 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     moves = ordered_moves(board, depth, tt_move=tt_move)
     if not moves:
         if in_check:
-            return -INF + board.ply()
-        return 0
+            return -INF + board.ply(), []
+        return 0, []
 
     expected_move = pv_move_for_node(board, on_expected_pv)
 
@@ -421,22 +443,28 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
             reduction = 1
             if depth >= 6 and move_index >= 6:
                 reduction = 2
-            score = -negamax(board, new_depth - reduction, -alpha - 1, -alpha, False, allow_singular=True)
+            score, child_pv = negamax(board, new_depth - reduction, -alpha - 1, -alpha, False, allow_singular=True)
+            score = -score
             if score > alpha:
-                score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
+                score, child_pv = negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
+                score = -score
         else:
             if move_index > 0:
-                score = -negamax(board, new_depth, -alpha - 1, -alpha, False, allow_singular=True)
-                if score > alpha and score < beta:
-                    score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
+                score, child_pv = negamax(board, new_depth, -alpha - 1, -alpha, False, allow_singular=True)
+                score = -score
+                if alpha < score < beta:
+                    score, child_pv = negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
+                    score = -score
             else:
-                score = -negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
+                score, child_pv = negamax(board, new_depth, -beta, -alpha, child_on_pv, allow_singular=True)
+                score = -score
 
         board.pop()
 
         if score > max_eval:
             max_eval = score
             best_move = move
+            best_pv = [move] + child_pv
 
         if score > alpha:
             alpha = score
@@ -466,7 +494,47 @@ def negamax(board, depth, alpha, beta, on_expected_pv, allow_singular=True):
     if old is None or depth >= old.depth:
         transposition_table[key] = TTEntry(depth, max_eval, flag, best_move)
 
-    return max_eval
+    return max_eval, best_pv
+
+
+def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
+    """
+    Extract the principal variation from the transposition table.
+
+    Args:
+        board: Current board position
+        max_depth: Maximum depth to extract
+
+    Returns:
+        List of moves forming the PV
+    """
+    pv = []
+    seen_keys = set()
+
+    for _ in range(max_depth):
+        key = board.zobrist_hash()
+
+        # Prevent infinite loops from repetitions
+        if key in seen_keys:
+            break
+        seen_keys.add(key)
+
+        entry = transposition_table.get(key)
+        if entry is None or entry.best_move is None:
+            break
+
+        move = entry.best_move
+        if move not in board.get_legal_moves_list():
+            break
+
+        pv.append(move)
+        board.push(move)
+
+    # Restore board state
+    for _ in range(len(pv)):
+        board.pop()
+
+    return pv
 
 
 def age_heuristic_history():
@@ -480,10 +548,43 @@ def control_dict_size(table, max_dict_size):
             table.pop(next(iter(table)))
 
 
-def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_best_moves=None):
+def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
+    """
+    Convert a PV (list of moves) to SAN notation string.
+
+    Args:
+        board: Starting position
+        pv: List of moves
+
+    Returns:
+        SAN string representation of the PV
+    """
+    san_moves = []
+    temp_board = board.copy()
+
+    for i, move in enumerate(pv):
+        if temp_board.turn == chess.WHITE:
+            move_num = temp_board.fullmove_number
+            san_moves.append(f"{move_num}.")
+        elif i == 0:
+            # Black to move at start
+            move_num = temp_board.fullmove_number
+            san_moves.append(f"{move_num}...")
+
+        san_moves.append(temp_board.san(move))
+        temp_board.push(move)
+
+    return " ".join(san_moves)
+
+
+def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_best_moves=None) -> Tuple[
+    Optional[chess.Move], int, List[chess.Move]]:
     """
     Finds the best move for a given FEN using iterative deepening negamax with alpha-beta pruning,
     aspiration windows, TT, quiescence, null-move pruning, LMR, singular extensions, and heuristics.
+
+    Returns:
+        Tuple of (best_move, score, pv)
     """
 
     # -------- Initialize time control --------
@@ -503,6 +604,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     board = CachedBoard(fen)
     best_move = None
     best_score = 0
+    best_pv = []
     pv_move = None
     SEARCH_CONTEXT["root_ply"] = board.ply()
 
@@ -535,6 +637,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
 
                 current_best_score = -INF
                 current_best_move = None
+                current_best_pv = []
                 expected_move = pv_move_for_node(board, True)
 
                 for move_index, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
@@ -547,17 +650,21 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
 
                     # Principal variation first, then late moves with PVS
                     if move_index == 0:
-                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
+                        score, child_pv = negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
+                        score = -score
                     else:
-                        score = -negamax(board, depth - 1, -alpha - 1, -alpha, child_on_pv, allow_singular=True)
+                        score, child_pv = negamax(board, depth - 1, -alpha - 1, -alpha, False, allow_singular=True)
+                        score = -score
                         if score > alpha:
-                            score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
+                            score, child_pv = negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
+                            score = -score
 
                     board.pop()
 
                     if score > current_best_score:
                         current_best_score = score
                         current_best_move = move
+                        current_best_pv = [move] + child_pv
 
                     if score > alpha:
                         alpha = score
@@ -574,6 +681,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                 if current_best_score > alpha_orig and current_best_score < beta:
                     best_move = current_best_move
                     best_score = current_best_score
+                    best_pv = current_best_pv
                     pv_move = best_move
                     break
 
@@ -591,22 +699,27 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                     for move in ordered_moves(board, depth, pv_move, tt_move):
                         board.push(move)
                         child_on_pv = (expected_move == move)
-                        score = -negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
+                        score, child_pv = negamax(board, depth - 1, -beta, -alpha, child_on_pv, allow_singular=True)
+                        score = -score
                         board.pop()
 
                         if score > current_best_score:
                             current_best_score = score
                             current_best_move = move
+                            current_best_pv = [move] + child_pv
 
                         if score > alpha:
                             alpha = score
 
                     best_move = current_best_move
                     best_score = current_best_score
+                    best_pv = current_best_pv
                     pv_move = best_move
                     break
 
-            print(f"Depth {depth}: Best={best_move}, Score={best_score}")
+            # Print progress with PV
+            pv_san = pv_to_san(board, best_pv)
+            print(f"Depth {depth}: Score={best_score}, PV: {pv_san}")
 
             # Early break to speed up testing
             if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
@@ -621,8 +734,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
         board = CachedBoard(fen)
         best_move = board.get_legal_moves_list()[0]
         best_score = evaluate_material(board)
+        best_pv = [best_move]
 
-    return best_move, best_score
+    return best_move, best_score, best_pv
 
 
 def tokenize_san_string(san_string: str) -> list[str]:
@@ -676,7 +790,7 @@ def main():
 
             # Start timer
             start_time = time.perf_counter()
-            move, score = find_best_move(fen, max_depth=20, time_limit=60)
+            move, score, pv = find_best_move(fen, max_depth=20, time_limit=60)
             end_time = time.perf_counter()
 
             # Record cache sizes and time
@@ -691,8 +805,11 @@ def main():
             for key, value in kpi.items():
                 print(f"{key}: {value}")
 
+            board = CachedBoard(fen)
             print("\nBest move:", move)
             print("Evaluation:", score)
+            print("PV:", pv_to_san(board, pv))
+            print("PV (UCI):", " ".join(m.uci() for m in pv))
             print("-------------------\n")
 
         except KeyboardInterrupt:
@@ -707,4 +824,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

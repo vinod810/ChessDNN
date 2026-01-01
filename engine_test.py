@@ -464,7 +464,7 @@ def run_engine_tests(test_suite):
 
         f = io.StringIO()
         with redirect_stdout(f):
-            found_move, score = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
+            found_move, score, _ = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
                                                expected_best_moves=expected_moves)
 
         found_move = board.san(found_move)
