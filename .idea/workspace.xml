@@ -4,12 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="WAC - 5 sec - 207/300">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Minor edits for code quality WAC - 5 sec - 207/300">
+      <change afterPath="$PROJECT_DIR$/book_move.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cutechess.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cutechess.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cutechess.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/cutechess.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -54,9 +55,19 @@
     "RunOnceActivity.git.unshallow": "true",
     "SHELLCHECK.PATH": "/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck",
     "git-widget-placeholder": "master",
+    "last_opened_file_path": "/home/eapen/Documents/Projects/ChessDNN/test",
     "run.code.analysis.last.selected.profile": "pProject Default"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/test" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
+      <recent name="$PROJECT_DIR$/test" />
+    </key>
+  </component>
   <component name="RunManager">
     <configuration name="engine" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="ChessDNN" />
@@ -101,14 +112,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00007" summary="13 plane encoding">
-      <option name="closed" value="true" />
-      <created>1766370757398</created>
-      <option name="number" value="00007" />
-      <option name="presentableId" value="LOCAL-00007" />
-      <option name="project" value="LOCAL" />
-      <updated>1766370757398</updated>
     </task>
     <task id="LOCAL-00008" summary="13 plane encoding - v2">
       <option name="closed" value="true" />
@@ -494,7 +497,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767309732496</updated>
     </task>
-    <option name="localTasksCounter" value="56" />
+    <task id="LOCAL-00056" summary="Minor edits for code quality WAC - 5 sec - 207/300">
+      <option name="closed" value="true" />
+      <created>1767311378143</created>
+      <option name="number" value="00056" />
+      <option name="presentableId" value="LOCAL-00056" />
+      <option name="project" value="LOCAL" />
+      <updated>1767311378143</updated>
+    </task>
+    <option name="localTasksCounter" value="57" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -509,7 +520,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Code clean up" />
     <MESSAGE value="Code clean up by ChatGpt" />
     <MESSAGE value="Engine test" />
     <MESSAGE value="delta pruning margin - 50 - 68.33" />
@@ -534,6 +544,7 @@
     <MESSAGE value="bug fix wac 58/60 1min" />
     <MESSAGE value="wac 60sec 271/300" />
     <MESSAGE value="WAC - 5 sec - 207/300" />
-    <option name="LAST_COMMIT_MESSAGE" value="WAC - 5 sec - 207/300" />
+    <MESSAGE value="Minor edits for code quality WAC - 5 sec - 207/300" />
+    <option name="LAST_COMMIT_MESSAGE" value="Minor edits for code quality WAC - 5 sec - 207/300" />
   </component>
 </project>

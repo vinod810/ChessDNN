@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 import os
-import sys
 import threading
-import chess  # âœ… Added missing import
+import chess
 
 from engine import find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache
+from book_move import init_opening_book, get_book_move
+
+# Default book path
+DEFAULT_BOOK_PATH = "/home/eapen/Documents/Projects/ChessDNN/book/komodo.bin"
 
 search_thread = None
+use_book = True
 
 
 def uci_loop():
-    global search_thread
+    global search_thread, use_book
     board = chess.Board()
+    book_path = DEFAULT_BOOK_PATH
 
     while True:
         try:
@@ -23,15 +28,31 @@ def uci_loop():
             continue
 
         if command == "uci":
-            print("id name DNN Engine")
+            print("id name Neurofish")
             print("id author Eapen Kuruvilla")
+            print("option name OwnBook type check default true")
+            print("option name BookPath type string default " + DEFAULT_BOOK_PATH)
             print("uciok", flush=True)
 
         elif command == "isready":
-            # Wait for any ongoing search to finish
             if search_thread and search_thread.is_alive():
                 search_thread.join()
             print("readyok", flush=True)
+
+        elif command.startswith("setoption"):
+            tokens = command.split()
+            if "name" in tokens:
+                name_idx = tokens.index("name") + 1
+                if "value" in tokens:
+                    value_idx = tokens.index("value") + 1
+                    name = " ".join(tokens[name_idx:tokens.index("value")])
+                    value = " ".join(tokens[value_idx:])
+
+                    if name.lower() == "ownbook":
+                        use_book = value.lower() == "true"
+                    elif name.lower() == "bookpath":
+                        book_path = value
+                        init_opening_book(book_path)
 
         elif command == "ucinewgame":
             board.reset()
@@ -61,11 +82,9 @@ def uci_loop():
             movetime = None
             max_depth = MAX_NEGAMAX_DEPTH
 
-            # âœ… Fixed: Parse depth separately (can coexist with time controls)
             if "depth" in tokens:
                 max_depth = int(tokens[tokens.index("depth") + 1])
 
-            # âœ… Fixed: Parse time controls (mutually exclusive with each other)
             if "infinite" in tokens:
                 movetime = None
             elif "movetime" in tokens:
@@ -82,17 +101,28 @@ def uci_loop():
                 movetime = max(0.05, (time_left / movestogo + increment * 0.8) / 1000 - 0.05)
 
             TimeControl.stop_search = False
-            fen = board.fen()
 
-            def search_and_report():
-                best_move, score, pv = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
-                if best_move is None:
-                    print("bestmove 0000", flush=True)  # UCI null move
-                else:
-                    print(f"bestmove {best_move.uci()}", flush=True)
+            # Try book move FIRST on main thread (before starting search)
+            book_move = None
+            if use_book:
+                book_move = get_book_move(board, min_weight=1, temperature=1.0)
 
-            search_thread = threading.Thread(target=search_and_report)
-            search_thread.start()
+            if book_move:
+                print(f"info string Book move: {book_move.uci()}", flush=True)
+                print(f"bestmove {book_move.uci()}", flush=True)
+            else:
+                # No book move - start search
+                fen = board.fen()
+
+                def search_and_report():
+                    best_move, score, pv = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
+                    if best_move is None or best_move == chess.Move.null():
+                        print("bestmove 0000", flush=True)
+                    else:
+                        print(f"bestmove {best_move.uci()}", flush=True)
+
+                search_thread = threading.Thread(target=search_and_report)
+                search_thread.start()
 
         elif command == "stop":
             TimeControl.stop_search = True
@@ -107,28 +137,10 @@ def uci_loop():
 
 
 if __name__ == "__main__":
-    # Log environment info to file for debugging
-    with open("/tmp/uci_env_debug.log", "w") as f:
-        f.write(f"Python: {sys.executable}\n")
-        f.write(f"Version: {sys.version}\n")
-        f.write(f"Path: {sys.path}\n")
-        f.write(f"CWD: {os.getcwd()}\n")
-
-        try:
-            f.write(f"chess: {chess.__file__}\n")
-        except Exception as e:
-            f.write(f"chess error: {e}\n")
-
-        try:
-            import numpy
-            f.write(f"numpy: {numpy.__file__}\n")
-        except ImportError as e:
-            f.write(f"numpy import error: {e}\n")
-
-        try:
-            import tensorflow
-            f.write(f"tensorflow: {tensorflow.__file__}\n")
-        except ImportError as e:
-            f.write(f"tensorflow import error: {e}\n")
+    # Initialize book on startup
+    if os.path.exists(DEFAULT_BOOK_PATH):
+        init_opening_book(DEFAULT_BOOK_PATH)
+    else:
+        print(f"info string Book not found: {DEFAULT_BOOK_PATH}", flush=True)
 
     uci_loop()

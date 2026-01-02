@@ -470,7 +470,7 @@ def run_engine_tests(test_suite):
         with redirect_stdout(f):
             start_time = time.perf_counter()
             found_move, score, _ = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
-                                               expected_best_moves=expected_moves)
+                                                  expected_best_moves=expected_moves)
             end_time = time.perf_counter()
             time_exec = end_time - start_time
             time_max = max(time_max, time_exec)
