@@ -26,16 +26,6 @@ class DNNEvaluator:
         Returns:
             Score in centipawns. Positive = good for side to move.
         """
-        # Handle terminal positions
-        if board.is_game_over():
-            if board.is_checkmate():
-                # Side to move is checkmated - worst score
-                # Use ply so shorter mates are preferred by winner
-                return -INF + board.ply()
-            else:
-                # Draw (stalemate, insufficient material, etc.)
-                return 0
-
         # Load model if needed
         self._load_model(model_filepath)
 

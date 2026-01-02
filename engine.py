@@ -1,9 +1,10 @@
 import re
 import time
-import chess
-import chess.polyglot
 from collections import namedtuple
 from typing import List, Tuple, Optional
+
+import chess
+import chess.polyglot
 
 from cached_board import CachedBoard
 from dnn_eval import dnn_eval, INF  # Returns positional evaluation using a DNN model.
@@ -17,7 +18,7 @@ MAX_TABLE_SIZE = 200_000
 QS_TT_SUPPORTED = True
 DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
 DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
-QS_DEPTH_MAX_DNN_EVAL = 5
+QS_DEPTH_MAX_DNN_EVAL = 10
 STAND_PAT_MAX_DNN_EVAL = 200
 TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
 ASPIRATION_WINDOW = 40
@@ -40,7 +41,7 @@ class TimeControl:
     time_limit = None  # in seconds
     start_time = None
     stop_search = False  # Set by UCI 'stop' command - always honored
-    soft_stop = False    # Set by time limit - ignored until MIN_DEPTH reached
+    soft_stop = False  # Set by time limit - ignored until MIN_DEPTH reached
 
 
 TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move"])
@@ -51,11 +52,6 @@ qs_transposition_table = {}
 dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
 history_heuristic = {}
-
-#SEARCH_CONTEXT: dict[str, int | None | list[chess.Move]] = {
-#    "expected_pv": None,
-#    "root_ply": 0,
-#}
 
 kpi = {
     "pos_eval": 0,
@@ -78,6 +74,13 @@ def check_time():
 
 
 def evaluate_material(board: CachedBoard) -> int:
+    """
+    Evaluate the board position from the side-to-move perspective.
+
+    Returns:
+        Score in centipawns. Positive = good for side to move.
+    """
+    # Check for game over conditions
     if board.is_game_over():
         if board.is_checkmate():
             # Side to move is checkmated - worst possible score
@@ -85,12 +88,39 @@ def evaluate_material(board: CachedBoard) -> int:
         else:
             return 0  # Stalemate or other draw
 
+    # Check for draw conditions
+    if board.is_repetition(3):
+        return 0  # Threefold repetition
+
+    if board.can_claim_fifty_moves():
+        return 0  # 50-move rule
+
+    if board.is_insufficient_material():
+        return 0  # Insufficient material to checkmate
+
     kpi['pos_eval'] += 1
     score = board.material_evaluation()
     return score
 
 
 def evaluate_dnn(board: CachedBoard) -> int:
+    if board.is_game_over():
+        if board.is_checkmate():
+            # Side to move is checkmated - worst possible score
+            return -INF + board.ply()
+        else:
+            return 0  # Stalemate or other draw
+
+    # Check for draw conditions
+    if board.is_repetition(3):
+        return 0  # Threefold repetition
+
+    if board.can_claim_fifty_moves():
+        return 0  # 50-move rule
+
+    if board.is_insufficient_material():
+        return 0  # Insufficient material to checkmate
+
     key = board.zobrist_hash()
     if key in dnn_eval_cache:
         kpi['dec_hits'] += 1
@@ -98,7 +128,7 @@ def evaluate_dnn(board: CachedBoard) -> int:
 
     assert (board.is_quiet_position())
     kpi['dnn_evals'] += 1
-    score = int(dnn_eval(board, DNN_MODEL_FILEPATH))
+    score = dnn_eval(board, DNN_MODEL_FILEPATH)
 
     dnn_eval_cache[key] = score
     return score
@@ -166,16 +196,6 @@ def ordered_moves_q_search(board):
     return moves
 
 
-# def pv_move_for_node(board, on_expected_pv: bool):
-#     if not on_expected_pv:
-#         return None
-#
-#     pv = SEARCH_CONTEXT["expected_pv"]
-#     if not pv:
-#         return None
-#
-#     ply = board.ply() - SEARCH_CONTEXT["root_ply"]
-#     return pv[ply] if 0 <= ply < len(pv) else None
 def should_stop_search(current_depth: int) -> bool:
     """
     Determine if search should stop.
@@ -355,7 +375,7 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
     # -------- Null Move Pruning (not when in check or in zugzwang-prone positions) --------
     if (depth >= NULL_MOVE_MIN_DEPTH
             and not in_check
-            #and not on_expected_pv  # Don't null-move on PV
+            # and not on_expected_pv  # Don't null-move on PV
             and board.has_non_pawn_material()
             and board.occupied.bit_count() > 6):
         board.push(chess.Move.null())
@@ -411,8 +431,6 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
             return -INF + board.ply(), []
         return 0, []
 
-    #expected_move = pv_move_for_node(board, on_expected_pv)
-
     for move_index, move in enumerate(moves):
         is_capture = board.is_capture(move)
         gives_check = board.gives_check(move)
@@ -447,9 +465,6 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
                 and move != km1
                 and extension == 0
         )
-
-        #is_expected = (expected_move == move)
-        #child_on_pv = on_expected_pv and is_expected
 
         if reduce:
             reduction = 1
@@ -846,14 +861,6 @@ def main():
             if fen == "":
                 print("Type 'exit' to quit")
                 continue
-
-            #expected_pv = input("Expected pv: ").strip()
-
-            #if expected_pv:
-            #    SEARCH_CONTEXT["expected_pv"] = pv_from_san_string(fen, expected_pv)
-            #else:
-            #    SEARCH_CONTEXT["expected_pv"] = None
-            #SEARCH_CONTEXT["root_ply"] = 0
 
             # Reset KPIs
             for key in kpi:
