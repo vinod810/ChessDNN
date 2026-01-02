@@ -10,6 +10,7 @@ from cached_board import CachedBoard
 from dnn_eval import dnn_eval, INF  # Returns positional evaluation using a DNN model.
 from prepare_data import PIECE_VALUES
 
+# TODO support multiprocessing
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_TIME = 30

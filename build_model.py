@@ -2,9 +2,9 @@ import os
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras.callbacks import ModelCheckpoint
-from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE
+from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE, board_repr_to_fen
 
-MAX_SHARDS = 22 # Use a smaller number for quicker hyper param tuning
+MAX_SHARDS = 35 # Use a smaller number for quicker hyper param tuning
 DATA_DIR = OUT_DIR
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
 TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))
@@ -124,9 +124,10 @@ if __name__ == '__main__':
     for batch_x, batch_y in val_ds:  # your tf.data.Dataset
         y_pred = model.predict(batch_x)
 
-        for t, p in zip(batch_y.numpy(), y_pred.flatten()):  # pred_labels):
+        for x, t, p in zip(batch_x.numpy(), batch_y.numpy(), y_pred.flatten()):  # pred_labels):
             try:
-                print(f"{tanh_to_score(t)}, {tanh_to_score(p)}")
+                fen = board_repr_to_fen(x.reshape(BOARD_SHAPE))
+                print(f"{tanh_to_score(t)}, {tanh_to_score(p)}, fen={fen}")
             except (ValueError, OverflowError):
                 print("NA, NA")
                 pass

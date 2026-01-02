@@ -13,6 +13,7 @@ DEFAULT_BOOK_PATH = "/home/eapen/Documents/Projects/ChessDNN/book/komodo.bin"
 search_thread = None
 use_book = True
 
+# TODO support behind the screen pondering
 
 def record_position_hash(board: chess.Board):
     """Record position in game history using Zobrist hash."""

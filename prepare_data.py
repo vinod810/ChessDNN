@@ -54,6 +54,100 @@ PIECE_TO_PLANE = {
 # Faster lookup by index (piece_type is 1-6)
 _PIECE_TO_PLANE_LIST = [0, 0, 1, 2, 3, 4, 5]  # Index 0 unused
 
+# Plane to piece character mapping
+_PLANE_TO_PIECE_CHAR = ['p', 'n', 'b', 'r', 'q', 'k']  # Planes 0-5
+
+
+def board_repr_to_fen(board_repr: np.ndarray, side_to_move: bool = chess.WHITE) -> str:
+    """
+    Convert a board representation back to FEN string.
+
+    The board representation is from the side-to-move perspective:
+    - Planes 0-5: "Our" pieces (side to move)
+    - Planes 6-11: "Their" pieces (opponent)
+    - Board is flipped vertically when Black to move
+
+    Args:
+        board_repr: (12, 8, 8) numpy array with piece planes
+        side_to_move: chess.WHITE (True) or chess.BLACK (False), default WHITE
+
+    Returns:
+        FEN string with no castling rights, no en passant, halfmove=0, fullmove=1
+
+    Example:
+        >>> repr = get_board_repr_and_material(chess.Board())[0]
+        >>> fen = board_repr_to_fen(repr, chess.WHITE)
+        >>> print(fen)
+        'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1'
+    """
+    if board_repr.shape != BOARD_SHAPE:
+        raise ValueError(f"Expected shape {BOARD_SHAPE}, got {board_repr.shape}")
+
+    # Determine if we need to flip the board back
+    # The representation is from side-to-move's perspective
+    # If side_to_move is BLACK, the board was flipped, so we need to flip it back
+    flip = not side_to_move
+
+    # Build the board string rank by rank (from rank 8 to rank 1)
+    ranks = []
+
+    for row in range(8):  # row 0 = rank 8 in representation
+        rank_str = ""
+        empty_count = 0
+
+        for col in range(8):
+            # Get the actual row after considering flip
+            actual_row = (7 - row) if flip else row
+
+            piece_char = None
+
+            # Check "our" pieces (planes 0-5) - these belong to side_to_move
+            for plane in range(6):
+                if board_repr[plane, actual_row, col] == 1:
+                    char = _PLANE_TO_PIECE_CHAR[plane]
+                    # "Our" pieces belong to side_to_move
+                    if side_to_move == chess.WHITE:
+                        piece_char = char.upper()  # White pieces uppercase
+                    else:
+                        piece_char = char.lower()  # Black pieces lowercase
+                    break
+
+            # Check "their" pieces (planes 6-11) - these belong to opponent
+            if piece_char is None:
+                for plane in range(6, 12):
+                    if board_repr[plane, actual_row, col] == 1:
+                        char = _PLANE_TO_PIECE_CHAR[plane - 6]
+                        # "Their" pieces belong to opponent
+                        if side_to_move == chess.WHITE:
+                            piece_char = char.lower()  # Black pieces lowercase
+                        else:
+                            piece_char = char.upper()  # White pieces uppercase
+                        break
+
+            if piece_char is not None:
+                if empty_count > 0:
+                    rank_str += str(empty_count)
+                    empty_count = 0
+                rank_str += piece_char
+            else:
+                empty_count += 1
+
+        # Handle trailing empty squares
+        if empty_count > 0:
+            rank_str += str(empty_count)
+
+        ranks.append(rank_str)
+
+    # Construct FEN
+    board_fen = "/".join(ranks)
+    turn = "w" if side_to_move else "b"
+    castling = "-"  # No castling rights as specified
+    en_passant = "-"
+    halfmove = "0"
+    fullmove = "1"
+
+    return f"{board_fen} {turn} {castling} {en_passant} {halfmove} {fullmove}"
+
 
 def get_board_repr_and_material(board: chess.Board) -> Tuple[np.ndarray, int]:
     """
