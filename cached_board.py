@@ -386,17 +386,15 @@ class CachedBoard(chess.Board):
         return self._cache.is_quiet
 
     def _compute_is_quiet(self) -> bool:
-        """Compute if position is quiet."""
-        # In check = not quiet
         if self.is_check():
             return False
 
         for move in self.get_legal_moves_list():
             if self.is_capture(move):
                 return False
-            if self.gives_check(move):
-                return False
             if move.promotion:
+                return False
+            if self.gives_check(move):  # Cached, so not repeated
                 return False
 
         return True

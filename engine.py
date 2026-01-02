@@ -17,7 +17,7 @@ MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
 DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
-DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
+DELTA_MAX_DNN_EVAL = 0  # Score difference, below which will trigger a DNN evaluation
 QS_DEPTH_MAX_DNN_EVAL = 10
 STAND_PAT_MAX_DNN_EVAL = 200
 TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
@@ -63,6 +63,39 @@ kpi = {
     "q_depth": 0,
 }
 
+# Track positions seen in the current game (cleared on ucinewgame)
+game_position_history: dict[int, int] = {}  # zobrist_hash -> count
+
+
+def clear_game_history():
+    """Clear game position history (call on ucinewgame)."""
+    game_position_history.clear()
+
+
+def is_draw_by_repetition(board: CachedBoard) -> bool:
+    """
+    Check for threefold repetition combining game history and search path.
+
+    A draw occurs when the same position appears 3 times total.
+    """
+    key = board.zobrist_hash()
+    game_count = game_position_history.get(key, 0)
+
+    # Position in game history twice + current occurrence = 3
+    if game_count >= 2:
+        return True
+
+    # Position in game history once + appears twice in search path = 3
+    # board.is_repetition(2) means position appears 2+ times in move_stack
+    if game_count == 1 and board.is_repetition(2):
+        return True
+
+    # Position never in game history but 3 times in search
+    if game_count == 0 and board.is_repetition(3):
+        return True
+
+    return False
+
 
 def check_time():
     """Check if time limit exceeded. Sets soft_stop flag."""
@@ -88,16 +121,6 @@ def evaluate_material(board: CachedBoard) -> int:
         else:
             return 0  # Stalemate or other draw
 
-    # Check for draw conditions
-    if board.is_repetition(3):
-        return 0  # Threefold repetition
-
-    if board.can_claim_fifty_moves():
-        return 0  # 50-move rule
-
-    if board.is_insufficient_material():
-        return 0  # Insufficient material to checkmate
-
     kpi['pos_eval'] += 1
     score = board.material_evaluation()
     return score
@@ -110,16 +133,6 @@ def evaluate_dnn(board: CachedBoard) -> int:
             return -INF + board.ply()
         else:
             return 0  # Stalemate or other draw
-
-    # Check for draw conditions
-    if board.is_repetition(3):
-        return 0  # Threefold repetition
-
-    if board.can_claim_fifty_moves():
-        return 0  # 50-move rule
-
-    if board.is_insufficient_material():
-        return 0  # Insufficient material to checkmate
 
     key = board.zobrist_hash()
     if key in dnn_eval_cache:
@@ -223,7 +236,7 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         raise TimeoutError()
 
     # -------- Draw detection --------
-    if board.is_repetition(3) or board.can_claim_fifty_moves():
+    if is_draw_by_repetition(board) or board.can_claim_fifty_moves(): # TODO add fity moves  to CachedBoard
         return 0, []
 
     # -------- Always compute key for TT --------
@@ -338,7 +351,7 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         raise TimeoutError()
 
     # -------- Draw detection --------
-    if board.is_repetition(3) or board.can_claim_fifty_moves() or board.is_insufficient_material():
+    if is_draw_by_repetition(board) or board.can_claim_fifty_moves() or board.is_insufficient_material():
         return 0, []
 
     key = board.zobrist_hash()
@@ -587,7 +600,7 @@ def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
         SAN string representation of the PV
     """
     san_moves = []
-    temp_board = board.copy()
+    temp_board = board.copy(stack=False)
 
     for i, move in enumerate(pv):
         if temp_board.turn == chess.WHITE:

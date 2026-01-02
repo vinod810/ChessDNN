@@ -2,15 +2,22 @@
 import os
 import threading
 import chess
+import chess.polyglot
 
-from engine import find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache
+from engine import (find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache,
+                    clear_game_history, game_position_history)
 from book_move import init_opening_book, get_book_move
 
-# Default book path
 DEFAULT_BOOK_PATH = "/home/eapen/Documents/Projects/ChessDNN/book/komodo.bin"
 
 search_thread = None
 use_book = True
+
+
+def record_position_hash(board: chess.Board):
+    """Record position in game history using Zobrist hash."""
+    key = chess.polyglot.zobrist_hash(board)
+    game_position_history[key] = game_position_history.get(key, 0) + 1
 
 
 def uci_loop():
@@ -41,27 +48,29 @@ def uci_loop():
 
         elif command.startswith("setoption"):
             tokens = command.split()
-            if "name" in tokens:
+            if "name" in tokens and "value" in tokens:
                 name_idx = tokens.index("name") + 1
-                if "value" in tokens:
-                    value_idx = tokens.index("value") + 1
-                    name = " ".join(tokens[name_idx:tokens.index("value")])
-                    value = " ".join(tokens[value_idx:])
+                value_idx = tokens.index("value") + 1
+                name = " ".join(tokens[name_idx:tokens.index("value")])
+                value = " ".join(tokens[value_idx:])
 
-                    if name.lower() == "ownbook":
-                        use_book = value.lower() == "true"
-                    elif name.lower() == "bookpath":
-                        book_path = value
-                        init_opening_book(book_path)
+                if name.lower() == "ownbook":
+                    use_book = value.lower() == "true"
+                elif name.lower() == "bookpath":
+                    book_path = value
+                    init_opening_book(book_path)
 
         elif command == "ucinewgame":
             board.reset()
             dnn_eval_cache.clear()
+            clear_game_history()
 
         elif command.startswith("position"):
             tokens = command.split()
             if len(tokens) < 2:
                 continue
+
+            clear_game_history()
 
             if tokens[1] == "startpos":
                 board.reset()
@@ -73,9 +82,14 @@ def uci_loop():
             else:
                 continue
 
+            # Record starting position
+            record_position_hash(board)
+
+            # Apply moves and record each position
             if move_index < len(tokens) and tokens[move_index] == "moves":
                 for mv in tokens[move_index + 1:]:
                     board.push_uci(mv)
+                    record_position_hash(board)
 
         elif command.startswith("go"):
             tokens = command.split()
@@ -102,7 +116,7 @@ def uci_loop():
 
             TimeControl.stop_search = False
 
-            # Try book move FIRST on main thread (before starting search)
+            # Try book move first
             book_move = None
             if use_book:
                 book_move = get_book_move(board, min_weight=1, temperature=1.0)
@@ -111,7 +125,6 @@ def uci_loop():
                 print(f"info string Book move: {book_move.uci()}", flush=True)
                 print(f"bestmove {book_move.uci()}", flush=True)
             else:
-                # No book move - start search
                 fen = board.fen()
 
                 def search_and_report():
@@ -137,7 +150,6 @@ def uci_loop():
 
 
 if __name__ == "__main__":
-    # Initialize book on startup
     if os.path.exists(DEFAULT_BOOK_PATH):
         init_opening_book(DEFAULT_BOOK_PATH)
     else:
