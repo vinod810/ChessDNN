@@ -4,15 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Three-fold repetition fix.">
-      <change afterPath="$PROJECT_DIR$/book/komodo.bin" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Relative file path">
+      <change afterPath="$PROJECT_DIR$/test/oldfish.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dnn_engine.sh" beforeDir="false" afterPath="$PROJECT_DIR$/engine.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/cutechess.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/cutechess.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.sh" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/environment.yml" beforeDir="false" afterPath="$PROJECT_DIR$/environment.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/cutechess.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -114,14 +112,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00016" summary="Aspiration window">
-      <option name="closed" value="true" />
-      <created>1766627469076</created>
-      <option name="number" value="00016" />
-      <option name="presentableId" value="LOCAL-00016" />
-      <option name="project" value="LOCAL" />
-      <updated>1766627469076</updated>
     </task>
     <task id="LOCAL-00017" summary="LMR">
       <option name="closed" value="true" />
@@ -507,7 +497,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767453415482</updated>
     </task>
-    <option name="localTasksCounter" value="65" />
+    <task id="LOCAL-00065" summary="Relative file path">
+      <option name="closed" value="true" />
+      <created>1767457720091</created>
+      <option name="number" value="00065" />
+      <option name="presentableId" value="LOCAL-00065" />
+      <option name="project" value="LOCAL" />
+      <updated>1767457720092</updated>
+    </task>
+    <option name="localTasksCounter" value="66" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -522,7 +520,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="DNN, 512-256-128-1, loss-0.08166,rate-71.67" />
     <MESSAGE value="Engine tuning rate-73.67" />
     <MESSAGE value="ChatGpt improvements 73.33" />
     <MESSAGE value="ChatGpt improvements 71.67" />
@@ -547,7 +544,8 @@
     <MESSAGE value="Check for 3-fold repetition" />
     <MESSAGE value="board_repr_to_fen()" />
     <MESSAGE value="Three-fold repetition fix." />
-    <option name="LAST_COMMIT_MESSAGE" value="Three-fold repetition fix." />
+    <MESSAGE value="Relative file path" />
+    <option name="LAST_COMMIT_MESSAGE" value="Relative file path" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -559,12 +557,12 @@
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>
-          <line>51</line>
+          <line>52</line>
           <option name="timeStamp" value="3" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>
-          <line>151</line>
+          <line>152</line>
           <option name="timeStamp" value="4" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">

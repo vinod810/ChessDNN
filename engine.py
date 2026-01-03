@@ -1,3 +1,4 @@
+import random
 import re
 import time
 from collections import namedtuple
@@ -227,7 +228,8 @@ def ordered_moves(board, depth, pv_move=None, tt_move=None):
             score = move_score(board, move, depth)
         scored_moves.append((score, move))
 
-    scored_moves.sort(key=lambda tup: tup[0], reverse=True)
+    # Add small random noise to break ties (preserves relative ordering mostly)
+    scored_moves.sort(key=lambda tup: (tup[0], random.random()), reverse=True)
     return [move for _, move in scored_moves]
 
 
