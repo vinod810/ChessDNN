@@ -368,29 +368,14 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
 
 def get_draw_score(board: CachedBoard) -> int:
     """
-    Return score for draw positions with contempt.
+    Return score for draw positions.
 
-    The score is from the SIDE TO MOVE's perspective:
-    - material_evaluation() > 0 means side-to-move is winning
-    - material_evaluation() < 0 means side-to-move is losing
-
-    If we're winning (positive material), a draw is BAD → return negative score
-    If we're losing (negative material), a draw is GOOD → return positive score
-
-    This ensures the winning side avoids repetitions and the losing side seeks them,
-    but the search will correctly reject/accept based on alpha-beta bounds.
+    Simply returns -material_evaluation():
+    - If winning (+X), draw costs us X centipawns → return -X
+    - If losing (-X), draw saves us X centipawns → return +X
+    - If equal, draw is neutral → return 0
     """
-    material = board.material_evaluation()
-
-    # Side-to-move is winning → draw is BAD for us
-    if material > 150:
-        return -300  # Penalize draw when we're ahead
-
-    # Side-to-move is losing → draw is GOOD for us
-    if material < -150:
-        return 150  # Reward draw when we're behind
-
-    return 0  # Roughly equal, draw is neutral
+    return -board.material_evaluation()
 
 
 def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[chess.Move]]:
