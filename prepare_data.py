@@ -15,6 +15,7 @@ import zstandard as zstd
 # Planes 0-5: "Our" pieces (side to move)
 # Planes 6-11: "Their" pieces (opponent)
 # Board flipped vertically when Black to move
+  #TODO read/processing in parallel or divide the file among all the workers
 BOARD_SHAPE = (12, 8, 8)
 
 SHARD_SIZE = 1000_000  # samples per file

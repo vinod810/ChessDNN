@@ -18,7 +18,7 @@ MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
 DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras" # TODO get rid of /eapen/
-DELTA_MAX_DNN_EVAL = 0  # Score difference, below which will trigger a DNN evaluation
+DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
 QS_DEPTH_MAX_DNN_EVAL = 10
 STAND_PAT_MAX_DNN_EVAL = 200
 TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
@@ -368,14 +368,21 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
 
 def get_draw_score(board: CachedBoard) -> int:
     """
-    Return score for draw positions.
+    Return score for draw positions with capped contempt.
 
-    Simply returns -material_evaluation():
-    - If winning (+X), draw costs us X centipawns → return -X
-    - If losing (-X), draw saves us X centipawns → return +X
-    - If equal, draw is neutral → return 0
+    Uses -material (proportional contempt) but capped to avoid situations
+    where we'd rather lose material than draw.
+
+    When winning: contempt ranges from 0 to -300 (draw is bad)
+    When losing: contempt ranges from 0 to +150 (draw is good)
     """
-    return -board.material_evaluation()
+    material = board.material_evaluation()
+
+    if material > 0:
+        return max(-300, -material)
+    elif material < 0:
+        return min(150, -material)
+    return 0
 
 
 def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[chess.Move]]:
