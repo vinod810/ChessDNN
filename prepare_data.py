@@ -428,7 +428,7 @@ def stream_data_multiprocess(path: str, num_workers: int = NUM_WORKERS):
                         batches_sent += 1
                         batch = []
                     break
-
+            # TODO read next batch before start waiting
             # Collect results from workers
             while True:
                 try:

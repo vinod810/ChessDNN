@@ -1,8 +1,8 @@
 import re
 import time
 from collections import namedtuple
+from pathlib import Path
 from typing import List, Tuple, Optional
-
 import chess
 import chess.polyglot
 
@@ -17,7 +17,8 @@ MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
-DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras" # TODO get rid of /eapen/
+curr_dir = Path(__file__).resolve().parent
+DNN_MODEL_FILEPATH = curr_dir / 'model' / 'model.keras'
 DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
 QS_DEPTH_MAX_DNN_EVAL = 10
 STAND_PAT_MAX_DNN_EVAL = 200

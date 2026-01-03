@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import threading
+from pathlib import Path
 import chess
 import chess.polyglot
 
@@ -8,7 +9,8 @@ from engine import (find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cac
                     clear_game_history, game_position_history)
 from book_move import init_opening_book, get_book_move
 
-DEFAULT_BOOK_PATH = "/home/eapen/Documents/Projects/ChessDNN/book/komodo.bin"
+curr_dir = Path(__file__).resolve().parent
+DEFAULT_BOOK_PATH = curr_dir / 'book' / 'komodo.bin'
 
 search_thread = None
 use_book = True
@@ -39,7 +41,7 @@ def uci_loop():
             print("id name Neurofish")
             print("id author Eapen Kuruvilla")
             print("option name OwnBook type check default true")
-            print("option name BookPath type string default " + DEFAULT_BOOK_PATH)
+            print("option name BookPath type string default " + str(DEFAULT_BOOK_PATH))
             print("uciok", flush=True)
 
         elif command == "isready":
@@ -152,7 +154,7 @@ def uci_loop():
 
 if __name__ == "__main__":
     if os.path.exists(DEFAULT_BOOK_PATH):
-        init_opening_book(DEFAULT_BOOK_PATH)
+        init_opening_book(str(DEFAULT_BOOK_PATH))
     else:
         print(f"info string Book not found: {DEFAULT_BOOK_PATH}", flush=True)
 

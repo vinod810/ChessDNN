@@ -2,6 +2,8 @@ import os
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras.callbacks import ModelCheckpoint
+from pathlib import Path
+
 from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE, board_repr_to_fen
 
 MAX_SHARDS = 39 # Use a smaller number for quicker hyper param tuning
@@ -9,7 +11,8 @@ DATA_DIR = OUT_DIR
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.gz")))[:MAX_SHARDS]
 TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))
 N_TRAIN = int(len(DATA_FILES) * TRAIN_FACTOR)
-DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
+curr_dir = Path(__file__).resolve().parent
+DNN_MODEL_FILEPATH = curr_dir / 'model' / 'model.keras'
 
 BATCH_SIZE = 256 * 4 # AVX2 CPU = 256
 NUM_EPOCHS = 100
