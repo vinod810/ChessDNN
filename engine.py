@@ -17,7 +17,7 @@ MAX_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
 QS_TT_SUPPORTED = True
-DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras"
+DNN_MODEL_FILEPATH = "/home/eapen/Documents/Projects/ChessDNN/model/model.keras" # TODO get rid of /eapen/
 DELTA_MAX_DNN_EVAL = 0  # Score difference, below which will trigger a DNN evaluation
 QS_DEPTH_MAX_DNN_EVAL = 10
 STAND_PAT_MAX_DNN_EVAL = 200
@@ -77,23 +77,49 @@ def is_draw_by_repetition(board: CachedBoard) -> bool:
     """
     Check for threefold repetition combining game history and search path.
 
-    A draw occurs when the same position appears 3 times total.
+    A position is a draw if it occurs 3+ times total:
+    - game_position_history counts occurrences in the actual game (including current position)
+    - board.is_repetition() counts occurrences in the search tree
+
+    Key insight: The ROOT position of search is already counted in game_history.
+    If we return to that position during search, is_repetition(2) will be True,
+    but we shouldn't double-count.
+
+    Simple approach:
+    - If game_count >= 3: already 3-fold in game alone
+    - If game_count == 2: one more occurrence makes it 3-fold
+      → is_repetition(2) means we've seen this position again in search
+    - If game_count == 1: need 2 more occurrences
+      → is_repetition(2) means we've seen this position 2+ times in current search line
+    - If game_count == 0: need 3 occurrences in search alone
+      → is_repetition(3)
     """
     key = board.zobrist_hash()
     game_count = game_position_history.get(key, 0)
 
-    # Position in game history twice + current occurrence = 3
-    if game_count >= 2:
+    # Already occurred 3+ times in game
+    if game_count >= 3:
         return True
 
-    # Position in game history once + appears twice in search path = 3
-    # board.is_repetition(2) means position appears 2+ times in move_stack
-    if game_count == 1 and board.is_repetition(2):
-        return True
+    # Occurred twice in game - need to see it once more in search
+    # is_repetition(2) = position occurred 2+ times including current
+    if game_count == 2:
+        # Any occurrence in search (beyond root) makes it 3-fold
+        # is_repetition(2) catches: we're at this position AND we were here before in search
+        if board.is_repetition(2):
+            return True
 
-    # Position never in game history but 3 times in search
-    if game_count == 0 and board.is_repetition(3):
-        return True
+    # Occurred once in game - need to see it twice more in search
+    # is_repetition(3) = position occurred 3+ times including current
+    if game_count == 1:
+        if board.is_repetition(2):
+            # We've seen it twice in search (including current), plus once in game = 3
+            return True
+
+    # Never in game - need 3 occurrences in search
+    if game_count == 0:
+        if board.is_repetition(3):
+            return True
 
     return False
 
@@ -237,8 +263,8 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         raise TimeoutError()
 
     # -------- Draw detection --------
-    if is_draw_by_repetition(board) or board.can_claim_fifty_moves(): # TODO add fity moves  to CachedBoard
-        return 0, []
+    if is_draw_by_repetition(board) or board.can_claim_fifty_moves():
+        return get_draw_score(board), []
 
     # -------- Always compute key for TT --------
     key = board.zobrist_hash()
@@ -340,6 +366,33 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
     return best_score, best_pv  # ✅ Return best_score, not alpha
 
 
+def get_draw_score(board: CachedBoard) -> int:
+    """
+    Return score for draw positions with contempt.
+
+    The score is from the SIDE TO MOVE's perspective:
+    - material_evaluation() > 0 means side-to-move is winning
+    - material_evaluation() < 0 means side-to-move is losing
+
+    If we're winning (positive material), a draw is BAD → return negative score
+    If we're losing (negative material), a draw is GOOD → return positive score
+
+    This ensures the winning side avoids repetitions and the losing side seeks them,
+    but the search will correctly reject/accept based on alpha-beta bounds.
+    """
+    material = board.material_evaluation()
+
+    # Side-to-move is winning → draw is BAD for us
+    if material > 150:
+        return -300  # Penalize draw when we're ahead
+
+    # Side-to-move is losing → draw is GOOD for us
+    if material < -150:
+        return 150  # Reward draw when we're behind
+
+    return 0  # Roughly equal, draw is neutral
+
+
 def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[chess.Move]]:
     """
     Negamax search with alpha-beta pruning.
@@ -352,8 +405,9 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         raise TimeoutError()
 
     # -------- Draw detection --------
-    if is_draw_by_repetition(board) or board.can_claim_fifty_moves() or board.is_insufficient_material():
-        return 0, []
+    if is_draw_by_repetition(board) or board.can_claim_fifty_moves():
+        #print(f"Eapen, get_draw_score(board)={get_draw_score(board)}, dpeth={depth}, turn={board.turn}")
+        return get_draw_score(board), []
 
     key = board.zobrist_hash()
     alpha_orig = alpha
@@ -710,16 +764,20 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
 
                     board.push(move)
 
-                    # Principal variation first, then late moves with PVS
-                    if move_index == 0:
-                        score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
-                        score = -score
+                    if is_draw_by_repetition(board):
+                        score = get_draw_score(board)
+                        child_pv = []
                     else:
-                        score, child_pv = negamax(board, depth - 1, -alpha - 1, -alpha, allow_singular=True)
-                        score = -score
-                        if score > alpha:
+                        # Principal variation first, then late moves with PVS
+                        if move_index == 0:
                             score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
                             score = -score
+                        else:
+                            score, child_pv = negamax(board, depth - 1, -alpha - 1, -alpha, allow_singular=True)
+                            score = -score
+                            if score > alpha:
+                                score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
+                                score = -score
 
                     board.pop()
 
@@ -875,6 +933,13 @@ def main():
             if fen == "":
                 print("Type 'exit' to quit")
                 continue
+
+            #repeated_fen = "8/8/8/p6p/P3k1pP/6p1/8/5K2 w - - 20 59"
+            #board = chess.Board(repeated_fen)
+            #key = chess.polyglot.zobrist_hash(board)
+            #game_position_history[key] = game_position_history.get(key, 0) + 1
+            #game_position_history[key] = game_position_history.get(key, 0) + 1
+            #print("Eapen game_position_history.get(key, 0)=", game_position_history.get(key, 0))
 
             # Reset KPIs
             for key in kpi:
