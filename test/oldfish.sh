@@ -13,5 +13,5 @@ dir="$(dirname "$0")"
 
 ~/Temp/cutechess/build/cutechess-cli -engine cmd="$dir"/../../oldfish/uci_engine.sh name="$1" \
 -engine cmd="$dir"/../uci_engine.sh name="$2"  -pgnout /tmp/cutechess.pgn \
--each proto=uci tc=$3 timemargin=9999 -draw movenumber=40 movecount=5 score=50 \
--resign movecount=3 score=500 twosided=false -maxmoves 100 -recover -games $4 # -debug
+-each proto=uci tc="$3" timemargin=9999 -draw movenumber=40 movecount=5 score=50 \
+-resign movecount=3 score=500 twosided=false -maxmoves 100 -recover -games "$4" #-debug

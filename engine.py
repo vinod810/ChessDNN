@@ -14,24 +14,30 @@ from prepare_data import PIECE_VALUES
 # TODO support multiprocessing
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
-MAX_TIME = 30
+MAX_DEFAULT_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
-QS_TT_SUPPORTED = True
 curr_dir = Path(__file__).resolve().parent
 DNN_MODEL_FILEPATH = curr_dir / 'model' / 'model.keras'
+IS_DNN_ENABLED = True
 DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
-QS_DEPTH_MAX_DNN_EVAL = 10
 STAND_PAT_MAX_DNN_EVAL = 200
-TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
-ASPIRATION_WINDOW = 40
-MAX_AW_RETRIES = 3
-LMR_MOVE_THRESHOLD = 2
-LMR_MIN_DEPTH = 3  # minimum depth to apply LMR
-NULL_MOVE_REDUCTION = 3  # R value (usually 2 or 3)
-NULL_MOVE_MIN_DEPTH = 4
+QS_DEPTH_MAX_DNN_EVAL = 10
+
+QS_TT_SUPPORTED = True
 DELTA_PRUNING_QS_MIN_DEPTH = 6
 DELTA_PRUNING_MARGIN = 75
+TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
+
+ASPIRATION_WINDOW = 40
+MAX_AW_RETRIES = 3
+
+LMR_MOVE_THRESHOLD = 2
+LMR_MIN_DEPTH = 3  # minimum depth to apply LMR
+
+NULL_MOVE_REDUCTION = 3  # R value (usually 2 or 3)
+NULL_MOVE_MIN_DEPTH = 4
+
 SINGULAR_MARGIN = 130  # Score difference in centipawns to trigger singular extension
 SINGULAR_EXTENSION = 1  # Extra depth
 
@@ -293,7 +299,7 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         stand_pat = evaluate_material(board)
 
         is_dnn_eval = False
-        if (q_depth <= QS_DEPTH_MAX_DNN_EVAL
+        if (IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
                 and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
                 and board.is_quiet_position()):
@@ -308,7 +314,7 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
             return stand_pat, []  # ✅ Return stand_pat (it's the best we can do)
 
-        if (not is_dnn_eval
+        if (not is_dnn_eval and IS_DNN_ENABLED
                 and q_depth <= QS_DEPTH_MAX_DNN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
                 and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)

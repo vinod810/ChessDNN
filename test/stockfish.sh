@@ -1,6 +1,6 @@
 #!/bin/bash
 
-EXPECTED_ARGS=3
+EXPECTED_ARGS=2
 CUTECHESS_PATH=~/Temp/cutechess
 
 if [ "$#" -ne "$EXPECTED_ARGS" ]; then
