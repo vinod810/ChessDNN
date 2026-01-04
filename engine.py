@@ -11,11 +11,7 @@ from cached_board import CachedBoard
 from dnn_eval import INF  # Returns  evaluation using a DNN model.
 from prepare_data import PIECE_VALUES
 
-IS_NUMPY_EVAL = False
-if IS_NUMPY_EVAL:
-    from dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
-else:
-    from dnn_eval import dnn_eval
+curr_dir = Path(__file__).resolve().parent
 
 # TODO support multiprocessing
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
@@ -23,7 +19,11 @@ MAX_NEGAMAX_DEPTH = 20
 MAX_DEFAULT_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
-curr_dir = Path(__file__).resolve().parent
+IS_NUMPY_EVAL = True
+if IS_NUMPY_EVAL:
+    from dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
+else:
+    from dnn_eval import dnn_eval
 DNN_MODEL_FILEPATH = curr_dir / 'model' / 'model.keras'
 IS_DNN_ENABLED = True
 DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
