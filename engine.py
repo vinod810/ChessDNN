@@ -8,7 +8,7 @@ import chess
 import chess.polyglot
 
 from cached_board import CachedBoard
-from dnn_eval import INF  # Returns positional evaluation using a DNN model.
+from dnn_eval import INF  # Returns  evaluation using a DNN model.
 from prepare_data import PIECE_VALUES
 
 IS_NUMPY_EVAL = False
@@ -199,7 +199,7 @@ def move_score_q_search(board: CachedBoard, move) -> int:
             score += 10 * PIECE_VALUES[victim.piece_type] - PIECE_VALUES[attacker.piece_type]
 
     #if board.gives_check(move):
-    #    score += 50
+    #    score += 50 Hi
 
     return score
 
