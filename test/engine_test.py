@@ -461,12 +461,14 @@ def print_vars(var_names, module_name, local_scope=None):
 
 
 def dump_parameters():
-    print_vars(["IS_NUMPY_EVAL",
+    print_vars([
+        "IS_NUMPY_EVAL",
         "DNN_MODEL_FILEPATH",
         "IS_DNN_ENABLED",
+        "QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL",
+        "QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL",
         "DELTA_MAX_DNN_EVAL",
         "STAND_PAT_MAX_DNN_EVAL",
-        "QS_DEPTH_MAX_DNN_EVAL",
         "QS_TT_SUPPORTED",
         "DELTA_PRUNING_QS_MIN_DEPTH",
         "DELTA_PRUNING_MARGIN",

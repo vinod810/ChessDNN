@@ -27,9 +27,10 @@ else:
     from dnn_eval import dnn_eval
 DNN_MODEL_FILEPATH = curr_dir / f"../{HOME_DIR}" /'model' / 'model.keras'
 IS_DNN_ENABLED = True
+QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL = 1
+QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL = 10
 DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
-QS_DEPTH_MAX_DNN_EVAL = 10
 
 QS_TT_SUPPORTED = True
 DELTA_PRUNING_QS_MIN_DEPTH = 6
@@ -330,11 +331,14 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
     # -------- Stand pat (not valid when in check) --------
     if not is_check:
-        # TODO need QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL
-        stand_pat = evaluate_material(board)
-
         is_dnn_eval = False
-        if (IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL # todo rename to QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL
+        if IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL:
+            stand_pat = evaluate_dnn(board)
+            is_dnn_eval = True
+        else:
+            stand_pat = evaluate_material(board)
+
+        if (not is_dnn_eval and IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
                 and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL):
             stand_pat = evaluate_dnn(board)
@@ -349,7 +353,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             return stand_pat, []  # ✅ Return stand_pat (it's the best we can do)
 
         if (not is_dnn_eval and IS_DNN_ENABLED
-                and q_depth <= QS_DEPTH_MAX_DNN_EVAL
+                and q_depth <= QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
                 and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)):
             stand_pat = evaluate_dnn(board)
