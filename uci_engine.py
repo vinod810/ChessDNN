@@ -111,11 +111,24 @@ def uci_loop():
                 btime = int(tokens[tokens.index("btime") + 1])
                 winc = int(tokens[tokens.index("winc") + 1]) if "winc" in tokens else 0
                 binc = int(tokens[tokens.index("binc") + 1]) if "binc" in tokens else 0
-                movestogo = int(tokens[tokens.index("movestogo") + 1]) if "movestogo" in tokens else 30
+                movestogo = int(tokens[tokens.index("movestogo") + 1]) if "movestogo" in tokens else 40
 
                 time_left = wtime if board.turn else btime
                 increment = winc if board.turn else binc
-                movetime = max(0.05, (time_left / movestogo + increment * 0.8) / 1000 - 0.05)
+
+                # More conservative time management
+                # Use smaller fraction of remaining time, larger safety buffer
+                base_time = time_left / max(movestogo, 20)  # Don't divide by too few moves
+                with_increment = base_time + increment * 0.7
+
+                # Safety margins:
+                # - At least 100ms buffer for overhead
+                # - Never use more than 1/10th of remaining time in one move
+                # - Keep at least 500ms in reserve
+                max_for_move = (time_left - 500) / 10  # Never use more than 10% minus reserve
+
+                movetime = min(with_increment, max_for_move) / 1000.0  # Convert to seconds
+                movetime = max(0.1, movetime - 0.1)  # 100ms overhead buffer, 100ms minimum
 
             TimeControl.stop_search = False
 

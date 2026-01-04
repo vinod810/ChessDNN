@@ -8,10 +8,17 @@ import chess
 import chess.polyglot
 
 from cached_board import CachedBoard
-from dnn_eval import dnn_eval, INF  # Returns positional evaluation using a DNN model.
+from dnn_eval import INF  # Returns positional evaluation using a DNN model.
 from prepare_data import PIECE_VALUES
 
+IS_NUMPY_EVAL = False
+if IS_NUMPY_EVAL:
+    from dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
+else:
+    from dnn_eval import dnn_eval
+
 # TODO support multiprocessing
+# TODO Ensure all frequetly used board.methods() are cached
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_DEFAULT_TIME = 30
@@ -191,8 +198,8 @@ def move_score_q_search(board: CachedBoard, move) -> int:
         if victim and attacker:
             score += 10 * PIECE_VALUES[victim.piece_type] - PIECE_VALUES[attacker.piece_type]
 
-    if board.gives_check(move):
-        score += 50
+    #if board.gives_check(move):
+    #    score += 50
 
     return score
 

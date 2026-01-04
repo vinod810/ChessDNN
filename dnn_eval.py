@@ -1,7 +1,11 @@
+from typing import Any
+
 import numpy as np
 import tensorflow as tf
-
-from build_model import DNN_MODEL_FILEPATH, tanh_to_score
+from numpy import dtype, ndarray
+from numpy.typing import NDArray
+from typing import Any
+from build_model import tanh_to_score
 from cached_board import CachedBoard
 
 INF = 10_000
@@ -17,9 +21,10 @@ class DNNEvaluator:
         """Load model if not already loaded or if path changed."""
         if self._model is None or self._model_path != filepath:
             self._model = tf.keras.models.load_model(filepath)
+            self._model.summary()
             self._model_path = filepath
 
-    def evaluate(self, board: CachedBoard, model_filepath: str = DNN_MODEL_FILEPATH) -> int:
+    def evaluate(self, board: CachedBoard, model_filepath) -> int:
         """
         Evaluate position from side-to-move perspective.
 
@@ -33,9 +38,12 @@ class DNNEvaluator:
         board_repr = board.get_board_repr()
         board_repr = np.expand_dims(board_repr, axis=0)
 
-        score = self._model.predict(board_repr, verbose=0)[0][0]
-        score = tanh_to_score(score)
+        return self.dnn_eval_board_repr(board_repr)
 
+    def dnn_eval_board_repr(self, board_repr: NDArray[Any]) -> int:
+        # Direct call is MUCH faster for single samples
+        score = self._model(board_repr, training=False)[0][0].numpy()
+        score = tanh_to_score(score)
         return int(score)
 
 
@@ -43,7 +51,7 @@ class DNNEvaluator:
 _evaluator = DNNEvaluator()
 
 
-def dnn_eval(board: CachedBoard, model_filepath: str = DNN_MODEL_FILEPATH) -> int:
+def dnn_eval(board: CachedBoard, model_filepath) -> int:
     """
     Evaluate position using DNN model.
 

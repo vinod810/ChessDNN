@@ -9,9 +9,15 @@ if [ "$#" -ne "$EXPECTED_ARGS" ]; then
     exit 1
 fi
 
-dir="$(dirname "$0")"
+CMD_DIR="$(dirname "$0")"
+OUTFILE_TEMPLATE="/tmp/fileXXXXXX.pgn"
+OUTFILE=$(mktemp --dry-run "$OUTFILE_TEMPLATE")
+echo "PGN File: $OUTFILE"
 
-~/Temp/cutechess/build/cutechess-cli -engine cmd="$dir"/../../oldfish/uci_engine.sh name="$1" \
--engine cmd="$dir"/../uci_engine.sh name="$2"  -pgnout /tmp/cutechess.pgn \
+~/Temp/cutechess/build/cutechess-cli -engine cmd="$CMD_DIR"/../../oldfish/uci_engine.sh name="$1" \
+-engine cmd="$CMD_DIR"/../uci_engine.sh name="$2"  -pgnout "$OUTFILE" \
 -each proto=uci tc="$3" timemargin=9999 -draw movenumber=40 movecount=5 score=50 \
 -resign movecount=3 score=500 twosided=false -maxmoves 100 -recover -games "$4" #-debug
+
+echo "PGN File: $OUTFILE"
+
