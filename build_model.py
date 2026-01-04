@@ -6,7 +6,7 @@ from pathlib import Path
 
 from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE, board_repr_to_fen
 
-MAX_SHARDS = 12 # FIXME Use a smaller number for quicker hyper param tuning
+MAX_SHARDS = 37 # FIXME Use a smaller number for quicker hyper param tuning
 DATA_DIR = OUT_DIR
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.zlib")))[:MAX_SHARDS]
 TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))

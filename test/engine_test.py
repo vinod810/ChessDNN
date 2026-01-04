@@ -1,3 +1,4 @@
+import importlib
 import io
 import re
 import time
@@ -5,10 +6,8 @@ from contextlib import redirect_stdout
 
 import chess
 
-from engine import find_best_move, DELTA_MAX_DNN_EVAL, STAND_PAT_MAX_DNN_EVAL, TACTICAL_QS_MAX_DEPTH, \
-    ASPIRATION_WINDOW, MAX_AW_RETRIES, LMR_MOVE_THRESHOLD, LMR_MIN_DEPTH, NULL_MOVE_REDUCTION, NULL_MOVE_MIN_DEPTH, \
-    DELTA_PRUNING_QS_MIN_DEPTH, DELTA_PRUNING_MARGIN, SINGULAR_MARGIN, SINGULAR_EXTENSION, DNN_MODEL_FILEPATH, \
-    QS_TT_SUPPORTED, TimeControl
+import engine
+from engine import find_best_move, TimeControl
 
 # https://www.chessprogramming.org/Test-Positions
 win_at_chess_positions = \
@@ -432,16 +431,56 @@ test_suites = {
     "eigenmann": (eigenmann_rapid_engine_test, r'";', -1, 120)
 }
 
+def print_vars(var_names, module_name, local_scope=None):
+    local_scope = local_scope or {}
+    global_scope = globals()
+    module_vars = {}
+
+    if module_name:
+        try:
+            module = importlib.import_module(module_name)
+            module_vars = vars(module)
+        except ImportError:
+            module_vars = {}
+
+    for name in var_names:
+        if name in local_scope:
+            value = local_scope[name]
+            source = "local"
+        elif name in global_scope:
+            value = global_scope[name]
+            source = "global"
+        elif name in module_vars:
+            value = module_vars[name]
+            source = f"module:{module_name}"
+        else:
+            value = "<NOT FOUND>"
+            source = "missing"
+
+        print(f"{name} = {value}")
+
 
 def dump_parameters():
-    print(f"QS_TT_SUPPORTED={QS_TT_SUPPORTED}")
-    print(f"DNN_MODEL_FILEPATH={DNN_MODEL_FILEPATH}, DELTA_MAX_DNN_EVAL={DELTA_MAX_DNN_EVAL}")
-    print(f"STAND_PAT_MAX_DNN_EVAL={STAND_PAT_MAX_DNN_EVAL}, TACTICAL_QS_MAX_DEPTH={TACTICAL_QS_MAX_DEPTH}")
-    print(f"ASPIRATION_WINDOW={ASPIRATION_WINDOW}, MAX_AW_RETRIES={MAX_AW_RETRIES}")
-    print(f"LMR_MOVE_THRESHOLD={LMR_MOVE_THRESHOLD}, LMR_MIN_DEPTH={LMR_MIN_DEPTH}")
-    print(f"NULL_MOVE_REDUCTION={NULL_MOVE_REDUCTION}, NULL_MOVE_MIN_DEPTH={NULL_MOVE_MIN_DEPTH}")
-    print(f"DELTA_PRUNING_QS_MIN_DEPTH={DELTA_PRUNING_QS_MIN_DEPTH}, DELTA_PRUNING_MARGIN={DELTA_PRUNING_MARGIN}")
-    print(f"SINGULAR_MARGIN={SINGULAR_MARGIN}, SINGULAR_EXTENSION={SINGULAR_EXTENSION}")
+    print_vars(["IS_NUMPY_EVAL",
+        "DNN_MODEL_FILEPATH",
+        "IS_DNN_ENABLED",
+        "DELTA_MAX_DNN_EVAL",
+        "STAND_PAT_MAX_DNN_EVAL",
+        "QS_DEPTH_MAX_DNN_EVAL",
+        "QS_TT_SUPPORTED",
+        "DELTA_PRUNING_QS_MIN_DEPTH",
+        "DELTA_PRUNING_MARGIN",
+        "TACTICAL_QS_MAX_DEPTH",
+        "ASPIRATION_WINDOW",
+        "MAX_AW_RETRIES",
+        "LMR_MOVE_THRESHOLD",
+        "LMR_MIN_DEPTH",
+        "NULL_MOVE_REDUCTION",
+        "NULL_MOVE_MIN_DEPTH",
+        "SINGULAR_MARGIN",
+        "SINGULAR_EXTENSION",
+        "ESTIMATED_BRANCHING_FACTOR",
+        "TIME_SAFETY_MARGIN"], "engine")
 
 
 def run_engine_tests(test_suite):
