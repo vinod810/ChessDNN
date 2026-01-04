@@ -4,11 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Numpy DNN - passed=200, success-rate=66.67%">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="print vars">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model/model.keras" beforeDir="false" afterPath="$PROJECT_DIR$/model/model.keras" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -111,14 +110,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00026" summary="README">
-      <option name="closed" value="true" />
-      <created>1766703899189</created>
-      <option name="number" value="00026" />
-      <option name="presentableId" value="LOCAL-00026" />
-      <option name="project" value="LOCAL" />
-      <updated>1766703899189</updated>
     </task>
     <task id="LOCAL-00027" summary="README">
       <option name="closed" value="true" />
@@ -504,7 +495,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767547163416</updated>
     </task>
-    <option name="localTasksCounter" value="75" />
+    <task id="LOCAL-00075" summary="print vars">
+      <option name="closed" value="true" />
+      <created>1767550373255</created>
+      <option name="number" value="00075" />
+      <option name="presentableId" value="LOCAL-00075" />
+      <option name="project" value="LOCAL" />
+      <updated>1767550373255</updated>
+    </task>
+    <option name="localTasksCounter" value="76" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -519,7 +518,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Claude - 2" />
     <MESSAGE value="SINGULAR_MARGIN=130,81.85" />
     <MESSAGE value="cached_board.py" />
     <MESSAGE value="cached board_repr" />
@@ -544,7 +542,8 @@
     <MESSAGE value="total=300, passed=187, success-rate=62.33%" />
     <MESSAGE value="More caching total=300, passed=189, success-rate=63.0%" />
     <MESSAGE value="Numpy DNN - passed=200, success-rate=66.67%" />
-    <option name="LAST_COMMIT_MESSAGE" value="Numpy DNN - passed=200, success-rate=66.67%" />
+    <MESSAGE value="print vars" />
+    <option name="LAST_COMMIT_MESSAGE" value="print vars" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -553,11 +552,6 @@
           <url>file://$PROJECT_DIR$/cached_board.py</url>
           <line>129</line>
           <option name="timeStamp" value="2" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/engine.py</url>
-          <line>83</line>
-          <option name="timeStamp" value="3" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>

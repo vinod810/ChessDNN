@@ -329,10 +329,11 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
     # -------- Stand pat (not valid when in check) --------
     if not is_check:
+        # TODO need QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL
         stand_pat = evaluate_material(board)
 
         is_dnn_eval = False
-        if (IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL
+        if (IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL # todo rename to QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
                 and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL):
             stand_pat = evaluate_dnn(board)
