@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="ChessDNN" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="ChessDNN" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="$USER_HOME$/anaconda3/envs/neurofish" project-jdk-type="Python SDK" />
 </project>

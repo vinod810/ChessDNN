@@ -1,12 +1,24 @@
-name: ChessDNN
+name: neurofish
 channels:
-  - defaults
   - conda-forge
+  - defaults
 dependencies:
-  - python=3.13
-  - chess
+  # Python version
+  - python>=3.10
+
+  # Core dependencies
   - numpy
-  - tensorflow
+  - tensorflow>=2.10
+
+  # Chess library
+  - python-chess
+
+  # Data processing
   - zstandard
+
+  # Optional: Numba for JIT compilation (performance optimization)
   - numba
-prefix: /home/eapen/anaconda3/envs/neurofish
+
+  # Pip dependencies (if any conda packages unavailable)
+  # - pip:
+  #   - package-name
