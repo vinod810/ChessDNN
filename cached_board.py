@@ -3,13 +3,15 @@ Enhanced CachedBoard - Efficient chess board with intelligent caching.
 
 This module provides a chess.Board subclass with caching for expensive computations,
 incremental Zobrist hash updates, and piece-square table evaluation.
+
+OPTIMIZED VERSION: Added pre-computation of move info (is_capture, gives_check, etc.)
 """
 
 import chess
 import chess.polyglot
 import numpy as np
-from typing import Optional, List, Iterator, Dict
-from dataclasses import dataclass
+from typing import Optional, List, Iterator, Dict, Tuple
+from dataclasses import dataclass, field
 from copy import deepcopy
 
 from prepare_data import BOARD_SHAPE, PIECE_TO_PLANE, PIECE_VALUES
@@ -134,6 +136,11 @@ class CacheState:
     is_endgame: Optional[bool] = None
     gives_check_cache: Optional[Dict[chess.Move, bool]] = None
     board_repr: Optional[np.ndarray] = None
+    # NEW: Pre-computed move info for all legal moves
+    move_is_capture: Optional[Dict[chess.Move, bool]] = None
+    move_gives_check: Optional[Dict[chess.Move, bool]] = None
+    move_victim_type: Optional[Dict[chess.Move, Optional[int]]] = None
+    move_attacker_type: Optional[Dict[chess.Move, Optional[int]]] = None
 
     def clear(self):
         self.zobrist_hash = None
@@ -152,6 +159,11 @@ class CacheState:
         self.is_endgame = None
         self.gives_check_cache = None
         self.board_repr = None
+        # Clear new fields
+        self.move_is_capture = None
+        self.move_gives_check = None
+        self.move_victim_type = None
+        self.move_attacker_type = None
 
 
 @dataclass(slots=True)
@@ -360,10 +372,109 @@ class CachedBoard(chess.Board):
             return len(self._cache.legal_moves) > 0
         return any(True for _ in super().legal_moves)
 
+    # ==================== NEW OPTIMIZED METHODS ====================
+
+    def precompute_move_info(self) -> None:
+        """
+        Pre-compute is_capture, gives_check, victim_type, and attacker_type
+        for all legal moves in a single pass.
+
+        This is much faster than computing these individually when scoring moves,
+        since we avoid repeated lookups and can batch the work.
+        """
+        if self._cache.move_is_capture is not None:
+            return  # Already computed
+
+        self._cache.move_is_capture = {}
+        self._cache.move_gives_check = {}
+        self._cache.move_victim_type = {}
+        self._cache.move_attacker_type = {}
+
+        # Get legal moves (also cached)
+        legal_moves = self.get_legal_moves_list()
+
+        # Pre-fetch occupied bitboard for fast capture detection
+        occupied = self.occupied
+
+        for move in legal_moves:
+            # Fast capture detection using bitboard
+            to_sq = move.to_square
+            is_cap = bool(occupied & chess.BB_SQUARES[to_sq]) or self.is_en_passant(move)
+            self._cache.move_is_capture[move] = is_cap
+
+            # gives_check is expensive - compute once
+            self._cache.move_gives_check[move] = super().gives_check(move)
+
+            # Victim and attacker types for MVV-LVA scoring
+            if is_cap:
+                if self.is_en_passant(move):
+                    self._cache.move_victim_type[move] = chess.PAWN
+                else:
+                    victim = self.piece_at(to_sq)
+                    self._cache.move_victim_type[move] = victim.piece_type if victim else None
+            else:
+                self._cache.move_victim_type[move] = None
+
+            attacker = self.piece_at(move.from_square)
+            self._cache.move_attacker_type[move] = attacker.piece_type if attacker else None
+
+    def is_capture_cached(self, move: chess.Move) -> bool:
+        """Return cached is_capture result, computing if necessary."""
+        if self._cache.move_is_capture is None:
+            self.precompute_move_info()
+        result = self._cache.move_is_capture.get(move)
+        if result is None:
+            # Move not in legal moves list - compute directly
+            return self.is_capture(move)
+        return result
+
+    def gives_check_cached(self, move: chess.Move) -> bool:
+        """Return cached gives_check result, computing if necessary."""
+        if self._cache.move_gives_check is None:
+            self.precompute_move_info()
+        result = self._cache.move_gives_check.get(move)
+        if result is None:
+            # Move not in legal moves list - compute directly
+            return super().gives_check(move)
+        return result
+
+    def get_victim_type(self, move: chess.Move) -> Optional[int]:
+        """Return the piece type of the captured piece, or None if not a capture."""
+        if self._cache.move_victim_type is None:
+            self.precompute_move_info()
+        return self._cache.move_victim_type.get(move)
+
+    def get_attacker_type(self, move: chess.Move) -> Optional[int]:
+        """Return the piece type of the moving piece."""
+        if self._cache.move_attacker_type is None:
+            self.precompute_move_info()
+        return self._cache.move_attacker_type.get(move)
+
+    def get_move_info(self, move: chess.Move) -> Tuple[bool, bool, Optional[int], Optional[int]]:
+        """
+        Return all cached move info at once: (is_capture, gives_check, victim_type, attacker_type)
+
+        This is useful when you need multiple pieces of info about the same move.
+        """
+        if self._cache.move_is_capture is None:
+            self.precompute_move_info()
+        return (
+            self._cache.move_is_capture.get(move, False),
+            self._cache.move_gives_check.get(move, False),
+            self._cache.move_victim_type.get(move),
+            self._cache.move_attacker_type.get(move)
+        )
+
+    # ==================== END NEW METHODS ====================
+
     def is_any_capture_available(self) -> bool:
         if self._cache.is_any_capture_available is None:
-            self._cache.is_any_capture_available = any(
-                self.is_capture(m) for m in self.get_legal_moves_list())
+            # Use optimized path if move info is already computed
+            if self._cache.move_is_capture is not None:
+                self._cache.is_any_capture_available = any(self._cache.move_is_capture.values())
+            else:
+                self._cache.is_any_capture_available = any(
+                    self.is_capture(m) for m in self.get_legal_moves_list())
         return self._cache.is_any_capture_available
 
     is_any_move_capture = is_any_capture_available
@@ -389,20 +500,36 @@ class CachedBoard(chess.Board):
         if self.is_check():
             return False
 
+        # Use precomputed move info if available
+        if self._cache.move_is_capture is not None and self._cache.move_gives_check is not None:
+            for move in self.get_legal_moves_list():
+                if self._cache.move_is_capture.get(move, False):
+                    return False
+                if move.promotion:
+                    return False
+                if self._cache.move_gives_check.get(move, False):
+                    return False
+            return True
+
+        # Fallback to direct computation
         for move in self.get_legal_moves_list():
             if self.is_capture(move):
                 return False
             if move.promotion:
                 return False
-            if self.gives_check(move):  # Cached, so not repeated # TODO consider removing
+            if self.gives_check(move):
                 return False
 
         return True
 
     def get_capture_moves(self) -> List[chess.Move]:
+        # Use precomputed info if available
+        if self._cache.move_is_capture is not None:
+            return [m for m in self.get_legal_moves_list() if self._cache.move_is_capture.get(m, False)]
         return [m for m in self.get_legal_moves_list() if self.is_capture(m)]
 
     def gives_check(self, move: chess.Move) -> bool:
+        """Original gives_check with per-move caching (kept for compatibility)."""
         if self._cache.gives_check_cache is None:
             self._cache.gives_check_cache = {}
         if move not in self._cache.gives_check_cache:
@@ -707,6 +834,7 @@ class CachedBoard(chess.Board):
             "legal_moves": c.legal_moves is not None,
             "is_check": c.is_check is not None,
             "material_evaluation": c.material_evaluation is not None,
+            "move_info_precomputed": c.move_is_capture is not None,
         }
 
 
@@ -782,6 +910,22 @@ if __name__ == "__main__":
     print(f"Legal moves: {len(board.get_legal_moves_list())}")
     print(f"Is check: {board.is_check()}")
     print(f"Has non-pawn material: {board.has_non_pawn_material()}")
+
+    # Test new precomputed move info
+    print(f"\n=== Precomputed Move Info Tests ===")
+    board = CachedBoard()
+    board.push_san("e4")
+    board.push_san("d5")  # Position where exd5 is possible
+
+    board.precompute_move_info()
+    print(f"Cache info: {board.get_cache_info()}")
+
+    # Find the exd5 move
+    for move in board.get_legal_moves_list():
+        if move.uci() == "e4d5":
+            is_cap, gives_chk, victim, attacker = board.get_move_info(move)
+            print(f"Move e4d5: is_capture={is_cap}, gives_check={gives_chk}, victim={victim}, attacker={attacker}")
+            break
 
     # Test board representation
     print(f"\n=== Board Representation Tests ===")

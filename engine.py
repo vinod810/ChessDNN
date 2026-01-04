@@ -180,7 +180,7 @@ def evaluate_dnn(board: CachedBoard) -> int:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    #assert (board.is_quiet_position())
+    # assert (board.is_quiet_position())
     kpi['dnn_evals'] += 1
     score = dnn_eval(board, DNN_MODEL_FILEPATH)
 
@@ -188,48 +188,66 @@ def evaluate_dnn(board: CachedBoard) -> int:
     return score
 
 
-def move_score_q_search(board: CachedBoard, move) -> int:
+def move_score_q_search(board: CachedBoard, move: chess.Move) -> int:
+    """
+    Score a move for quiescence search ordering.
+    Uses cached move info for efficiency.
+    """
     score = 0
 
-    if board.is_capture(move):
-        victim = board.piece_at(move.to_square)
-        attacker = board.piece_at(move.from_square)
-        if victim and attacker:
-            score += 10 * PIECE_VALUES[victim.piece_type] - PIECE_VALUES[attacker.piece_type]
-
-    #if board.gives_check(move):
-    #    score += 50 Hi
+    # Use cached is_capture and piece types
+    if board.is_capture_cached(move):
+        victim_type = board.get_victim_type(move)
+        attacker_type = board.get_attacker_type(move)
+        if victim_type and attacker_type:
+            score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
 
     return score
 
 
-def move_score(board, move, depth):
+def move_score(board: CachedBoard, move: chess.Move, depth: int) -> int:
+    """
+    Score a move for move ordering.
+    Uses cached move info for efficiency.
+    """
     score = 0
 
+    # Use cached is_capture
+    is_capture = board.is_capture_cached(move)
+
     # Killer moves (quiet moves only)
-    if not board.is_capture(move) and depth is not None and 0 <= depth < len(killer_moves):
+    if not is_capture and depth is not None and 0 <= depth < len(killer_moves):
         if move == killer_moves[depth][0]:
             score += 9000
         elif move == killer_moves[depth][1]:
             score += 8000
 
-    if board.is_capture(move):
-        victim = board.piece_at(move.to_square)
-        attacker = board.piece_at(move.from_square)
-        if victim and attacker:
-            score += 10 * PIECE_VALUES[victim.piece_type] - PIECE_VALUES[attacker.piece_type]
+    if is_capture:
+        # Use cached victim and attacker types
+        victim_type = board.get_victim_type(move)
+        attacker_type = board.get_attacker_type(move)
+        if victim_type and attacker_type:
+            score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
 
     score += history_heuristic.get(
         (move.from_square, move.to_square), 0
     )
 
-    if board.gives_check(move):
+    # Use cached gives_check
+    if board.gives_check_cached(move):
         score += 50
 
     return score
 
 
-def ordered_moves(board, depth, pv_move=None, tt_move=None):
+def ordered_moves(board: CachedBoard, depth: int, pv_move=None, tt_move=None):
+    """
+    Return legal moves ordered by expected quality.
+    Pre-computes move info for efficient scoring.
+    """
+    # Ensure move info is precomputed for this position
+    board.precompute_move_info()
+
     scored_moves = []
     for move in board.get_legal_moves_list():
         if move == tt_move:
@@ -245,10 +263,19 @@ def ordered_moves(board, depth, pv_move=None, tt_move=None):
     return [move for _, move in scored_moves]
 
 
-def ordered_moves_q_search(board):
-    moves = list(board.get_legal_moves_list())
-    moves.sort(key=lambda m: move_score_q_search(board, m), reverse=True)
-    return moves
+def ordered_moves_q_search(board: CachedBoard):
+    """
+    Return legal moves ordered for quiescence search.
+    Pre-computes move info for efficient scoring.
+    """
+    # Ensure move info is precomputed for this position
+    board.precompute_move_info()
+
+    # Use the already-cached legal moves list (don't create a copy)
+    moves = board.get_legal_moves_list()
+    moves_with_scores = [(move_score_q_search(board, m), m) for m in moves]
+    moves_with_scores.sort(key=lambda x: x[0], reverse=True)
+    return [m for _, m in moves_with_scores]
 
 
 def should_stop_search(current_depth: int) -> bool:
@@ -264,7 +291,7 @@ def should_stop_search(current_depth: int) -> bool:
     return False
 
 
-def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
+def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple[int, List[chess.Move]]:
     """
     Quiescence search.
 
@@ -331,24 +358,28 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
 
     moves_searched = 0
 
+    # Pre-compute move info for this position
+    board.precompute_move_info()
+
     for move in ordered_moves_q_search(board):
         if not is_check:
-            # TODO cache is_capture(move) in CachedBoard
-            is_capture_move = board.is_capture(move)
+            # Use cached is_capture
+            is_capture_move = board.is_capture_cached(move)
             # If the move gives check and depth < TACTICAL_QS_MAX_DEPTH, go ahead with
             # evaluation
             if not is_capture_move:
                 if q_depth > TACTICAL_QS_MAX_DEPTH:
                     continue
-                if not board.gives_check(move):  # Note gives_check() is cached in CachedBoard
+                # Use cached gives_check
+                if not board.gives_check_cached(move):
                     continue
 
             # -------- Delta pruning (only when not in check) --------
             if (q_depth >= DELTA_PRUNING_QS_MIN_DEPTH and is_capture_move
-                    and not board.gives_check(move)):
-                victim = board.piece_at(move.to_square)
-                if victim:
-                    gain = PIECE_VALUES[victim.piece_type]
+                    and not board.gives_check_cached(move)):
+                victim_type = board.get_victim_type(move)
+                if victim_type:
+                    gain = PIECE_VALUES[victim_type]
                     if best_score + gain + DELTA_PRUNING_MARGIN < alpha:  # ✅ Use best_score
                         continue
 
@@ -400,7 +431,8 @@ def get_draw_score(board: CachedBoard) -> int:
     return 0
 
 
-def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[chess.Move]]:
+def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singular: bool = True) -> Tuple[
+    int, List[chess.Move]]:
     """
     Negamax search with alpha-beta pruning.
 
@@ -413,7 +445,7 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
 
     # -------- Draw detection --------
     if is_draw_by_repetition(board) or board.can_claim_fifty_moves():
-        #print(f"Eapen, get_draw_score(board)={get_draw_score(board)}, dpeth={depth}, turn={board.turn}")
+        # print(f"Eapen, get_draw_score(board)={get_draw_score(board)}, dpeth={depth}, turn={board.turn}")
         return get_draw_score(board), []
 
     key = board.zobrist_hash()
@@ -507,8 +539,9 @@ def negamax(board, depth, alpha, beta, allow_singular=True) -> Tuple[int, List[c
         return 0, []
 
     for move_index, move in enumerate(moves):
-        is_capture = board.is_capture(move)
-        gives_check = board.gives_check(move)
+        # Use cached move info
+        is_capture = board.is_capture_cached(move)
+        gives_check = board.gives_check_cached(move)
 
         board.push(move)
         child_in_check = board.is_check()
@@ -941,12 +974,12 @@ def main():
                 print("Type 'exit' to quit")
                 continue
 
-            #repeated_fen = "8/8/8/p6p/P3k1pP/6p1/8/5K2 w - - 20 59"
-            #board = chess.Board(repeated_fen)
-            #key = chess.polyglot.zobrist_hash(board)
-            #game_position_history[key] = game_position_history.get(key, 0) + 1
-            #game_position_history[key] = game_position_history.get(key, 0) + 1
-            #print("Eapen game_position_history.get(key, 0)=", game_position_history.get(key, 0))
+            # repeated_fen = "8/8/8/p6p/P3k1pP/6p1/8/5K2 w - - 20 59"
+            # board = chess.Board(repeated_fen)
+            # key = chess.polyglot.zobrist_hash(board)
+            # game_position_history[key] = game_position_history.get(key, 0) + 1
+            # game_position_history[key] = game_position_history.get(key, 0) + 1
+            # print("Eapen game_position_history.get(key, 0)=", game_position_history.get(key, 0))
 
             # Reset KPIs
             for key in kpi:
