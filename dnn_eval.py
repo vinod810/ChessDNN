@@ -1,11 +1,8 @@
-from typing import Any
-
 import numpy as np
 import tensorflow as tf
-from numpy import dtype, ndarray
 from numpy.typing import NDArray
 from typing import Any
-from build_model import tanh_to_score
+from build_model import tanh_to_score, DNN_MODEL_FILEPATH
 from cached_board import CachedBoard
 
 INF = 10_000
@@ -76,7 +73,7 @@ def main():
                 break
 
             board = CachedBoard(fen)
-            score = dnn_eval(board)
+            score = dnn_eval(board, DNN_MODEL_FILEPATH)
             print(f"Predicted score: {score} cp")
             print(f"Side to move: {'White' if board.turn else 'Black'}")
 

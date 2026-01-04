@@ -33,7 +33,7 @@ QS_DEPTH_MAX_DNN_EVAL = 10
 QS_TT_SUPPORTED = True
 DELTA_PRUNING_QS_MIN_DEPTH = 6
 DELTA_PRUNING_MARGIN = 75
-TACTICAL_QS_MAX_DEPTH = 5  # TODO delete me After this QS depth, only captures are considered, i.e. no checks or promotions.
+TACTICAL_QS_MAX_DEPTH = 5
 
 ASPIRATION_WINDOW = 40
 MAX_AW_RETRIES = 3
@@ -180,7 +180,7 @@ def evaluate_dnn(board: CachedBoard) -> int:
         kpi['dec_hits'] += 1
         return dnn_eval_cache[key]
 
-    assert (board.is_quiet_position())
+    #assert (board.is_quiet_position())
     kpi['dnn_evals'] += 1
     score = dnn_eval(board, DNN_MODEL_FILEPATH)
 
@@ -307,8 +307,7 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         is_dnn_eval = False
         if (IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
-                and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL
-                and board.is_quiet_position()):
+                and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL):
             stand_pat = evaluate_dnn(board)
             is_dnn_eval = True
 
@@ -323,8 +322,7 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
         if (not is_dnn_eval and IS_DNN_ENABLED
                 and q_depth <= QS_DEPTH_MAX_DNN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
-                and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)
-                and board.is_quiet_position()):
+                and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)):
             stand_pat = evaluate_dnn(board)
 
         best_score = stand_pat  # ✅ Initialize best_score with stand_pat
@@ -335,15 +333,18 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
 
     for move in ordered_moves_q_search(board):
         if not is_check:
-            # TODO cache is_capture locally
-            if not board.is_capture(move):
+            # TODO cache is_capture(move) in CachedBoard
+            is_capture_move = board.is_capture(move)
+            # If the move gives check and depth < TACTICAL_QS_MAX_DEPTH, go ahead with
+            # evaluation
+            if not is_capture_move:
                 if q_depth > TACTICAL_QS_MAX_DEPTH:
                     continue
-                if not board.gives_check(move):  # Note  gives_check is cached in CachedBoard
+                if not board.gives_check(move):  # Note gives_check() is cached in CachedBoard
                     continue
 
             # -------- Delta pruning (only when not in check) --------
-            if (q_depth >= DELTA_PRUNING_QS_MIN_DEPTH and board.is_capture(move)
+            if (q_depth >= DELTA_PRUNING_QS_MIN_DEPTH and is_capture_move
                     and not board.gives_check(move)):
                 victim = board.piece_at(move.to_square)
                 if victim:

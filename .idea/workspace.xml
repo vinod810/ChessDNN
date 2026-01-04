@@ -4,12 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="environment.yml">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="prepare-data.py all moves">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dnn_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/dnn_eval.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model/model.keras" beforeDir="false" afterPath="$PROJECT_DIR$/model/model.keras" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -112,14 +112,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00022" summary="QS delta pruning -undo">
-      <option name="closed" value="true" />
-      <created>1766688238676</created>
-      <option name="number" value="00022" />
-      <option name="presentableId" value="LOCAL-00022" />
-      <option name="project" value="LOCAL" />
-      <updated>1766688238676</updated>
     </task>
     <task id="LOCAL-00023" summary="time control">
       <option name="closed" value="true" />
@@ -505,7 +497,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767507862602</updated>
     </task>
-    <option name="localTasksCounter" value="71" />
+    <task id="LOCAL-00071" summary="prepare-data.py all moves">
+      <option name="closed" value="true" />
+      <created>1767539972054</created>
+      <option name="number" value="00071" />
+      <option name="presentableId" value="LOCAL-00071" />
+      <option name="project" value="LOCAL" />
+      <updated>1767539972054</updated>
+    </task>
+    <option name="localTasksCounter" value="72" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -520,7 +520,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Early break from test" />
     <MESSAGE value="Printing parameters to aid testing" />
     <MESSAGE value="Optimization uptoLMR_MOVE_THRESHOLD=2 from bottom. total=300, passed=193, success-rate=64.33%" />
     <MESSAGE value="Claude - 1" />
@@ -545,7 +544,8 @@
     <MESSAGE value="total=300, passed=220, success-rate=73.33%" />
     <MESSAGE value="cond env neurofish" />
     <MESSAGE value="environment.yml" />
-    <option name="LAST_COMMIT_MESSAGE" value="environment.yml" />
+    <MESSAGE value="prepare-data.py all moves" />
+    <option name="LAST_COMMIT_MESSAGE" value="prepare-data.py all moves" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -564,10 +564,6 @@
           <url>file://$PROJECT_DIR$/engine.py</url>
           <line>164</line>
           <option name="timeStamp" value="4" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/build_model.py</url>
-          <option name="timeStamp" value="6" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
