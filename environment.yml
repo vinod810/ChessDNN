@@ -9,6 +9,4 @@ dependencies:
   - tensorflow
   - zstandard
   - numba
-prefix: /home/eapen/anaconda3/envs/ChessDNN
-
-# TODO rename to neurofish
+prefix: /home/eapen/anaconda3/envs/neurofish

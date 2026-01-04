@@ -18,7 +18,6 @@ else:
     from dnn_eval import dnn_eval
 
 # TODO support multiprocessing
-# TODO Ensure all frequetly used board.methods() are cached
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_DEFAULT_TIME = 30

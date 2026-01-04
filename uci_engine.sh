@@ -6,5 +6,5 @@ export CUDA_VISIBLE_DEVICES=-1  # Optional: disable GPU if not needed
 
 cd "$(dirname "$0")" # cd to the directory of this script
 source ~/anaconda3/etc/profile.d/conda.sh
-conda activate ChessDNN
+conda activate neurofish
 exec python uci_engine.py
