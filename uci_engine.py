@@ -6,11 +6,11 @@ import chess
 import chess.polyglot
 
 from engine import (find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache,
-                    clear_game_history, game_position_history)
+                    clear_game_history, game_position_history, HOME_DIR)
 from book_move import init_opening_book, get_book_move
 
-curr_dir = Path(__file__).resolve().parent
-DEFAULT_BOOK_PATH = curr_dir / 'book' / 'komodo.bin'
+CURR_DIR = Path(__file__).resolve().parent
+DEFAULT_BOOK_PATH = CURR_DIR / f"../{HOME_DIR}" / 'book' / 'komodo.bin'
 
 search_thread = None
 use_book = True

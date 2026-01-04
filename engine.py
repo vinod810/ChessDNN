@@ -14,6 +14,7 @@ from prepare_data import PIECE_VALUES
 curr_dir = Path(__file__).resolve().parent
 
 # TODO support multiprocessing
+HOME_DIR = "ChessDNN"
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_DEFAULT_TIME = 30
@@ -24,7 +25,7 @@ if IS_NUMPY_EVAL:
     from dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
 else:
     from dnn_eval import dnn_eval
-DNN_MODEL_FILEPATH = curr_dir / 'model' / 'model.keras'
+DNN_MODEL_FILEPATH = curr_dir / f"../{HOME_DIR}" /'model' / 'model.keras'
 IS_DNN_ENABLED = True
 DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
 STAND_PAT_MAX_DNN_EVAL = 200
