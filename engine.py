@@ -33,7 +33,7 @@ QS_DEPTH_MAX_DNN_EVAL = 10
 QS_TT_SUPPORTED = True
 DELTA_PRUNING_QS_MIN_DEPTH = 6
 DELTA_PRUNING_MARGIN = 75
-TACTICAL_QS_MAX_DEPTH = 5  # After this QS depth, only captures are considered, i.e. no checks or promotions.
+TACTICAL_QS_MAX_DEPTH = 5  # TODO delete me After this QS depth, only captures are considered, i.e. no checks or promotions.
 
 ASPIRATION_WINDOW = 40
 MAX_AW_RETRIES = 3
@@ -335,17 +335,16 @@ def quiescence(board, alpha, beta, q_depth) -> Tuple[int, List[chess.Move]]:
 
     for move in ordered_moves_q_search(board):
         if not is_check:
+            # TODO cache is_capture locally
             if not board.is_capture(move):
                 if q_depth > TACTICAL_QS_MAX_DEPTH:
                     continue
-                if not board.gives_check(move):
+                if not board.gives_check(move):  # Note  gives_check is cached in CachedBoard
                     continue
 
             # -------- Delta pruning (only when not in check) --------
-            if (board.is_capture(move)
-                    and not board.gives_check(move)
-                    and q_depth >= DELTA_PRUNING_QS_MIN_DEPTH):
-
+            if (q_depth >= DELTA_PRUNING_QS_MIN_DEPTH and board.is_capture(move)
+                    and not board.gives_check(move)):
                 victim = board.piece_at(move.to_square)
                 if victim:
                     gain = PIECE_VALUES[victim.piece_type]

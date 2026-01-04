@@ -2,6 +2,7 @@ import io
 import os
 import queue
 import sys
+import threading
 import multiprocessing as mp
 from typing import Iterable, Tuple, List
 from collections import Counter
@@ -15,22 +16,21 @@ import zstandard as zstd
 # Planes 0-5: "Our" pieces (side to move)
 # Planes 6-11: "Their" pieces (opponent)
 # Board flipped vertically when Black to move
-  #TODO read/processing in parallel or divide the file among all the workers
 BOARD_SHAPE = (12, 8, 8)
 
 SHARD_SIZE = 1000_000  # samples per file
 MAX_SHARDS = 1000
-COMPRESSION = "GZIP"
+COMPRESSION = "ZLIB"
 OUT_DIR = "tfrecords"
 TANH_SCALE = 400  # 1200(CP) = 3 = ~pi = 0.99
 MAX_SCORE = 10 * TANH_SCALE  # tanh(10) is almost 1
 MATE_FACTOR = 100
 MAX_MATE_DEPTH = 5
 MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
-MAX_MATERIAL_IMBALANCE = 250  # Skip positions with material imbalance > 250 cp
+MAX_MATERIAL_IMBALANCE = 300  # Skip positions with material imbalance
 
 # Multiprocessing settings
-NUM_WORKERS = min(5, max(1, mp.cpu_count() - 1))  # Leave one core free, cap at 5
+NUM_WORKERS = min(4, max(1, mp.cpu_count() - 1))  # Leave one core free, cap at 5
 BATCH_SIZE = 100  # Games per batch sent to workers
 QUEUE_MAX_SIZE = 1000  # Max items in result queue
 
@@ -184,44 +184,56 @@ def get_board_repr_and_material(board: chess.Board) -> Tuple[np.ndarray, int]:
     return planes, abs(white_material - black_material)
 
 
-def is_quiet_position(board: chess.Board) -> bool:
-    """
-    Check if a position is quiet (suitable for static evaluation).
-
-    A position is quiet when:
-    - Not in check
-    - No captures available
-    - No checks available
-    - No promotions available
-    """
-    if board.is_check():
-        return False
-
-    # Fast check: pawn on 7th rank = possible promotion
-    our_pawns = board.pawns & board.occupied_co[board.turn]
-    promotion_rank = chess.BB_RANK_7 if board.turn else chess.BB_RANK_2
-    if our_pawns & promotion_rank:
-        return False
-
-    for move in board.legal_moves:
-        if board.is_capture(move):
-            return False
-        if board.gives_check(move):
-            return False
-
-    return True
+# def is_quiet_position(board: chess.Board) -> bool:
+#     """
+#     Check if a position is quiet (suitable for static evaluation).
+#
+#     A position is quiet when:
+#     - Not in check
+#     - No captures available
+#     - No checks available
+#     - No promotions available
+#     """
+#     if board.is_check():
+#         return False
+#
+#     # Fast check: pawn on 7th rank = possible promotion
+#     our_pawns = board.pawns & board.occupied_co[board.turn]
+#     promotion_rank = chess.BB_RANK_7 if board.turn else chess.BB_RANK_2
+#     if our_pawns & promotion_rank:
+#         return False
+#
+#     for move in board.legal_moves:
+#         if board.is_capture(move):
+#             return False
+#         if board.gives_check(move):
+#             return False
+#
+#     return True
 
 
 def is_drawn_position(board: chess.Board) -> bool:
     """
     Check if a position is a draw or game is over.
 
+    Optimized version that skips expensive threefold repetition check.
+    For training data purposes, exact threefold detection isn't critical.
+
     Returns True if:
-    - Game is over (checkmate, stalemate, insufficient material,
-      fivefold repetition, seventy-five move rule)
-    - Draw can be claimed (threefold repetition, fifty-move rule)
+    - Checkmate or stalemate
+    - Insufficient material
+    - Fifty-move rule (halfmove clock >= 100)
     """
-    return board.is_game_over() or board.can_claim_draw()
+    if board.is_checkmate() or board.is_stalemate():
+        return True
+    if board.is_insufficient_material():
+        return True
+    if board.halfmove_clock >= 100:  # Fifty-move rule
+        return True
+
+    # Note: Can claim draw is computationally too expensive.
+
+    return False
 
 
 # ----- TF Example Helpers -----
@@ -242,12 +254,12 @@ def serialize(board: np.ndarray, score: float) -> bytes:
     return example.SerializeToString()
 
 
-def process_game_pgn(pgn_text: str) -> Tuple[List[Tuple[np.ndarray, float]], dict]:
+def process_game_pgn(pgn_text: str) -> Tuple[List[bytes], dict]:
     """
     Process a single game from PGN text.
 
     Returns:
-        Tuple of (list of (board_repr, score) tuples, kpi_updates dict)
+        Tuple of (list of serialized TFRecord bytes, kpi_updates dict)
     """
     kpi = Counter()
     results = []
@@ -264,22 +276,22 @@ def process_game_pgn(pgn_text: str) -> Tuple[List[Tuple[np.ndarray, float]], dic
             kpi["games_variant"] += 1
             return results, kpi
 
-        node = game
-        while (node := node.next()) is not None:
+        # Maintain running board instead of calling node.board() each time
+        # This avoids O(n²) complexity from replaying moves from start
+        board = game.board()
+
+        for node in game.mainline():
+            board.push(node.move)
+
             if node.eval() is None:
                 kpi["games_no_eval"] += 1
                 break
 
             kpi["moves"] += 1
-            board = node.board()
 
-            # Check draw conditions first (cheaper than is_quiet_position)
+            # Stockfish gives eval 0 which is not reflective of the position
             if is_drawn_position(board):
                 kpi["moves_drawn"] += 1
-                continue
-
-            if not is_quiet_position(board):
-                kpi["moves_not_quiet"] += 1
                 continue
 
             # Get board representation and material imbalance in one pass
@@ -310,7 +322,8 @@ def process_game_pgn(pgn_text: str) -> Tuple[List[Tuple[np.ndarray, float]], dic
             if not board.turn:
                 score = -score
 
-            results.append((board_repr, score))
+            # Serialize in worker process (parallelizes serialization)
+            results.append(serialize(board_repr, np.float32(score)))
 
     except Exception as e:
         kpi["errors"] += 1
@@ -318,30 +331,58 @@ def process_game_pgn(pgn_text: str) -> Tuple[List[Tuple[np.ndarray, float]], dic
     return results, kpi
 
 
-def worker_process(input_queue: mp.Queue, output_queue: mp.Queue, worker_id: int):
+def worker_process(input_queue: mp.Queue, output_queue: mp.Queue, worker_id: int, profile: bool = False):
     """
     Worker process that processes games from input queue.
+
+    Sends None to output_queue when finished to signal completion.
+
+    Args:
+        input_queue: Queue to receive game batches from
+        output_queue: Queue to send results to
+        worker_id: Unique identifier for this worker
+        profile: If True, write cProfile stats to worker_{id}.prof
     """
-    while True:
-        try:
-            item = input_queue.get()
-            if item is None:  # Poison pill
-                break
+    profiler = None
+    if profile:
+        import cProfile
+        import sys
 
-            batch_id, pgn_texts = item
-            batch_results = []
-            batch_kpi = Counter()
+        # Disable any inherited profiler from parent process (e.g., if run with python -m cProfile)
+        sys.setprofile(None)
 
-            for pgn_text in pgn_texts:
-                results, kpi = process_game_pgn(pgn_text)
-                batch_results.extend(results)
-                batch_kpi.update(kpi)
+        profiler = cProfile.Profile()
+        profiler.enable()
 
-            output_queue.put((batch_id, batch_results, batch_kpi))
+    try:
+        while True:
+            try:
+                item = input_queue.get()
+                if item is None:  # Poison pill
+                    break
 
-        except Exception as e:
-            print(f"Worker {worker_id} error: {e}")
-            continue
+                batch_id, pgn_texts = item
+                batch_results = []
+                batch_kpi = Counter()
+
+                for pgn_text in pgn_texts:
+                    results, kpi = process_game_pgn(pgn_text)
+                    batch_results.extend(results)
+                    batch_kpi.update(kpi)
+
+                output_queue.put((batch_id, batch_results, batch_kpi))
+
+            except Exception as e:
+                print(f"Worker {worker_id} error: {e}")
+                continue
+    finally:
+        if profiler is not None:
+            profiler.disable()
+            profiler.dump_stats(f'worker_{worker_id}.prof')
+            print(f"Worker {worker_id}: profile saved to worker_{worker_id}.prof")
+
+    # Signal that this worker is done
+    output_queue.put(None)
 
 
 def read_games_from_pgn_zst(path: str) -> Iterable[str]:
@@ -380,86 +421,193 @@ def read_games_from_pgn_zst(path: str) -> Iterable[str]:
                 yield ''.join(current_game_lines)
 
 
-def stream_data_multiprocess(path: str, num_workers: int = NUM_WORKERS):
+def _reader_thread_fn(
+        path: str,
+        input_queue: mp.Queue,
+        batch_size: int,
+        num_workers: int,
+        stats: dict,
+        stop_event: threading.Event
+):
+    """
+    Dedicated thread for reading and batching games from compressed PGN.
+
+    Runs in a separate thread to overlap I/O with worker processing.
+    Sends batches to input_queue and poison pills when done.
+    """
+    batch = []
+    batch_id = 0
+    games_read = 0
+
+    try:
+        for pgn_text in read_games_from_pgn_zst(path):
+            # Check if we should stop early
+            if stop_event.is_set():
+                break
+
+            batch.append(pgn_text)
+            games_read += 1
+
+            if len(batch) >= batch_size:
+                # Update stats before potentially blocking
+                stats['games_read'] = games_read
+                stats['batches_sent'] = batch_id + 1
+
+                try:
+                    # Use timeout to allow checking stop_event
+                    while not stop_event.is_set():
+                        try:
+                            input_queue.put((batch_id, batch), timeout=0.5)
+                            break
+                        except queue.Full:
+                            continue
+                except Exception:
+                    break
+
+                batch_id += 1
+                batch = []
+
+        # Send final partial batch if any
+        if batch and not stop_event.is_set():
+            try:
+                input_queue.put((batch_id, batch), timeout=5)
+                batch_id += 1
+            except queue.Full:
+                pass
+
+    except Exception as e:
+        stats['error'] = str(e)
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Update final stats
+        stats['games_read'] = games_read
+        stats['batches_sent'] = batch_id
+
+        # Send poison pills to all workers
+        for _ in range(num_workers):
+            try:
+                input_queue.put(None, timeout=5)
+            except queue.Full:
+                pass
+
+        stats['done'] = True
+
+
+def stream_data_multiprocess(path: str, num_workers: int = NUM_WORKERS, profile_workers: bool = False):
     """
     Stream training data using multiple worker processes.
+
+    Uses a dedicated reader thread to overlap file I/O with processing.
+    Yields serialized TFRecord bytes (serialization done in workers).
+
+    Args:
+        path: Path to .pgn.zst file
+        num_workers: Number of worker processes
+        profile_workers: If True, profile workers and save to worker_N.prof files
     """
     print(f"Starting {num_workers} worker processes...")
+    if profile_workers:
+        print("Worker profiling enabled - will save to worker_N.prof files")
 
     input_queue = mp.Queue(maxsize=num_workers * 2)
     output_queue = mp.Queue(maxsize=QUEUE_MAX_SIZE)
 
+    # Prevent queue feeder threads from blocking process exit
+    # This is critical for clean Ctrl+C handling
+    input_queue.cancel_join_thread()
+    output_queue.cancel_join_thread()
+
     # Start workers
     workers = []
     for i in range(num_workers):
-        p = mp.Process(target=worker_process, args=(input_queue, output_queue, i))
+        p = mp.Process(target=worker_process, args=(input_queue, output_queue, i, profile_workers))
         p.start()
         workers.append(p)
 
-    # Producer: read games and batch them
-    total_kpi = Counter()
-    batch = []
-    batch_id = 0
-    batches_sent = 0
-    batches_received = 0
+    # Reader thread coordination
+    stop_event = threading.Event()
+    reader_stats = {'done': False, 'batches_sent': 0, 'games_read': 0, 'error': None}
 
-    # Start reading games
-    game_reader = read_games_from_pgn_zst(path)
-    reader_exhausted = False
+    # Start dedicated reader thread
+    reader = threading.Thread(
+        target=_reader_thread_fn,
+        args=(path, input_queue, BATCH_SIZE, num_workers, reader_stats, stop_event),
+        daemon=True
+    )
+    reader.start()
+
+    # Main thread: collect results from workers
+    total_kpi = Counter()
+    batches_received = 0
+    workers_done = 0
 
     try:
-        while True:
-            # Send batches to workers (non-blocking when possible)
-            while not reader_exhausted and not input_queue.full():
-                try:
-                    pgn_text = next(game_reader)
-                    batch.append(pgn_text)
+        while workers_done < num_workers:
+            try:
+                result = output_queue.get(timeout=0.5)
 
-                    if len(batch) >= BATCH_SIZE:
-                        input_queue.put((batch_id, batch))
-                        batch_id += 1
-                        batches_sent += 1
-                        batch = []
-                except StopIteration:
-                    reader_exhausted = True
-                    # Send remaining batch
-                    if batch:
-                        input_queue.put((batch_id, batch))
-                        batches_sent += 1
-                        batch = []
-                    break
-            # TODO read next batch before start waiting
-            # Collect results from workers
-            while True:
-                try:
-                    result_batch_id, results, kpi = output_queue.get(timeout=0.1)
-                    batches_received += 1
-                    total_kpi.update(kpi)
+                if result is None:
+                    # Worker finished (sent None after receiving poison pill)
+                    workers_done += 1
+                    continue
 
-                    for board_repr, score in results:
-                        yield board_repr, score
+                result_batch_id, results, kpi = result
+                batches_received += 1
+                total_kpi.update(kpi)
 
-                    if batches_received % 10000 == 0:
-                        print(f"Processed {batches_received}/{batches_sent} batches, {dict(total_kpi)}")
+                # Results are already serialized bytes from workers
+                for serialized_record in results:
+                    yield serialized_record
 
-                except queue.Empty:
-                    break
+                if batches_received % 10000 == 0:
+                    print(f"Processed {batches_received}/{reader_stats['batches_sent']} batches, {dict(total_kpi)}")
 
-            # Check if done
-            if reader_exhausted and batches_received >= batches_sent:
-                break
+            except queue.Empty:
+                # Check for reader errors while waiting
+                if reader_stats.get('error'):
+                    print(f"Reader thread error: {reader_stats['error']}")
+                continue
 
+    except GeneratorExit:
+        # Consumer stopped early - signal reader to stop
+        stop_event.set()
+        raise
+    except KeyboardInterrupt:
+        # Handle Ctrl+C gracefully
+        stop_event.set()
+        print("\nInterrupted, cleaning up...")
     finally:
-        # Send poison pills to workers
-        for _ in workers:
-            input_queue.put(None)
+        # Signal reader to stop if not already done
+        stop_event.set()
 
-        # Wait for workers to finish
-        for p in workers:
-            p.join(timeout=5)
-            if p.is_alive():
-                p.terminate()
+        # Wait briefly for reader thread
+        reader.join(timeout=1)
 
+        # When profiling, let workers exit gracefully so they can save profiles
+        # Otherwise, terminate immediately for faster cleanup
+        if profile_workers:
+            # Workers should already be finishing - wait for them
+            for p in workers:
+                p.join(timeout=10)
+                if p.is_alive():
+                    print(f"Warning: Worker still alive after timeout, terminating...")
+                    p.terminate()
+                    p.join(timeout=1)
+        else:
+            # Terminate workers immediately - don't wait for queue drain
+            for p in workers:
+                if p.is_alive():
+                    p.terminate()
+            # Join terminated workers
+            for p in workers:
+                p.join(timeout=1)
+
+        # Close queues explicitly
+        input_queue.close()
+        output_queue.close()
+
+        print(f"Reader: {reader_stats['games_read']} games in {reader_stats['batches_sent']} batches")
         print(f"Final KPI: {dict(total_kpi)}")
 
 
@@ -499,9 +647,9 @@ def stream_data_single_process(path: str):
                         kpi["moves_drawn"] += 1
                         continue
 
-                    if not is_quiet_position(board):
-                        kpi["moves_not_quiet"] += 1
-                        continue
+                    # if not is_quiet_position(board):
+                    #    kpi["moves_not_quiet"] += 1
+                    #    continue
 
                     # Get board representation and material imbalance in one pass
                     board_repr, material_imbalance = get_board_repr_and_material(board)
@@ -540,9 +688,20 @@ def stream_data_single_process(path: str):
 
 # ----- WRITE SHARDED TFRECORDS -----
 def write_chess_tfrecords(
-        data_stream: Iterable[Tuple[np.ndarray, float]],
+        data_stream: Iterable[bytes],
         out_dir: str = OUT_DIR,
-        shard_size: int = SHARD_SIZE) -> List[str]:
+        shard_size: int = SHARD_SIZE,
+        pre_serialized: bool = True) -> List[str]:
+    """
+    Write TFRecords from a stream of data.
+
+    Args:
+        data_stream: Iterator yielding either serialized bytes (if pre_serialized=True)
+                     or (board, score) tuples (if pre_serialized=False)
+        out_dir: Output directory for TFRecord files
+        shard_size: Number of samples per shard file
+        pre_serialized: If True, data_stream yields bytes; if False, yields (board, score) tuples
+    """
     os.makedirs(out_dir, exist_ok=True)
     shard_id = 0
     samples_written = 0
@@ -552,14 +711,19 @@ def write_chess_tfrecords(
     writer = None
     options = tf.io.TFRecordOptions(compression_type=COMPRESSION)
 
-    for board, score in data_stream:
+    for record in data_stream:
         if writer is None:
-            path = os.path.join(out_dir, f"chess-{shard_id:05d}.tfrecord.gz")
+            path = os.path.join(out_dir, f"chess-{shard_id:05d}.tfrecord.zlib")
             writer = tf.io.TFRecordWriter(path, options=options)
             file_paths.append(path)
             print(f"Opened shard {shard_id}: {path}")
 
-        writer.write(serialize(board, np.float32(score)))
+        if pre_serialized:
+            writer.write(record)
+        else:
+            board, score = record
+            writer.write(serialize(board, np.float32(score)))
+
         samples_written += 1
         total_samples += 1
 
@@ -591,6 +755,8 @@ def main():
                         help=f'Number of worker processes (default: {NUM_WORKERS})')
     parser.add_argument('--output-dir', '-o', default=OUT_DIR,
                         help=f'Output directory for TFRecords (default: {OUT_DIR})')
+    parser.add_argument('--profile-workers', '-p', action='store_true',
+                        help='Profile worker processes (saves worker_N.prof files)')
 
     args = parser.parse_args()
 
@@ -608,11 +774,12 @@ def main():
     if args.single_process:
         print("Using single-process mode")
         data_stream = stream_data_single_process(args.input_file)
+        write_chess_tfrecords(data_stream, out_dir=args.output_dir, pre_serialized=False)
     else:
         print(f"Using multi-process mode with {args.workers} workers")
-        data_stream = stream_data_multiprocess(args.input_file, args.workers)
+        data_stream = stream_data_multiprocess(args.input_file, args.workers, profile_workers=args.profile_workers)
+        write_chess_tfrecords(data_stream, out_dir=args.output_dir, pre_serialized=True)
 
-    write_chess_tfrecords(data_stream, out_dir=args.output_dir)
     print("Done!")
 
 

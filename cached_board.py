@@ -394,7 +394,7 @@ class CachedBoard(chess.Board):
                 return False
             if move.promotion:
                 return False
-            if self.gives_check(move):  # Cached, so not repeated
+            if self.gives_check(move):  # Cached, so not repeated # TODO consider removing
                 return False
 
         return True
