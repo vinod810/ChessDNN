@@ -4,16 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL: passed=227 success-rate=75.67%">
-      <change afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test/delayed_scipt.sh" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test/stockfish_eval.sh" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model/model.keras" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/oldfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/oldfish.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -116,14 +112,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00030" summary="Engine test">
-      <option name="closed" value="true" />
-      <created>1766781076431</created>
-      <option name="number" value="00030" />
-      <option name="presentableId" value="LOCAL-00030" />
-      <option name="project" value="LOCAL" />
-      <updated>1766781076431</updated>
     </task>
     <task id="LOCAL-00031" summary="delta pruning margin - 50 - 68.33">
       <option name="closed" value="true" />
@@ -509,7 +497,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767571038198</updated>
     </task>
-    <option name="localTasksCounter" value="79" />
+    <task id="LOCAL-00079" summary="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%">
+      <option name="closed" value="true" />
+      <created>1767632080688</created>
+      <option name="number" value="00079" />
+      <option name="presentableId" value="LOCAL-00079" />
+      <option name="project" value="LOCAL" />
+      <updated>1767632080690</updated>
+    </task>
+    <option name="localTasksCounter" value="80" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -524,7 +520,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Minor optimizations by Claude" />
     <MESSAGE value="cutechess.sh" />
     <MESSAGE value="Claude improvements for detecting draw" />
     <MESSAGE value="Returns PV" />
@@ -549,7 +544,8 @@
     <MESSAGE value="Before NNUE" />
     <MESSAGE value="Removed komodo and model dirs from oldfish. passed=208, success-rate=69.33%" />
     <MESSAGE value="QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL: passed=227 success-rate=75.67%" />
-    <option name="LAST_COMMIT_MESSAGE" value="QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL: passed=227 success-rate=75.67%" />
+    <MESSAGE value="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%" />
+    <option name="LAST_COMMIT_MESSAGE" value="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -558,11 +554,6 @@
           <url>file://$PROJECT_DIR$/cached_board.py</url>
           <line>129</line>
           <option name="timeStamp" value="2" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/engine.py</url>
-          <line>163</line>
-          <option name="timeStamp" value="4" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

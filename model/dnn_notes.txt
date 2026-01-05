@@ -1,4 +1,5 @@
-small,768-256-128-64-1,tanh,mse,0.06,238/300
+Network Size,Architecture,1st Layer Activation,Loss Func.,Error,WAC Test Result,Against non DNN Engine
+small,768-256-128-64-1,tanh,mse,0.06,238/300,
 large,1024-256-32-1,relu,mae,
 medium,512-256-32-1,relu,mae,
 small,256-128-32-1,relu,mae,

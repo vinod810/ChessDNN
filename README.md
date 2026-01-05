@@ -6,6 +6,7 @@ a fast, well-optimized negamax search core enhanced by a DNN-based positional ev
 
 The objectives of this project are to demonstrate 1) chess position evaluation using a deep neural network (DNN) and 2) a chess engine that can play at aen expert level strength, i.e., above 2000 ELO rating strength.
 
+ELO rating by playing against Stockfish The games are available here. Many people used checss engine as their PhD project.
 ## Description
 The project used about 40 million chess positions to train a DNN that can evaluate a chess position. The chess engine uses the chess position evaluation provided by the DNN to decide the best move by evaluating and ranking the resulting chess positions for each legal move. 
 

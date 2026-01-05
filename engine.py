@@ -13,7 +13,39 @@ from prepare_data import PIECE_VALUES
 
 curr_dir = Path(__file__).resolve().parent
 
+# # TODO Also support
+# # SEE pruning+20-4
+# # Futility pruning+15-30 Skip hopeless nodes
+# # ## 6. Razoring to frontier nodes, if static eval is way below alpha, drop into quiescence.
+# This could be +50-100 Elo but requires more experimentation.
+
 # TODO support multiprocessing
+# # Run a search with OMP limited to 1 thread
+# OMP_NUM_THREADS=1 python engine.py
+# # Compare NPS to normal run
+# # If NPS drops 3-4x → BLAS parallelism is huge → Lazy SMP less valuable +20-40 ELO
+# # If NPS drops 1.5-2x → Search overhead dominates → Lazy SMP more valuable +50-80 ELO
+#
+# Lazy SMP Architecture Summary
+# Process Structure
+# MAIN PROCESS (UCI handler)
+# ├── Handles UCI I/O (stdin/stdout)
+# ├── Owns stop_event (multiprocessing.Event)
+# ├── Owns work_queue, result_queue
+# ├── Monitors time, sets stop_event when done
+# └── Collects results, prints bestmove
+#
+# WORKER PROCESSES (N = cpu_count - 1)
+# ├── Spawned once at engine startup
+# ├── Each loads own DNN model copy
+# ├── Shares TT, QS_TT, DNN cache via shared memory
+# ├── Independent killer_moves, history_heuristic
+# ├── Polls stop_event in search loop
+# └── Reports completed depths to result_queue
+# Start with Lazy SMP + independent caches first. Get that working (~60-80 Elo gain). Add shared TT later for the
+# remaining ~20 Elo. This splits the complexity into two manageable steps.
+
+
 HOME_DIR = "ChessDNN"
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
@@ -71,6 +103,7 @@ killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
 history_heuristic = {}
 
 kpi = {
+    "nodes": 0,
     "pos_eval": 0,
     "dnn_evals": 0,
     "beta_cutoffs": 0,
@@ -301,6 +334,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         Tuple of (score, pv) where pv is the list of moves in the principal variation.
     """
     kpi['q_depth'] = max(kpi['q_depth'], q_depth)
+    kpi['nodes'] += 1
 
     check_time()
     if TimeControl.stop_search:
@@ -445,6 +479,8 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     Returns:
         Tuple of (score, pv) where pv is the list of moves in the principal variation.
     """
+    kpi['nodes'] += 1
+
     check_time()
     if TimeControl.stop_search:
         raise TimeoutError()
@@ -917,7 +953,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
 
             # Print progress with PV only if depth completed
             if depth_completed and best_pv:
-                print(f"info depth {depth} score cp {best_score} pv {' '.join(m.uci() for m in best_pv)}", flush=True)
+                elapsed = time.perf_counter() - TimeControl.start_time
+                nps = int(kpi['nodes'] / elapsed) if elapsed > 0 else 0
+                print(f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {' '.join(m.uci() for m in best_pv)}", flush=True)
 
             # Early break to speed up testing
             if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
@@ -997,10 +1035,12 @@ def main():
             end_time = time.perf_counter()
 
             # Record cache sizes and time
+            elapsed_time = end_time - start_time
             kpi.update({
                 'tt_size': len(transposition_table),
                 'dec_size': len(dnn_eval_cache),
-                'time': round(end_time - start_time, 2)
+                'time': round(elapsed_time, 2),
+                'nps': int(kpi['nodes'] / elapsed_time) if elapsed_time > 0 else 0
             })
 
             # Print KPIs
