@@ -1,0 +1,4 @@
+small,768-256-128-64-1,tanh,mse,0.06,238/300
+large,1024-256-32-1,relu,mae,
+medium,512-256-32-1,relu,mae,
+small,256-128-32-1,relu,mae,

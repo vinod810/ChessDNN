@@ -22,6 +22,9 @@ The Python-based chess engine that combines classical alpha–beta negamax searc
 * Time-controlled search
 * Transposition Tables
 
+Uses numpy instead of tensorflow as it works faster on CPUs on typical user machines without GPUs. Training is still done using tensorflow. Tested accumulators instead of matrix multuiplacation on the first layer 
+instead of matric multiplcatik but not giving any considerable advantage.
+
 ## Getting Started
 * Clone the repository to your computer
 * Set up the conda environment using the environment.yml file
@@ -33,6 +36,10 @@ The Python-based chess engine that combines classical alpha–beta negamax searc
   * Configure PyChess to use this program as an engine.
     * Edit->Engines>New. Then browse to the cloned directory and select uci_engine.py
   * You are now ready to play against the engine. Good luck!
+
+## Future work
+768 input parameters. Stockfish NNE style overparmterization of input and use accumelators instead of matrix multiple at the first hidden layer.
+
 
 ## Authors
 Eapen Kuruvilla 

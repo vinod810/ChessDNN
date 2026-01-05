@@ -289,7 +289,7 @@ def process_game_pgn(pgn_text: str) -> Tuple[List[bytes], dict]:
 
             kpi["moves"] += 1
 
-            # Stockfish gives eval 0 which is not reflective of the position
+            # Stockfish gives eval 0 which may not be reflective of the position
             if is_drawn_position(board):
                 kpi["moves_drawn"] += 1
                 continue

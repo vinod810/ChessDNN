@@ -4,7 +4,7 @@ EXPECTED_ARGS=4
 
 if [ "$#" -ne "$EXPECTED_ARGS" ]; then
     echo "Usage: $0 oldfish-name neurofish-name time-control games" >&2
-    echo "Example: $0 test/cutechess.sh name-old name-neuro 40/120+1 6" >&2
+    echo "Example: $0 name-old name-neuro 40/120+1 6" >&2
     echo "Error: Expected $EXPECTED_ARGS arguments, but received $#" >&2
     exit 1
 fi

@@ -6,15 +6,17 @@ from pathlib import Path
 
 from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE, board_repr_to_fen
 
-MAX_SHARDS = 37 # FIXME Use a smaller number for quicker hyper param tuning
+MAX_SHARDS = 1000 # Use a smaller number for quicker hyper param tuning
 DATA_DIR = OUT_DIR
 DATA_FILES = sorted(tf.io.gfile.glob(os.path.join(DATA_DIR, "*.tfrecord.zlib")))[:MAX_SHARDS]
-TRAIN_FACTOR = 0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else  (0.80 if MAX_SHARDS > 2 else 0.50))
+TRAIN_FACTOR = 0.99 if MAX_SHARDS > 200 else (0.98 if MAX_SHARDS > 100
+                                              else (0.95 if MAX_SHARDS > 10 else (0.90 if MAX_SHARDS > 5 else
+                                                                            (0.80 if MAX_SHARDS > 2 else 0.50))))
 N_TRAIN = int(len(DATA_FILES) * TRAIN_FACTOR)
 curr_dir = Path(__file__).resolve().parent
-DNN_MODEL_FILEPATH = curr_dir / 'model' / 'model.keras'
+DNN_MODEL_FILEPATH = curr_dir / 'model' / 'small.keras'
 
-BATCH_SIZE = 256 * 4 # AVX2 CPU = 256
+BATCH_SIZE = 8192 # 256 * 4 # AVX2 CPU = 256
 NUM_EPOCHS = 100
 TANH_MAX = np.tanh(MAX_SCORE / TANH_SCALE)
 TANH_MIN = -TANH_MAX
@@ -53,7 +55,7 @@ def load_dataset(tfrecord_files, batch_size=256, shuffle=True):
     ) .repeat(count=NUM_EPOCHS)
 
     if shuffle:
-        ds = ds.shuffle(BATCH_SIZE * BATCH_SIZE)
+        ds = ds.shuffle(1_000_000) #BATCH_SIZE * BATCH_SIZE)
 
     ds = ds.map(parser, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.batch(batch_size, drop_remainder=True)
@@ -79,15 +81,15 @@ if __name__ == '__main__':
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=BOARD_SHAPE,),
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(256, activation="tanh"), # First layer tanh activation
-        tf.keras.layers.Dense(128, activation="relu"),
-        tf.keras.layers.Dense(64, activation="relu"),
+        tf.keras.layers.Dense(256, activation="relu"), # First layer tanh activation
+        tf.keras.layers.Dense(128, activation="relu"), # Try SF 768->2x256 -> 32->32->1
+        tf.keras.layers.Dense(32, activation="relu"),
         tf.keras.layers.Dense(1, activation='tanh')
     ])
 
     model.summary()
 
-    model.compile(optimizer="adam", loss="mae", metrics=['mae'])
+    model.compile(optimizer="adam", loss="mae", metrics=['mae']) # SF uses mse
 
     os.makedirs(os.path.dirname(DNN_MODEL_FILEPATH), exist_ok=True)
     checkpoint = ModelCheckpoint(
