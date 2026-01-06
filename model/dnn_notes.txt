@@ -16,10 +16,10 @@ medium,512-256-32-1,relu,mae,0.136,234
 medium,512-256-32-1,tanh,mae,0.143,235
 medium,512-256-32-1,relu,mse,0.057,233
 
-512 vs 1024 Against Stockfish1700
-512,
-1024,
+Against Stockfish1700
+DNN512 - +77.8
+DNN1024 - 181.7 +/-113.2
 
-1024 vs. 512
-
+DNN1024 vs. DNN512
+DNN512 +6.9 ELO / 50 games
 

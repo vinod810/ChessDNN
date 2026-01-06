@@ -6,9 +6,10 @@ import io
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from typing import Tuple, List
+from torch.utils.data import IterableDataset, DataLoader
+from typing import Tuple, List, Iterator
 import struct
+import random
 
 # Configuration
 KING_SQUARES = 64
@@ -152,18 +153,131 @@ class NNUENetwork(nn.Module):
         return torch.tanh(x)
 
 
-class ChessDataset(Dataset):
-    """Dataset for loading chess positions from PGN"""
+class StreamingChessDataset(IterableDataset):
+    """Streaming dataset that reads PGN file on-the-fly"""
 
-    def __init__(self, positions: List[Tuple]):
-        self.positions = positions
+    def __init__(self, pgn_file: str, max_positions_per_game: int = 20,
+                 skip_early_moves: int = 10, shuffle_buffer_size: int = 10000):
+        self.pgn_file = pgn_file
+        self.max_positions_per_game = max_positions_per_game
+        self.skip_early_moves = skip_early_moves
+        self.shuffle_buffer_size = shuffle_buffer_size
 
-    def __len__(self):
-        return len(self.positions)
+    def process_game(self, game) -> Iterator[Tuple]:
+        """Process a single game and yield positions"""
+        if game is None:
+            return
 
-    def __getitem__(self, idx):
-        white_feat, black_feat, stm, score = self.positions[idx]
+        board = game.board()
+        moves = list(game.mainline_moves())
 
+        # Get game result for evaluation proxy
+        result = game.headers.get("Result", "1/2-1/2")
+        if result == "1-0":
+            base_score = 100
+        elif result == "0-1":
+            base_score = -100
+        else:
+            base_score = 0
+
+        # Sample positions from the game
+        positions_yielded = 0
+        for i, move in enumerate(moves):
+            if positions_yielded >= self.max_positions_per_game:
+                break
+
+            board.push(move)
+
+            # Skip positions that are too early or terminal
+            if i < self.skip_early_moves or len(list(board.legal_moves)) == 0:
+                continue
+
+            # Calculate evaluation (simplified - based on game result + position)
+            eval_score = base_score + (i - len(moves) / 2) * 2
+
+            # Normalize: tanh(cp/400)
+            normalized_score = np.tanh(eval_score / 400.0)
+
+            # Extract features
+            white_feat, black_feat = NNUEFeatures.board_to_features(board)
+            stm = 1.0 if board.turn == chess.WHITE else 0.0
+
+            yield (white_feat, black_feat, stm, normalized_score)
+            positions_yielded += 1
+
+    def stream_positions(self) -> Iterator[Tuple]:
+        """Stream positions from PGN file"""
+        try:
+            with open(self.pgn_file, 'rb') as f:
+                dctx = zstd.ZstdDecompressor()
+                with dctx.stream_reader(f) as reader:
+                    text_stream = io.TextIOWrapper(reader, encoding='utf-8')
+
+                    while True:
+                        game = chess.pgn.read_game(text_stream)
+                        if game is None:
+                            break
+
+                        # Yield all positions from this game
+                        yield from self.process_game(game)
+
+        except FileNotFoundError:
+            print(f"File {self.pgn_file} not found. Generating sample data...")
+            yield from self.generate_sample_positions()
+
+    def generate_sample_positions(self) -> Iterator[Tuple]:
+        """Generate random positions for testing"""
+        while True:
+            board = chess.Board()
+
+            # Make random moves
+            for _ in range(random.randint(10, 40)):
+                moves = list(board.legal_moves)
+                if not moves:
+                    break
+                board.push(random.choice(moves))
+
+            # Random evaluation
+            eval_score = np.random.randn() * 100
+            normalized_score = np.tanh(eval_score / 400.0)
+
+            white_feat, black_feat = NNUEFeatures.board_to_features(board)
+            stm = 1.0 if board.turn == chess.WHITE else 0.0
+
+            yield (white_feat, black_feat, stm, normalized_score)
+
+    def __iter__(self) -> Iterator:
+        """Return iterator with optional shuffling"""
+        if self.shuffle_buffer_size > 0:
+            return self.shuffled_iterator()
+        else:
+            return self.stream_positions()
+
+    def shuffled_iterator(self) -> Iterator:
+        """Iterator with shuffle buffer for better randomization"""
+        buffer = []
+        for item in self.stream_positions():
+            buffer.append(item)
+            if len(buffer) >= self.shuffle_buffer_size:
+                # Shuffle and yield
+                random.shuffle(buffer)
+                while len(buffer) > self.shuffle_buffer_size // 2:
+                    yield buffer.pop()
+
+        # Yield remaining items
+        random.shuffle(buffer)
+        while buffer:
+            yield buffer.pop()
+
+
+def collate_fn(batch):
+    """Custom collate function to handle sparse features"""
+    white_inputs = []
+    black_inputs = []
+    stms = []
+    scores = []
+
+    for white_feat, black_feat, stm, score in batch:
         # Create sparse feature vectors
         white_input = torch.zeros(INPUT_SIZE)
         black_input = torch.zeros(INPUT_SIZE)
@@ -173,111 +287,27 @@ class ChessDataset(Dataset):
         for f in black_feat:
             black_input[f] = 1.0
 
-        return white_input, black_input, torch.tensor([stm], dtype=torch.float32), \
-            torch.tensor([score], dtype=torch.float32)
+        white_inputs.append(white_input)
+        black_inputs.append(black_input)
+        stms.append(stm)
+        scores.append(score)
+
+    return (torch.stack(white_inputs),
+            torch.stack(black_inputs),
+            torch.tensor(stms, dtype=torch.float32).unsqueeze(1),
+            torch.tensor(scores, dtype=torch.float32).unsqueeze(1))
 
 
-def load_pgn_data(pgn_file: str, max_games: int = 1000, max_positions_per_game: int = 20):
-    """Load training data from compressed PGN file"""
-    positions = []
-
-    print(f"Loading data from {pgn_file}...")
-
-    try:
-        with open(pgn_file, 'rb') as f:
-            dctx = zstd.ZstdDecompressor()
-            with dctx.stream_reader(f) as reader:
-                text_stream = io.TextIOWrapper(reader, encoding='utf-8')
-
-                games_processed = 0
-                while games_processed < max_games:
-                    game = chess.pgn.read_game(text_stream)
-                    if game is None:
-                        break
-
-                    board = game.board()
-                    moves = list(game.mainline_moves())
-
-                    # Sample positions from the game
-                    positions_added = 0
-                    for i, move in enumerate(moves):
-                        if positions_added >= max_positions_per_game:
-                            break
-
-                        board.push(move)
-
-                        # Skip positions that are too early or in endgame
-                        if i < 10 or len(list(board.legal_moves)) == 0:
-                            continue
-
-                        # Get evaluation (simplified - use game result as proxy)
-                        result = game.headers.get("Result", "1/2-1/2")
-                        if result == "1-0":
-                            eval_score = 100
-                        elif result == "0-1":
-                            eval_score = -100
-                        else:
-                            eval_score = 0
-
-                        # Add some noise based on position
-                        eval_score += (i - len(moves) / 2) * 2
-
-                        # Normalize: tanh(cp/400)
-                        normalized_score = np.tanh(eval_score / 400.0)
-
-                        # Extract features
-                        white_feat, black_feat = NNUEFeatures.board_to_features(board)
-                        stm = 1.0 if board.turn == chess.WHITE else 0.0
-
-                        positions.append((white_feat, black_feat, stm, normalized_score))
-                        positions_added += 1
-
-                    games_processed += 1
-                    if games_processed % 100 == 0:
-                        print(f"Processed {games_processed} games, {len(positions)} positions")
-
-    except FileNotFoundError:
-        print(f"File {pgn_file} not found. Generating sample data instead...")
-        positions = generate_sample_data(max_games * max_positions_per_game)
-
-    return positions
-
-
-def generate_sample_data(num_positions: int = 1000):
-    """Generate sample training data for testing"""
-    positions = []
-
-    print("Generating sample positions...")
-    for _ in range(num_positions):
-        board = chess.Board()
-
-        # Make random moves
-        for _ in range(np.random.randint(10, 40)):
-            moves = list(board.legal_moves)
-            if not moves:
-                break
-            board.push(np.random.choice(moves))
-
-        # Random evaluation
-        eval_score = np.random.randn() * 100
-        normalized_score = np.tanh(eval_score / 400.0)
-
-        white_feat, black_feat = NNUEFeatures.board_to_features(board)
-        stm = 1.0 if board.turn == chess.WHITE else 0.0
-
-        positions.append((white_feat, black_feat, stm, normalized_score))
-
-    return positions
-
-
-def train_model(model, train_loader, epochs=10, lr=0.001):
-    """Train the NNUE model"""
+def train_model(model, train_loader, epochs=10, lr=0.001, positions_per_epoch=None):
+    """Train the NNUE model with streaming data"""
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
     model.train()
     for epoch in range(epochs):
         total_loss = 0
+        batch_count = 0
+
         for batch_idx, (white_feat, black_feat, stm, target) in enumerate(train_loader):
             optimizer.zero_grad()
 
@@ -288,9 +318,19 @@ def train_model(model, train_loader, epochs=10, lr=0.001):
             optimizer.step()
 
             total_loss += loss.item()
+            batch_count += 1
 
-        avg_loss = total_loss / len(train_loader)
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.6f}")
+            # Print progress
+            if batch_idx % 100 == 0:
+                print(f"Epoch {epoch + 1}/{epochs}, Batch {batch_idx}, "
+                      f"Loss: {loss.item():.6f}")
+
+            # Limit positions per epoch if specified
+            if positions_per_epoch and batch_count * train_loader.batch_size >= positions_per_epoch:
+                break
+
+        avg_loss = total_loss / batch_count if batch_count > 0 else 0
+        print(f"Epoch {epoch + 1}/{epochs} complete, Avg Loss: {avg_loss:.6f}")
 
 
 class NNUEInference:
@@ -399,21 +439,38 @@ class NNUEInference:
 
 # Main execution
 if __name__ == "__main__":
-    # Load or generate data
+    # Create streaming dataset
     pgn_file = "pgn/lichess_db_standard_rated_2025-10.pgn.zst"
-    positions = load_pgn_data(pgn_file, max_games=1000, max_positions_per_game=20)
 
-    print(f"Loaded {len(positions)} positions")
+    print("Creating streaming dataset...")
+    dataset = StreamingChessDataset(
+        pgn_file,
+        max_positions_per_game=20,
+        skip_early_moves=10,
+        shuffle_buffer_size=10000  # Keep 10k positions in shuffle buffer
+    )
 
-    # Create dataset and dataloader
-    dataset = ChessDataset(positions)
-    train_loader = DataLoader(dataset, batch_size=256, shuffle=True)
+    # Create dataloader with streaming
+    train_loader = DataLoader(
+        dataset,
+        batch_size=256,
+        collate_fn=collate_fn,
+        num_workers=0  # Must be 0 for IterableDataset
+    )
 
     # Create and train model
     model = NNUENetwork()
     print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
 
-    train_model(model, train_loader, epochs=5, lr=0.001)
+    # Train with streaming data
+    # positions_per_epoch limits how many positions to train on per epoch
+    train_model(
+        model,
+        train_loader,
+        epochs=5,
+        lr=0.001,
+        positions_per_epoch=100000  # Train on 100k positions per epoch
+    )
 
     # Create numpy inference engine
     print("\nCreating numpy inference engine...")

@@ -4,18 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="uci resign, node, nps">
-      <change afterPath="$PROJECT_DIR$/halfkp.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test/print_config.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="halfkp.py">
+      <change afterPath="$PROJECT_DIR$/test_halfkp.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/build_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/build_model.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/environment.yml" beforeDir="false" afterPath="$PROJECT_DIR$/environment.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/halfkp.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/oldfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/oldfish.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -118,14 +112,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00032" summary="Before building noe DNN model">
-      <option name="closed" value="true" />
-      <created>1766796402291</created>
-      <option name="number" value="00032" />
-      <option name="presentableId" value="LOCAL-00032" />
-      <option name="project" value="LOCAL" />
-      <updated>1766796402291</updated>
     </task>
     <task id="LOCAL-00033" summary="DNN, 512-256-128-1, loss-0.08166,rate-71.67">
       <option name="closed" value="true" />
@@ -511,7 +497,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767652554262</updated>
     </task>
-    <option name="localTasksCounter" value="81" />
+    <task id="LOCAL-00081" summary="halfkp.py">
+      <option name="closed" value="true" />
+      <created>1767718208234</created>
+      <option name="number" value="00081" />
+      <option name="presentableId" value="LOCAL-00081" />
+      <option name="project" value="LOCAL" />
+      <updated>1767718208235</updated>
+    </task>
+    <option name="localTasksCounter" value="82" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -526,7 +520,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Claude improvements for detecting draw" />
     <MESSAGE value="Returns PV" />
     <MESSAGE value="bug fix wac 58/60 1min" />
     <MESSAGE value="wac 60sec 271/300" />
@@ -551,7 +544,8 @@
     <MESSAGE value="QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL: passed=227 success-rate=75.67%" />
     <MESSAGE value="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%" />
     <MESSAGE value="uci resign, node, nps" />
-    <option name="LAST_COMMIT_MESSAGE" value="uci resign, node, nps" />
+    <MESSAGE value="halfkp.py" />
+    <option name="LAST_COMMIT_MESSAGE" value="halfkp.py" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
