@@ -25,6 +25,7 @@ The Python-based chess engine that combines classical alpha–beta negamax searc
 
 Uses numpy instead of tensorflow as it works faster on CPUs on typical user machines without GPUs. Training is still done using tensorflow. Tested accumulators instead of matrix multuiplacation on the first layer 
 instead of matric multiplcatik but not giving any considerable advantage.
+Larger DNN netwrok Archtectures are better in positional play than smaller architectures.  But smaller on'e are btter in tactis due to it's abilty to explore more nodes.
 
 ## Getting Started
 * Clone the repository to your computer

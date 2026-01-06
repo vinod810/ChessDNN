@@ -1,3 +1,5 @@
+import importlib
+import os
 import random
 import re
 import time
@@ -11,13 +13,15 @@ from cached_board import CachedBoard
 from dnn_eval import INF  # Returns  evaluation using a DNN model.
 from prepare_data import PIECE_VALUES
 
-curr_dir = Path(__file__).resolve().parent
+CURR_DIR = Path(__file__).resolve().parent
 
 # # TODO Also support
 # # SEE pruning+20-4
 # # Futility pruning+15-30 Skip hopeless nodes
 # # ## 6. Razoring to frontier nodes, if static eval is way below alpha, drop into quiescence.
 # This could be +50-100 Elo but requires more experimentation.
+
+# TODO Try NNE style accumulators of HalfKP
 
 # TODO support multiprocessing
 # # Run a search with OMP limited to 1 thread
@@ -46,6 +50,7 @@ curr_dir = Path(__file__).resolve().parent
 # remaining ~20 Elo. This splits the complexity into two manageable steps.
 
 
+
 HOME_DIR = "ChessDNN"
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
@@ -53,11 +58,9 @@ MAX_DEFAULT_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
 IS_NUMPY_EVAL = True
-if IS_NUMPY_EVAL:
-    from dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
-else:
-    from dnn_eval import dnn_eval
-DNN_MODEL_FILEPATH = curr_dir / f"../{HOME_DIR}" /'model' / 'model.keras'
+IS_BLAS_ENABLED = False
+
+DNN_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'medium-relu-mae.keras'
 IS_DNN_ENABLED = True
 QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL = 1
 QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL = 10
@@ -84,6 +87,16 @@ SINGULAR_EXTENSION = 1  # Extra depth
 # Time management
 ESTIMATED_BRANCHING_FACTOR = 2.5  # Typical branching factor after pruning
 TIME_SAFETY_MARGIN = 0.7  # Only start new depth if we estimate having 70%+ of needed time
+
+if IS_NUMPY_EVAL:
+    from dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
+else:
+    from dnn_eval import dnn_eval
+
+if not IS_BLAS_ENABLED:
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "1"
 
 
 class TimeControl:
@@ -1003,6 +1016,60 @@ def pv_from_san_string(fen: str, san_string: str) -> list[chess.Move]:
     return pv
 
 
+def print_vars(var_names, module_name, local_scope=None):
+    local_scope = local_scope or {}
+    global_scope = globals()
+    module_vars = {}
+
+    if module_name:
+        try:
+            module = importlib.import_module(module_name)
+            module_vars = vars(module)
+        except ImportError:
+            module_vars = {}
+
+    for name in var_names:
+        if name in local_scope:
+            value = local_scope[name]
+            source = "local"
+        elif name in global_scope:
+            value = global_scope[name]
+            source = "global"
+        elif name in module_vars:
+            value = module_vars[name]
+            source = f"module:{module_name}"
+        else:
+            value = "<NOT FOUND>"
+            source = "missing"
+
+        print(f"{name} = {value}")
+
+
+def dump_parameters():
+    print_vars([
+        "IS_NUMPY_EVAL",
+        "DNN_MODEL_FILEPATH",
+        "IS_DNN_ENABLED",
+        "QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL",
+        "QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL",
+        "DELTA_MAX_DNN_EVAL",
+        "STAND_PAT_MAX_DNN_EVAL",
+        "QS_TT_SUPPORTED",
+        "DELTA_PRUNING_QS_MIN_DEPTH",
+        "DELTA_PRUNING_MARGIN",
+        "TACTICAL_QS_MAX_DEPTH",
+        "ASPIRATION_WINDOW",
+        "MAX_AW_RETRIES",
+        "LMR_MOVE_THRESHOLD",
+        "LMR_MIN_DEPTH",
+        "NULL_MOVE_REDUCTION",
+        "NULL_MOVE_MIN_DEPTH",
+        "SINGULAR_MARGIN",
+        "SINGULAR_EXTENSION",
+        "ESTIMATED_BRANCHING_FACTOR",
+        "TIME_SAFETY_MARGIN"], "engine")
+
+
 def main():
     """
     Interactive loop to input FEN positions and get the best move and evaluation.
@@ -1067,3 +1134,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+

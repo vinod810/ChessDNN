@@ -14,7 +14,7 @@ TRAIN_FACTOR = 0.99 if MAX_SHARDS > 200 else (0.98 if MAX_SHARDS > 100
                                                                             (0.80 if MAX_SHARDS > 2 else 0.50))))
 N_TRAIN = int(len(DATA_FILES) * TRAIN_FACTOR)
 curr_dir = Path(__file__).resolve().parent
-DNN_MODEL_FILEPATH = curr_dir / 'model' / 'small.keras'
+DNN_MODEL_FILEPATH = curr_dir / 'model' / 'medium-relu-mae.keras'
 
 BATCH_SIZE = 8192 # 256 * 4 # AVX2 CPU = 256
 NUM_EPOCHS = 100
@@ -81,15 +81,15 @@ if __name__ == '__main__':
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=BOARD_SHAPE,),
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(256, activation="relu"), # First layer tanh activation
-        tf.keras.layers.Dense(128, activation="relu"), # Try SF 768->2x256 -> 32->32->1
+        tf.keras.layers.Dense(512, activation="relu"), # TODO try - first layer tanh activation
+        tf.keras.layers.Dense(256, activation="relu"), # Try SF 768->2x256 -> 32->32->1
         tf.keras.layers.Dense(32, activation="relu"),
         tf.keras.layers.Dense(1, activation='tanh')
     ])
 
     model.summary()
 
-    model.compile(optimizer="adam", loss="mae", metrics=['mae']) # SF uses mse
+    model.compile(optimizer="adam", loss="mae", metrics=['mae']) # SF uses mse. Todo try mse
 
     os.makedirs(os.path.dirname(DNN_MODEL_FILEPATH), exist_ok=True)
     checkpoint = ModelCheckpoint(
