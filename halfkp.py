@@ -136,11 +136,17 @@ class StreamingChessDataset(IterableDataset):
     def __init__(self, pgn_file: str,
                  max_positions_per_game: int = 20,
                  skip_early_moves: int = 10,
-                 shuffle_buffer_size: int = 10000):
+                 shuffle_buffer_size: int = 10000,
+                 validation_split: float = 0.0,
+                 is_validation: bool = False,
+                 seed: int = 42):
         self.pgn_file = pgn_file
         self.max_positions_per_game = max_positions_per_game
         self.skip_early_moves = skip_early_moves
         self.shuffle_buffer_size = shuffle_buffer_size
+        self.validation_split = validation_split
+        self.is_validation = is_validation
+        self.seed = seed
 
     @staticmethod
     def parse_evaluation(comment: str) -> Optional[float]:
@@ -227,7 +233,9 @@ class StreamingChessDataset(IterableDataset):
             pass
 
     def stream_positions(self) -> Iterator[Tuple]:
-        """Stream positions from PGN file"""
+        """Stream positions from PGN file with optional train/val split"""
+        rng = random.Random(self.seed)
+
         try:
             with open(self.pgn_file, 'rb') as f:
                 dctx = zstd.ZstdDecompressor()
@@ -245,6 +253,12 @@ class StreamingChessDataset(IterableDataset):
 
                         games_processed += 1
 
+                        # Deterministic split based on game index
+                        if self.validation_split > 0:
+                            is_val_game = rng.random() < self.validation_split
+                            if is_val_game != self.is_validation:
+                                continue
+
                         # Process game and count positions
                         position_count = 0
                         for position in self.process_game(game):
@@ -256,8 +270,9 @@ class StreamingChessDataset(IterableDataset):
                             games_with_evals += 1
 
                         if games_processed % 1000 == 0:
-                            eval_ratio = games_with_evals / games_processed * 100
-                            print(f"Processed {games_processed} games: "
+                            eval_ratio = games_with_evals / max(1, games_processed) * 100
+                            split_name = "validation" if self.is_validation else "training"
+                            print(f"[{split_name}] Processed {games_processed} games: "
                                   f"{games_with_evals} with evals ({eval_ratio:.1f}%), "
                                   f"{positions_extracted} positions extracted")
 
@@ -288,6 +303,90 @@ class StreamingChessDataset(IterableDataset):
             yield buffer.pop()
 
 
+class EarlyStopping:
+    """Early stopping to stop training when validation loss doesn't improve"""
+
+    def __init__(self, patience: int = 5, min_delta: float = 0.0, verbose: bool = True,
+                 checkpoint_path: str = "best_model.pt"):
+        """
+        Args:
+            patience: Number of epochs to wait after last improvement
+            min_delta: Minimum change to qualify as an improvement
+            verbose: Print messages when early stopping is triggered
+            checkpoint_path: Path to save best model weights
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.verbose = verbose
+        self.checkpoint_path = checkpoint_path
+        self.counter = 0
+        self.best_loss = None
+        self.early_stop = False
+        self.best_epoch = 0
+
+    def __call__(self, val_loss: float, model: nn.Module, epoch: int) -> bool:
+        """
+        Check if training should stop.
+
+        Args:
+            val_loss: Current validation loss
+            model: Model to save if this is the best so far
+            epoch: Current epoch number
+
+        Returns:
+            True if training should stop, False otherwise
+        """
+        if self.best_loss is None:
+            self.best_loss = val_loss
+            self.best_epoch = epoch
+            self._save_checkpoint(model, epoch, val_loss)
+            if self.verbose:
+                print(f"  First validation loss: {val_loss:.6f}")
+                print(f"  Saved checkpoint to {self.checkpoint_path}")
+            return False
+
+        if val_loss < self.best_loss - self.min_delta:
+            improvement = self.best_loss - val_loss
+            if self.verbose:
+                print(f"  Validation loss improved by {improvement:.6f}")
+            self.best_loss = val_loss
+            self.best_epoch = epoch
+            self._save_checkpoint(model, epoch, val_loss)
+            if self.verbose:
+                print(f"  Saved checkpoint to {self.checkpoint_path}")
+            self.counter = 0
+            return False
+
+        self.counter += 1
+        if self.verbose:
+            print(f"  No improvement for {self.counter}/{self.patience} epochs")
+
+        if self.counter >= self.patience:
+            self.early_stop = True
+            if self.verbose:
+                print(f"  Early stopping triggered! Best loss: {self.best_loss:.6f} (epoch {self.best_epoch})")
+            return True
+
+        return False
+
+    def _save_checkpoint(self, model: nn.Module, epoch: int, val_loss: float):
+        """Save model checkpoint to file"""
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'val_loss': val_loss,
+        }
+        torch.save(checkpoint, self.checkpoint_path)
+
+    def restore_best_model(self, model: nn.Module):
+        """Restore the model to the best saved state"""
+        if self.checkpoint_path and self.best_loss is not None:
+            checkpoint = torch.load(self.checkpoint_path, weights_only=True)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"Restored model from epoch {checkpoint['epoch']} "
+                  f"with validation loss: {checkpoint['val_loss']:.6f}")
+
+
 def collate_fn(batch):
     """Custom collate function to handle sparse features"""
     white_inputs = []
@@ -315,17 +414,108 @@ def collate_fn(batch):
             torch.tensor(scores, dtype=torch.float32).unsqueeze(1))
 
 
-def train_model(model, train_loader, epochs=10, lr=0.001, positions_per_epoch=None):
-    """Train the NNUE model with streaming data"""
+def validate_model(model: nn.Module, val_loader: DataLoader,
+                   criterion: nn.Module, max_batches: Optional[int] = None,
+                   device: str = 'cpu') -> float:
+    """
+    Run validation and return average loss.
+
+    Args:
+        model: The model to validate
+        val_loader: Validation data loader
+        criterion: Loss function
+        max_batches: Maximum batches to evaluate (None for all)
+        device: Device to run on
+
+    Returns:
+        Average validation loss
+    """
+    model.eval()
+    total_loss = 0
+    batch_count = 0
+
+    with torch.no_grad():
+        for batch_idx, (white_feat, black_feat, stm, target) in enumerate(val_loader):
+            if max_batches and batch_idx >= max_batches:
+                break
+
+            white_feat = white_feat.to(device)
+            black_feat = black_feat.to(device)
+            stm = stm.to(device)
+            target = target.to(device)
+
+            output = model(white_feat, black_feat, stm)
+            loss = criterion(output, target)
+
+            total_loss += loss.item()
+            batch_count += 1
+
+    model.train()
+    return total_loss / max(1, batch_count)
+
+
+def train_model(model: nn.Module,
+                train_loader: DataLoader,
+                val_loader: Optional[DataLoader] = None,
+                epochs: int = 10,
+                lr: float = 0.001,
+                positions_per_epoch: Optional[int] = None,
+                early_stopping_patience: int = 5,
+                early_stopping_min_delta: float = 0.0001,
+                val_batches_per_epoch: Optional[int] = 100,
+                checkpoint_path: str = "best_model.pt",
+                device: str = 'cpu'):
+    """
+    Train the NNUE model with streaming data, validation, and early stopping.
+
+    Args:
+        model: The NNUE model to train
+        train_loader: Training data loader
+        val_loader: Validation data loader (optional)
+        epochs: Maximum number of epochs
+        lr: Learning rate
+        positions_per_epoch: Positions to train on per epoch (None for full dataset)
+        early_stopping_patience: Epochs to wait before early stopping
+        early_stopping_min_delta: Minimum improvement to reset patience
+        val_batches_per_epoch: Max validation batches per epoch (None for all)
+        checkpoint_path: Path to save best model checkpoint
+        device: Device to train on ('cpu' or 'cuda')
+    """
+    model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
+
+    # Initialize early stopping if validation is enabled
+    early_stopping = None
+    if val_loader is not None:
+        early_stopping = EarlyStopping(
+            patience=early_stopping_patience,
+            min_delta=early_stopping_min_delta,
+            verbose=True,
+            checkpoint_path=checkpoint_path
+        )
+
+    # Training history
+    history = {
+        'train_loss': [],
+        'val_loss': []
+    }
 
     model.train()
     for epoch in range(epochs):
         total_loss = 0
         batch_count = 0
 
+        print(f"\n{'=' * 60}")
+        print(f"Epoch {epoch + 1}/{epochs}")
+        print('=' * 60)
+
         for batch_idx, (white_feat, black_feat, stm, target) in enumerate(train_loader):
+            white_feat = white_feat.to(device)
+            black_feat = black_feat.to(device)
+            stm = stm.to(device)
+            target = target.to(device)
+
             optimizer.zero_grad()
 
             output = model(white_feat, black_feat, stm)
@@ -338,13 +528,39 @@ def train_model(model, train_loader, epochs=10, lr=0.001, positions_per_epoch=No
             batch_count += 1
 
             if batch_idx % 100 == 0:
-                print(f"Epoch {epoch + 1}/{epochs}, Batch {batch_idx}, Loss: {loss.item():.6f}")
+                print(f"  Batch {batch_idx}: Train Loss = {loss.item():.6f}")
 
             if positions_per_epoch and batch_count * train_loader.batch_size >= positions_per_epoch:
                 break
 
-        avg_loss = total_loss / batch_count if batch_count > 0 else 0
-        print(f"Epoch {epoch + 1}/{epochs} complete, Avg Loss: {avg_loss:.6f}")
+        avg_train_loss = total_loss / max(1, batch_count)
+        history['train_loss'].append(avg_train_loss)
+        print(f"\n  Average Train Loss: {avg_train_loss:.6f}")
+
+        # Validation
+        if val_loader is not None:
+            print("  Running validation...")
+            val_loss = validate_model(
+                model, val_loader, criterion,
+                max_batches=val_batches_per_epoch,
+                device=device
+            )
+            history['val_loss'].append(val_loss)
+            print(f"  Validation Loss: {val_loss:.6f}")
+
+            # Early stopping check
+            if early_stopping(val_loss, model, epoch + 1):
+                print(f"\nEarly stopping at epoch {epoch + 1}")
+                early_stopping.restore_best_model(model)
+                break
+
+        print(f"Epoch {epoch + 1} complete")
+
+    # Restore best model if early stopping was used
+    if early_stopping is not None and not early_stopping.early_stop:
+        early_stopping.restore_best_model(model)
+
+    return history
 
 
 class NNUEInference:
@@ -434,36 +650,77 @@ class NNUEInference:
 
 if __name__ == "__main__":
     # Use PGN file with evaluations
-    # Lichess PGN files downloaded with evaluations will have [%eval ...] comments
     pgn_file = "pgn/lichess_db_standard_rated_2025-10.pgn.zst"
 
-    print("Creating streaming dataset from PGN evaluations...")
+    print("Creating streaming datasets with train/validation split...")
     print("Note: Only games with evaluation comments will be used")
 
-    dataset = StreamingChessDataset(
+    # Create training dataset (90% of games)
+    train_dataset = StreamingChessDataset(
         pgn_file,
         max_positions_per_game=20,
         skip_early_moves=10,
-        shuffle_buffer_size=10000
+        shuffle_buffer_size=10000,
+        validation_split=0.1,  # 10% for validation
+        is_validation=False,
+        seed=42
+    )
+
+    # Create validation dataset (10% of games)
+    val_dataset = StreamingChessDataset(
+        pgn_file,
+        max_positions_per_game=20,
+        skip_early_moves=10,
+        shuffle_buffer_size=1000,  # Smaller buffer for validation
+        validation_split=0.1,
+        is_validation=True,
+        seed=42
     )
 
     train_loader = DataLoader(
-        dataset,
+        train_dataset,
         batch_size=256,
         collate_fn=collate_fn,
         num_workers=0
     )
 
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=256,
+        collate_fn=collate_fn,
+        num_workers=0
+    )
+
+    # Detect device
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
+
     model = NNUENetwork()
     print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
 
-    train_model(
+    # Train with validation and early stopping
+    history = train_model(
         model,
         train_loader,
-        epochs=20,
+        val_loader=val_loader,
+        epochs=50,  # Higher max epochs since early stopping will handle it
         lr=0.001,
-        positions_per_epoch=100000  # 100k positions per epoch
+        positions_per_epoch=100000,  # 100k positions per epoch
+        early_stopping_patience=5,  # Stop if no improvement for 5 epochs
+        early_stopping_min_delta=0.0001,
+        val_batches_per_epoch=100,  # Limit validation batches for speed
+        checkpoint_path="best_model.pt",  # Save best model here
+        device=device
     )
+
+    # Print training summary
+    print("\n" + "=" * 60)
+    print("Training Summary")
+    print("=" * 60)
+    print(f"Final train loss: {history['train_loss'][-1]:.6f}")
+    if history['val_loss']:
+        print(f"Best validation loss: {min(history['val_loss']):.6f}")
+        print(f"Epochs trained: {len(history['train_loss'])}")
 
     print("\nCreating numpy inference engine...")
     inference = NNUEInference(model)
@@ -475,3 +732,10 @@ if __name__ == "__main__":
 
     inference.save_weights("nnue_weights.bin")
     print("Weights saved to nnue_weights.bin")
+
+    # Save training history
+    import json
+
+    with open("training_history.json", "w") as f:
+        json.dump(history, f, indent=2)
+    print("Training history saved to training_history.json")
