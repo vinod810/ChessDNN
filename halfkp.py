@@ -7,9 +7,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import IterableDataset, DataLoader
-from typing import Tuple, List, Iterator
+from typing import Tuple, List, Iterator, Optional
 import struct
 import random
+import re
 
 # Configuration
 KING_SQUARES = 64
@@ -27,12 +28,8 @@ class NNUEFeatures:
     @staticmethod
     def get_piece_index(piece_type: int, piece_color: bool) -> int:
         """Convert piece type and color to index (0-9)"""
-        # piece_type: 1=P, 2=N, 3=B, 4=R, 5=Q, 6=K
-        # We exclude kings from features
         if piece_type == chess.KING:
             return -1
-
-        # Adjust index (subtract 1 since we skip king)
         type_idx = piece_type - 1
         color_idx = 1 if piece_color else 0
         return type_idx + color_idx * PIECE_TYPES
@@ -43,8 +40,6 @@ class NNUEFeatures:
         piece_idx = NNUEFeatures.get_piece_index(piece_type, piece_color)
         if piece_idx == -1:
             return -1
-
-        # Index calculation: king_sq * (64 * 10) + piece_sq * 10 + piece_idx
         return king_sq * (PIECE_SQUARES * PIECE_TYPES * COLORS) + \
             piece_sq * (PIECE_TYPES * COLORS) + piece_idx
 
@@ -63,8 +58,6 @@ class NNUEFeatures:
         Returns list of active feature indices
         """
         features = []
-
-        # Get king square for this perspective
         king_square = board.king(perspective)
         if king_square is None:
             return features
@@ -72,7 +65,6 @@ class NNUEFeatures:
         if not perspective:  # Black perspective - flip
             king_square = NNUEFeatures.flip_square(king_square)
 
-        # Iterate through all pieces
         for square in chess.SQUARES:
             piece = board.piece_at(square)
             if piece is None or piece.piece_type == chess.KING:
@@ -82,7 +74,6 @@ class NNUEFeatures:
             piece_color = piece.color
             piece_type = piece.piece_type
 
-            # Transform for black perspective
             if not perspective:
                 piece_square = NNUEFeatures.flip_square(piece_square)
                 piece_color = not piece_color
@@ -109,15 +100,10 @@ class NNUENetwork(nn.Module):
 
     def __init__(self, input_size=INPUT_SIZE, hidden_size=HIDDEN_SIZE):
         super(NNUENetwork, self).__init__()
-
         self.input_size = input_size
         self.hidden_size = hidden_size
-
-        # Feature transformer (shared between perspectives)
         self.ft = nn.Linear(input_size, hidden_size)
-
-        # Output layers
-        self.l1 = nn.Linear(hidden_size * 2, 32)  # 2x hidden (both perspectives)
+        self.l1 = nn.Linear(hidden_size * 2, 32)
         self.l2 = nn.Linear(32, 32)
         self.l3 = nn.Linear(32, 1)
 
@@ -126,84 +112,119 @@ class NNUENetwork(nn.Module):
         white_features, black_features: sparse feature indices
         stm: side to move (1.0 for white, 0.0 for black)
         """
-        # Transform features to hidden layer
-        w_hidden = torch.clamp(self.ft(white_features), 0, 1)  # ClippedReLU
+        w_hidden = torch.clamp(self.ft(white_features), 0, 1)
         b_hidden = torch.clamp(self.ft(black_features), 0, 1)
 
-        # Concatenate based on side to move
-        # STM perspective comes first
         batch_size = white_features.shape[0]
         hidden = torch.zeros(batch_size, self.hidden_size * 2, device=white_features.device)
-
-        # Create masks for white and black to move
         white_to_move = (stm > 0.5).squeeze()
 
-        # For positions where white is to move: [white, black]
-        # For positions where black is to move: [black, white]
         hidden[white_to_move, :self.hidden_size] = w_hidden[white_to_move]
         hidden[white_to_move, self.hidden_size:] = b_hidden[white_to_move]
         hidden[~white_to_move, :self.hidden_size] = b_hidden[~white_to_move]
         hidden[~white_to_move, self.hidden_size:] = w_hidden[~white_to_move]
 
-        # Forward through network
         x = torch.clamp(self.l1(hidden), 0, 1)
         x = torch.clamp(self.l2(x), 0, 1)
         x = self.l3(x)
-
         return torch.tanh(x)
 
 
 class StreamingChessDataset(IterableDataset):
-    """Streaming dataset that reads PGN file on-the-fly"""
+    """Streaming dataset that reads evaluations from PGN comments"""
 
-    def __init__(self, pgn_file: str, max_positions_per_game: int = 20,
-                 skip_early_moves: int = 10, shuffle_buffer_size: int = 10000):
+    def __init__(self, pgn_file: str,
+                 max_positions_per_game: int = 20,
+                 skip_early_moves: int = 10,
+                 shuffle_buffer_size: int = 10000):
         self.pgn_file = pgn_file
         self.max_positions_per_game = max_positions_per_game
         self.skip_early_moves = skip_early_moves
         self.shuffle_buffer_size = shuffle_buffer_size
 
+    @staticmethod
+    def parse_evaluation(comment: str) -> Optional[float]:
+        """
+        Parse evaluation from PGN comment
+        Supports formats:
+        - [%eval 0.24] (centipawn score)
+        - [%eval #3] (mate in 3)
+        - [%eval -1.5] (negative score)
+        - { [%eval 0.5] } (with curly braces)
+        """
+        if not comment:
+            return None
+
+        # Look for [%eval ...] pattern
+        eval_pattern = r'\[%eval\s+(#)?(-?\d+\.?\d*)\]'
+        match = re.search(eval_pattern, comment)
+
+        if match:
+            is_mate = match.group(1) == '#'
+            value = float(match.group(2))
+
+            if is_mate:
+                # Mate score: convert to large centipawn value
+                # Positive mate = white mates, negative = black mates
+                cp = 10000 if value > 0 else -10000
+            else:
+                # Already in pawns, convert to centipawns
+                cp = value * 100
+
+            # Normalize using tanh(cp/400)
+            return np.tanh(cp / 400.0)
+
+        return None
+
     def process_game(self, game) -> Iterator[Tuple]:
-        """Process a single game and yield positions"""
+        """Process a single game and yield positions with evaluations"""
         if game is None:
             return
 
         board = game.board()
-        moves = list(game.mainline_moves())
-
-        # Get game result for evaluation proxy
-        result = game.headers.get("Result", "1/2-1/2")
-        if result == "1-0":
-            base_score = 100
-        elif result == "0-1":
-            base_score = -100
-        else:
-            base_score = 0
-
-        # Sample positions from the game
+        has_evaluations = False
         positions_yielded = 0
-        for i, move in enumerate(moves):
+
+        # Iterate through the game tree
+        node = game
+        move_count = 0
+
+        for node in game.mainline():
+            move_count += 1
+
             if positions_yielded >= self.max_positions_per_game:
                 break
 
-            board.push(move)
-
-            # Skip positions that are too early or terminal
-            if i < self.skip_early_moves or len(list(board.legal_moves)) == 0:
+            # Skip early moves
+            if move_count <= self.skip_early_moves:
+                board.push(node.move)
                 continue
 
-            # Calculate evaluation (simplified - based on game result + position)
-            eval_score = base_score + (i - len(moves) / 2) * 2
+            # Make the move
+            board.push(node.move)
 
-            # Normalize: tanh(cp/400)
-            normalized_score = np.tanh(eval_score / 400.0)
+            # Skip terminal positions
+            if board.is_game_over():
+                continue
 
-            # Extract features
-            white_feat, black_feat = NNUEFeatures.board_to_features(board)
-            stm = 1.0 if board.turn == chess.WHITE else 0.0
+            # Try to get evaluation from comment
+            comment = node.comment if hasattr(node, 'comment') else ''
+            eval_score = self.parse_evaluation(comment)
 
-            yield (white_feat, black_feat, stm, normalized_score)
-            positions_yielded += 1
+            if eval_score is not None:
+                has_evaluations = True
+
+                # Extract features
+                white_feat, black_feat = NNUEFeatures.board_to_features(board)
+                stm = 1.0 if board.turn == chess.WHITE else 0.0
+
+                yield (white_feat, black_feat, stm, eval_score)
+                positions_yielded += 1
+
+        # Only log if we found evaluations
+        if not has_evaluations and positions_yielded == 0:
+            # Silently skip games without evaluations
+            pass
 
     def stream_positions(self) -> Iterator[Tuple]:
         """Stream positions from PGN file"""
@@ -213,38 +234,37 @@ class StreamingChessDataset(IterableDataset):
                 with dctx.stream_reader(f) as reader:
                     text_stream = io.TextIOWrapper(reader, encoding='utf-8')
 
+                    games_processed = 0
+                    games_with_evals = 0
+                    positions_extracted = 0
+
                     while True:
                         game = chess.pgn.read_game(text_stream)
                         if game is None:
                             break
 
-                        # Yield all positions from this game
-                        yield from self.process_game(game)
+                        games_processed += 1
+
+                        # Process game and count positions
+                        position_count = 0
+                        for position in self.process_game(game):
+                            yield position
+                            position_count += 1
+                            positions_extracted += 1
+
+                        if position_count > 0:
+                            games_with_evals += 1
+
+                        if games_processed % 1000 == 0:
+                            eval_ratio = games_with_evals / games_processed * 100
+                            print(f"Processed {games_processed} games: "
+                                  f"{games_with_evals} with evals ({eval_ratio:.1f}%), "
+                                  f"{positions_extracted} positions extracted")
 
         except FileNotFoundError:
-            print(f"File {self.pgn_file} not found. Generating sample data...")
-            yield from self.generate_sample_positions()
-
-    def generate_sample_positions(self) -> Iterator[Tuple]:
-        """Generate random positions for testing"""
-        while True:
-            board = chess.Board()
-
-            # Make random moves
-            for _ in range(random.randint(10, 40)):
-                moves = list(board.legal_moves)
-                if not moves:
-                    break
-                board.push(random.choice(moves))
-
-            # Random evaluation
-            eval_score = np.random.randn() * 100
-            normalized_score = np.tanh(eval_score / 400.0)
-
-            white_feat, black_feat = NNUEFeatures.board_to_features(board)
-            stm = 1.0 if board.turn == chess.WHITE else 0.0
-
-            yield (white_feat, black_feat, stm, normalized_score)
+            print(f"Error: File {self.pgn_file} not found!")
+            print("Please provide a valid PGN file with evaluations.")
+            return
 
     def __iter__(self) -> Iterator:
         """Return iterator with optional shuffling"""
@@ -254,17 +274,15 @@ class StreamingChessDataset(IterableDataset):
             return self.stream_positions()
 
     def shuffled_iterator(self) -> Iterator:
-        """Iterator with shuffle buffer for better randomization"""
+        """Iterator with shuffle buffer"""
         buffer = []
         for item in self.stream_positions():
             buffer.append(item)
             if len(buffer) >= self.shuffle_buffer_size:
-                # Shuffle and yield
                 random.shuffle(buffer)
                 while len(buffer) > self.shuffle_buffer_size // 2:
                     yield buffer.pop()
 
-        # Yield remaining items
         random.shuffle(buffer)
         while buffer:
             yield buffer.pop()
@@ -278,7 +296,6 @@ def collate_fn(batch):
     scores = []
 
     for white_feat, black_feat, stm, score in batch:
-        # Create sparse feature vectors
         white_input = torch.zeros(INPUT_SIZE)
         black_input = torch.zeros(INPUT_SIZE)
 
@@ -320,12 +337,9 @@ def train_model(model, train_loader, epochs=10, lr=0.001, positions_per_epoch=No
             total_loss += loss.item()
             batch_count += 1
 
-            # Print progress
             if batch_idx % 100 == 0:
-                print(f"Epoch {epoch + 1}/{epochs}, Batch {batch_idx}, "
-                      f"Loss: {loss.item():.6f}")
+                print(f"Epoch {epoch + 1}/{epochs}, Batch {batch_idx}, Loss: {loss.item():.6f}")
 
-            # Limit positions per epoch if specified
             if positions_per_epoch and batch_count * train_loader.batch_size >= positions_per_epoch:
                 break
 
@@ -339,17 +353,12 @@ class NNUEInference:
     def __init__(self, model: NNUENetwork):
         """Initialize from PyTorch model"""
         model.eval()
-
-        # Extract weights and biases
         self.ft_weight = model.ft.weight.detach().cpu().numpy()
         self.ft_bias = model.ft.bias.detach().cpu().numpy()
-
         self.l1_weight = model.l1.weight.detach().cpu().numpy()
         self.l1_bias = model.l1.bias.detach().cpu().numpy()
-
         self.l2_weight = model.l2.weight.detach().cpu().numpy()
         self.l2_bias = model.l2.bias.detach().cpu().numpy()
-
         self.l3_weight = model.l3.weight.detach().cpu().numpy()
         self.l3_bias = model.l3.bias.detach().cpu().numpy()
 
@@ -358,11 +367,7 @@ class NNUEInference:
         return np.clip(x, 0, 1)
 
     def evaluate(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
-        """
-        Evaluate position using numpy
-        stm: True for white to move, False for black
-        """
-        # Create sparse input vectors
+        """Evaluate position using numpy"""
         white_input = np.zeros(INPUT_SIZE)
         black_input = np.zeros(INPUT_SIZE)
 
@@ -371,17 +376,14 @@ class NNUEInference:
         for f in black_features:
             black_input[f] = 1.0
 
-        # Feature transformation
         white_hidden = self.clipped_relu(np.dot(white_input, self.ft_weight.T) + self.ft_bias)
         black_hidden = self.clipped_relu(np.dot(black_input, self.ft_weight.T) + self.ft_bias)
 
-        # Concatenate based on side to move
-        if stm:  # White to move
+        if stm:
             hidden = np.concatenate([white_hidden, black_hidden])
-        else:  # Black to move
+        else:
             hidden = np.concatenate([black_hidden, white_hidden])
 
-        # Forward through network
         x = self.clipped_relu(np.dot(hidden, self.l1_weight.T) + self.l1_bias)
         x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
         output = np.dot(x, self.l3_weight.T) + self.l3_bias
@@ -396,10 +398,7 @@ class NNUEInference:
     def save_weights(self, filename: str):
         """Save weights to binary file"""
         with open(filename, 'wb') as f:
-            # Write dimensions
             f.write(struct.pack('III', INPUT_SIZE, HIDDEN_SIZE, 32))
-
-            # Write all weights and biases
             self.ft_weight.tofile(f)
             self.ft_bias.tofile(f)
             self.l1_weight.tofile(f)
@@ -413,14 +412,10 @@ class NNUEInference:
     def load_weights(cls, filename: str):
         """Load weights from binary file"""
         with open(filename, 'rb') as f:
-            # Read dimensions
             input_size, hidden_size, l1_size = struct.unpack('III', f.read(12))
-
-            # Create dummy model for structure
             model = NNUENetwork(input_size, hidden_size)
             inference = cls(model)
 
-            # Load weights
             inference.ft_weight = np.fromfile(f, dtype=np.float32,
                                               count=hidden_size * input_size).reshape(hidden_size, input_size)
             inference.ft_bias = np.fromfile(f, dtype=np.float32, count=hidden_size)
@@ -437,56 +432,46 @@ class NNUEInference:
             return inference
 
 
-# Main execution
 if __name__ == "__main__":
-    # Create streaming dataset
+    # Use PGN file with evaluations
+    # Lichess PGN files downloaded with evaluations will have [%eval ...] comments
     pgn_file = "pgn/lichess_db_standard_rated_2025-10.pgn.zst"
 
-    print("Creating streaming dataset...")
+    print("Creating streaming dataset from PGN evaluations...")
+    print("Note: Only games with evaluation comments will be used")
+
     dataset = StreamingChessDataset(
         pgn_file,
         max_positions_per_game=20,
         skip_early_moves=10,
-        shuffle_buffer_size=10000  # Keep 10k positions in shuffle buffer
+        shuffle_buffer_size=10000
     )
 
-    # Create dataloader with streaming
     train_loader = DataLoader(
         dataset,
         batch_size=256,
         collate_fn=collate_fn,
-        num_workers=0  # Must be 0 for IterableDataset
+        num_workers=0
     )
 
-    # Create and train model
     model = NNUENetwork()
     print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
 
-    # Train with streaming data
-    # positions_per_epoch limits how many positions to train on per epoch
     train_model(
         model,
         train_loader,
-        epochs=5,
+        epochs=20,
         lr=0.001,
-        positions_per_epoch=100000  # Train on 100k positions per epoch
+        positions_per_epoch=100000  # 100k positions per epoch
     )
 
-    # Create numpy inference engine
     print("\nCreating numpy inference engine...")
     inference = NNUEInference(model)
 
-    # Test evaluation
     test_board = chess.Board()
     eval_score = inference.evaluate_board(test_board)
     print(f"Starting position evaluation: {eval_score:.4f}")
     print(f"Centipawn equivalent: {np.arctanh(np.clip(eval_score, -0.99, 0.99)) * 400:.1f}")
 
-    # Save weights
     inference.save_weights("nnue_weights.bin")
     print("Weights saved to nnue_weights.bin")
-
-    # Test loading
-    loaded_inference = NNUEInference.load_weights("nnue_weights.bin")
-    eval_score2 = loaded_inference.evaluate_board(test_board)
-    print(f"Loaded model evaluation: {eval_score2:.4f}")
