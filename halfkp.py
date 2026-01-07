@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import IterableDataset, DataLoader
-from typing import Tuple, List, Iterator, Optional, Dict, Any
+from typing import Tuple, List, Iterator, Optional, Dict, Any, Set
 import struct
 import random
 import re
@@ -233,6 +233,170 @@ class NNUEFeatures:
         return white_features, black_features
 
 
+class IncrementalFeatureUpdater:
+    """
+    Efficiently maintains NNUE features with incremental updates.
+
+    Instead of recomputing all features after each move, this class
+    tracks which features need to be added/removed based on the move made.
+
+    For king moves, a full recomputation is needed for that perspective
+    since all features depend on the king square.
+    """
+
+    def __init__(self, board: chess.Board):
+        """Initialize with a board position"""
+        self.board = board.copy()
+        # Store features as sets for O(1) add/remove
+        self.white_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.WHITE))
+        self.black_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.BLACK))
+        # Cache king squares
+        self.white_king_sq = board.king(chess.WHITE)
+        self.black_king_sq = board.king(chess.BLACK)
+
+    def _get_feature_for_perspective(self, perspective: bool, piece_sq: int,
+                                     piece_type: int, piece_color: bool) -> int:
+        """Get feature index for a piece from a given perspective"""
+        if perspective:
+            king_sq = self.white_king_sq
+        else:
+            king_sq = NNUEFeatures.flip_square(self.black_king_sq)
+            piece_sq = NNUEFeatures.flip_square(piece_sq)
+            piece_color = not piece_color
+
+        return NNUEFeatures.get_feature_index(king_sq, piece_sq, piece_type, piece_color)
+
+    def _remove_piece_features(self, square: int, piece_type: int, piece_color: bool):
+        """Remove features for a piece at the given square"""
+        if piece_type == chess.KING:
+            return
+
+        # Remove from white's perspective
+        white_feat = self._get_feature_for_perspective(True, square, piece_type, piece_color)
+        if white_feat >= 0:
+            self.white_features.discard(white_feat)
+
+        # Remove from black's perspective
+        black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
+        if black_feat >= 0:
+            self.black_features.discard(black_feat)
+
+    def _add_piece_features(self, square: int, piece_type: int, piece_color: bool):
+        """Add features for a piece at the given square"""
+        if piece_type == chess.KING:
+            return
+
+        # Add to white's perspective
+        white_feat = self._get_feature_for_perspective(True, square, piece_type, piece_color)
+        if white_feat >= 0:
+            self.white_features.add(white_feat)
+
+        # Add to black's perspective
+        black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
+        if black_feat >= 0:
+            self.black_features.add(black_feat)
+
+    def _recompute_perspective(self, perspective: bool):
+        """Fully recompute features for one perspective (needed after king moves)"""
+        features = set(NNUEFeatures.extract_features(self.board, perspective))
+        if perspective:
+            self.white_features = features
+        else:
+            self.black_features = features
+
+    def push(self, move: chess.Move):
+        """
+        Update features after making a move.
+        Must be called BEFORE board.push(move).
+        """
+        from_sq = move.from_square
+        to_sq = move.to_square
+
+        piece = self.board.piece_at(from_sq)
+        if piece is None:
+            # Should not happen in valid games
+            self.board.push(move)
+            return
+
+        moving_piece_type = piece.piece_type
+        moving_piece_color = piece.color
+
+        # Check if this is a king move
+        is_white_king_move = (moving_piece_type == chess.KING and moving_piece_color == chess.WHITE)
+        is_black_king_move = (moving_piece_type == chess.KING and moving_piece_color == chess.BLACK)
+
+        # Check for capture
+        captured_piece = self.board.piece_at(to_sq)
+        is_en_passant = self.board.is_en_passant(move)
+
+        # Handle en passant capture
+        if is_en_passant:
+            # The captured pawn is not on to_sq, it's on the en passant square
+            ep_sq = to_sq + (-8 if moving_piece_color == chess.WHITE else 8)
+            captured_piece = self.board.piece_at(ep_sq)
+            if captured_piece:
+                self._remove_piece_features(ep_sq, captured_piece.piece_type, captured_piece.color)
+
+        # Remove captured piece features
+        if captured_piece and not is_en_passant:
+            self._remove_piece_features(to_sq, captured_piece.piece_type, captured_piece.color)
+
+        # Handle castling - need to move the rook too
+        is_castling = self.board.is_castling(move)
+        if is_castling:
+            # Determine rook squares
+            if to_sq > from_sq:  # Kingside
+                rook_from = chess.H1 if moving_piece_color == chess.WHITE else chess.H8
+                rook_to = chess.F1 if moving_piece_color == chess.WHITE else chess.F8
+            else:  # Queenside
+                rook_from = chess.A1 if moving_piece_color == chess.WHITE else chess.A8
+                rook_to = chess.D1 if moving_piece_color == chess.WHITE else chess.D8
+
+            # Remove rook from old square, add to new square
+            self._remove_piece_features(rook_from, chess.ROOK, moving_piece_color)
+            # Note: rook addition happens after board.push since we need updated king position
+
+        # Remove moving piece from old square (if not king - king features handled by recompute)
+        if not is_white_king_move and not is_black_king_move:
+            self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color)
+
+        # Make the move on internal board
+        self.board.push(move)
+
+        # Update king square cache if king moved
+        if is_white_king_move:
+            self.white_king_sq = to_sq
+        elif is_black_king_move:
+            self.black_king_sq = to_sq
+
+        # Handle promotion
+        if move.promotion:
+            moving_piece_type = move.promotion
+
+        # Add moving piece to new square (if not king)
+        if not is_white_king_move and not is_black_king_move:
+            self._add_piece_features(to_sq, moving_piece_type, moving_piece_color)
+
+        # Add rook to new square for castling
+        if is_castling:
+            self._add_piece_features(rook_to, chess.ROOK, moving_piece_color)
+
+        # If king moved, recompute that perspective entirely
+        # (all features depend on king square)
+        if is_white_king_move:
+            self._recompute_perspective(chess.WHITE)
+        elif is_black_king_move:
+            self._recompute_perspective(chess.BLACK)
+
+    def get_features(self) -> Tuple[List[int], List[int]]:
+        """Get current features as sorted lists"""
+        return sorted(self.white_features), sorted(self.black_features)
+
+    def get_features_unsorted(self) -> Tuple[List[int], List[int]]:
+        """Get current features as lists (faster, no sorting)"""
+        return list(self.white_features), list(self.black_features)
+
+
 class NNUENetwork(nn.Module):
     """PyTorch NNUE Network"""
 
@@ -317,16 +481,18 @@ def parse_evaluation(comment: str) -> Optional[float]:
 
 
 def process_game(game, max_positions: int = 20, skip_early: int = 10) -> List[Tuple]:
-    """Process a single game and return positions with evaluations"""
+    """
+    Process a single game and return positions with evaluations.
+    Uses incremental feature updates for efficiency.
+    """
     if game is None:
-        return []
-
-    # Skip variant games
-    if any("Variant" in key for key in game.headers.keys()):
         return []
 
     positions = []
     board = game.board()
+
+    # Initialize incremental updater after skipping early moves
+    feature_updater = None
     move_count = 0
 
     for node in game.mainline():
@@ -339,39 +505,151 @@ def process_game(game, max_positions: int = 20, skip_early: int = 10) -> List[Tu
             board.push(node.move)
             continue
 
+        # Initialize feature updater on first position we might use
+        if feature_updater is None:
+            feature_updater = IncrementalFeatureUpdater(board)
+
+        # Update features incrementally (this also updates the updater's internal board)
+        feature_updater.push(node.move)
+        # Keep main board in sync
         board.push(node.move)
 
         if board.is_game_over():
             continue
 
-        #comment = node.comment if hasattr(node, 'comment') else ''
-        #eval_score = parse_evaluation(comment)
-        ev = node.eval()
-        if ev is None:
-            score = None
-        else:
-            if ev.is_mate():
-                mate_in = ev.white().mate()
-                if mate_in < 0:
-                    score = -10_000
-                else:
-                    score = 10_000
-            else:
-                score = ev.white().score()
-                score = min(score, 10_000)
-                score = max(score, -10_000)
+        comment = node.comment if hasattr(node, 'comment') else ''
+        eval_score = parse_evaluation(comment)
 
-        if score is not None:
-            white_feat, black_feat = NNUEFeatures.board_to_features(board)
+        if eval_score is not None:
+            # Get features from incremental updater (faster than full recompute)
+            white_feat, black_feat = feature_updater.get_features_unsorted()
             stm = 1.0 if board.turn == chess.WHITE else 0.0
 
+            # CRITICAL FIX: Lichess eval is always from White's perspective.
+            # But our network outputs from the side-to-move's perspective.
+            # So when Black is to move, we need to negate the evaluation.
             if board.turn == chess.BLACK:
-                score = -score
-            score = np.tanh(score / 400)
+                eval_score = -eval_score
 
-            positions.append((white_feat, black_feat, stm, score))
+            positions.append((white_feat, black_feat, stm, eval_score))
 
     return positions
+
+
+class ProcessGameWithValidation:
+    """
+    Callable class that processes games with periodic validation of incremental features.
+    Each instance maintains its own position counter (no global state).
+    """
+
+    VALIDATION_INTERVAL = 10000
+
+    def __init__(self):
+        self.position_count = 0
+
+    def __call__(self, game, max_positions: int = 20, skip_early: int = 10) -> List[Tuple]:
+        """
+        Process a single game and return positions with evaluations.
+        Uses incremental feature updates for efficiency.
+        Periodically validates incremental updates against full extraction.
+        """
+        if game is None:
+            return []
+
+        # Skip variant games
+        if any("Variant" in key for key in game.headers.keys()):
+            return []
+
+        positions = []
+        board = game.board()
+
+        # Initialize incremental updater after skipping early moves
+        feature_updater = None
+        move_count = 0
+
+        for node in game.mainline():
+            move_count += 1
+
+            if len(positions) >= max_positions:
+                break
+
+            if move_count <= skip_early:
+                board.push(node.move)
+                continue
+
+            # Initialize feature updater on first position we might use
+            if feature_updater is None:
+                feature_updater = IncrementalFeatureUpdater(board)
+
+            # Update features incrementally (this also updates the updater's internal board)
+            feature_updater.push(node.move)
+            # Keep main board in sync
+            board.push(node.move)
+
+            if board.is_game_over():
+                continue
+
+            #comment = node.comment if hasattr(node, 'comment') else ''
+            #eval_score = parse_evaluation(comment)
+            ev = node.eval()
+            if ev is None:
+                score = None
+            else:
+                if ev.is_mate():
+                    mate_in = ev.white().mate()
+                    if mate_in < 0:
+                        score = -10_000
+                    else:
+                        score = 10_000
+                else:
+                    score = ev.white().score()
+                    score = min(score, 10_000)
+                    score = max(score, -10_000)
+
+                score = np.tanh(score / 400)
+
+            if score is not None:
+                # Get features from incremental updater (faster than full recompute)
+                white_feat, black_feat = feature_updater.get_features_unsorted()
+
+                # Periodic validation: compare incremental vs full extraction
+                self.position_count += 1
+                if self.position_count % self.VALIDATION_INTERVAL == 0:
+                    # Full extraction for comparison
+                    white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
+
+                    # Compare as sets (order doesn't matter)
+                    white_match = set(white_feat) == set(white_feat_full)
+                    black_match = set(black_feat) == set(black_feat_full)
+
+                    if not white_match or not black_match:
+                        print(f"\n⚠️  WARNING: Incremental feature mismatch at position {self.position_count}!")
+                        print(f"    FEN: {board.fen()}")
+                        if not white_match:
+                            incremental_only = set(white_feat) - set(white_feat_full)
+                            full_only = set(white_feat_full) - set(white_feat)
+                            print(f"    White features - Incremental only: {incremental_only}")
+                            print(f"    White features - Full only: {full_only}")
+                        if not black_match:
+                            incremental_only = set(black_feat) - set(black_feat_full)
+                            full_only = set(black_feat_full) - set(black_feat)
+                            print(f"    Black features - Incremental only: {incremental_only}")
+                            print(f"    Black features - Full only: {full_only}")
+
+                        # Use full extraction as fallback
+                        white_feat, black_feat = white_feat_full, black_feat_full
+
+                stm = 1.0 if board.turn == chess.WHITE else 0.0
+
+                # CRITICAL FIX: Lichess eval is always from White's perspective.
+                # But our network outputs from the side-to-move's perspective.
+                # So when Black is to move, we need to negate the evaluation.
+                if board.turn == chess.BLACK:
+                    score = -score
+
+                positions.append((white_feat, black_feat, stm, score))
+
+        return positions
 
 
 def encode_sparse_batch(positions: List[Tuple]) -> Dict[str, Any]:
@@ -452,6 +730,9 @@ def worker_process(
     position_buffer = []
     gc_counter = 0
 
+    # Create local game processor with validation (no shared state)
+    game_processor = ProcessGameWithValidation()
+
     while not stop_event.is_set():
         try:
             # Open and stream from file
@@ -470,8 +751,8 @@ def worker_process(
                                 stats.worker_file_loops[worker_id].value += 1
                             break
 
-                        # Process game
-                        positions = process_game(game, max_positions_per_game, skip_early_moves)
+                        # Process game with periodic validation (using local counter)
+                        positions = game_processor(game, max_positions_per_game, skip_early_moves)
 
                         if positions:
                             position_buffer.extend(positions)
@@ -635,7 +916,7 @@ class ParallelTrainer:
             pgn_dir: str,
             model: nn.Module,
             batch_size: int = BATCH_SIZE,
-            validation_split: float = 0.1,
+            validation_split: float = 0.05,
             queue_size: int = QUEUE_MAX_SIZE,
             device: str = 'cpu',
             seed: int = 42
@@ -671,7 +952,7 @@ class ParallelTrainer:
         self.criterion = nn.MSELoss()
 
         # Validation buffer with size limit
-        self.val_buffer = deque(maxlen=1000)  # Limit validation buffer size
+        self.val_buffer = deque(maxlen=1000)  # Limit validation buffer size in batches
         self.val_buffer_lock = threading.Lock()
 
     def start_workers(self):
@@ -847,6 +1128,7 @@ class ParallelTrainer:
 
         with self.val_buffer_lock:
             val_batches = list(self.val_buffer)
+            print(f"Computing validation loss, val_batches size={len(val_batches)}...")
 
         with torch.no_grad():
             for batch_data in val_batches:
@@ -1055,7 +1337,7 @@ if __name__ == "__main__":
         pgn_dir=pgn_dir,
         model=model,
         batch_size=BATCH_SIZE,
-        validation_split=0.1,
+        validation_split=0.05,
         queue_size=QUEUE_MAX_SIZE,
         device=device,
         seed=42
@@ -1067,9 +1349,9 @@ if __name__ == "__main__":
     # - Longer patience since LR will be reduced
     # - Gradient clipping for stability
     history = trainer.train(
-        epochs=100,
+        epochs=5000,
         lr=0.001,
-        positions_per_epoch=500000,  # 500k positions per epoch (was 100k)
+        positions_per_epoch=1000_000,  # 1M positions per epoch (was 100k)
         early_stopping_patience=10,  # More patience since LR scheduler helps
         checkpoint_path="best_model.pt",
         lr_scheduler="plateau",  # Reduce LR on plateau

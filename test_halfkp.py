@@ -363,9 +363,9 @@ def test_nnue_interactive(weights_path: str = None):
                 print(f"  Black perspective: {len(black_feat)} active features")
 
                 if eval_score > 0.3:
-                    print("Position favors White")
+                    print(f"Position favors {"White" if board.turn == chess.WHITE else "Back"}")
                 elif eval_score < -0.3:
-                    print("Position favors Black")
+                    print(f"Position favors {"Black" if board.turn == chess.WHITE else "White"}")
                 else:
                     print("Position is roughly equal")
             else:
