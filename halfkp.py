@@ -33,7 +33,7 @@ OUTPUT_SIZE = 1
 
 # Worker configuration
 QUEUE_MAX_SIZE = 100  # Max batches in queue
-BATCH_SIZE = 256
+BATCH_SIZE = 512
 GC_INTERVAL = 1000  # Run garbage collection every N batches
 
 
@@ -497,6 +497,10 @@ def process_game(game, max_positions: int = 20, skip_early: int = 10) -> List[Tu
 
     for node in game.mainline():
         move_count += 1
+        current_move = node.move
+
+        # Check if this move is a capture BEFORE pushing it
+        is_capture = board.is_capture(current_move)
 
         if len(positions) >= max_positions:
             break
@@ -517,10 +521,34 @@ def process_game(game, max_positions: int = 20, skip_early: int = 10) -> List[Tu
         if board.is_game_over():
             continue
 
-        comment = node.comment if hasattr(node, 'comment') else ''
-        eval_score = parse_evaluation(comment)
+        if board.is_check():
+            continue
 
-        if eval_score is not None:
+            # Skip if this move was a capture (position after capture is tactically unstable)
+        if is_capture:
+            continue
+
+        #comment = node.comment if hasattr(node, 'comment') else ''
+        #eval_score = parse_evaluation(comment)
+
+        ev = node.eval()
+        if ev is None:
+            score = None
+        else:
+            if ev.is_mate():
+                mate_in = ev.white().mate()
+                if mate_in < 0:
+                    score = -10_000
+                else:
+                    score = 10_000
+            else:
+                score = ev.white().score()
+                score = min(score, 10_000)
+                score = max(score, -10_000)
+
+            score = np.tanh(score / 400)
+
+        if score is not None:
             # Get features from incremental updater (faster than full recompute)
             white_feat, black_feat = feature_updater.get_features_unsorted()
             stm = 1.0 if board.turn == chess.WHITE else 0.0
@@ -529,9 +557,9 @@ def process_game(game, max_positions: int = 20, skip_early: int = 10) -> List[Tu
             # But our network outputs from the side-to-move's perspective.
             # So when Black is to move, we need to negate the evaluation.
             if board.turn == chess.BLACK:
-                eval_score = -eval_score
+                score = -score
 
-            positions.append((white_feat, black_feat, stm, eval_score))
+            positions.append((white_feat, black_feat, stm, score))
 
     return positions
 
@@ -566,15 +594,21 @@ class ProcessGameWithValidation:
         # Initialize incremental updater after skipping early moves
         feature_updater = None
         move_count = 0
+        last_move_was_capture = False
 
         for node in game.mainline():
             move_count += 1
+            current_move = node.move
+
+            # Check if this move is a capture BEFORE pushing it
+            is_capture = board.is_capture(current_move)
 
             if len(positions) >= max_positions:
                 break
 
             if move_count <= skip_early:
-                board.push(node.move)
+                board.push(current_move)
+                last_move_was_capture = is_capture
                 continue
 
             # Initialize feature updater on first position we might use
@@ -587,6 +621,17 @@ class ProcessGameWithValidation:
             board.push(node.move)
 
             if board.is_game_over():
+                last_move_was_capture = is_capture
+                continue
+
+            # Skip if side to move is in check
+            if board.is_check():
+                last_move_was_capture = is_capture
+                continue
+
+            # Skip if this move was a capture (position after capture is tactically unstable)
+            if is_capture:
+                last_move_was_capture = is_capture
                 continue
 
             #comment = node.comment if hasattr(node, 'comment') else ''
@@ -648,6 +693,8 @@ class ProcessGameWithValidation:
                     score = -score
 
                 positions.append((white_feat, black_feat, stm, score))
+
+            last_move_was_capture = is_capture
 
         return positions
 

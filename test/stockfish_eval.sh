@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SF_ENGINE="stockfish"
-DEPTH=1
+DEPTH=0
 
 echo "Stockfish Position Evaluator (depth $DEPTH)"
 echo "Enter FEN positions to evaluate, or 'quit'/'exit' to end."

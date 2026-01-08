@@ -4,10 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="multiple workers">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="multiple workers and increment feature evaluation">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/halfkp.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/test_halfkp.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/stockfish_eval.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish_eval.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -110,14 +111,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00037" summary="ChatGpt improvements 71.67">
-      <option name="closed" value="true" />
-      <created>1766893849591</created>
-      <option name="number" value="00037" />
-      <option name="presentableId" value="LOCAL-00037" />
-      <option name="project" value="LOCAL" />
-      <updated>1766893849591</updated>
     </task>
     <task id="LOCAL-00038" summary="Troubleshooting code">
       <option name="closed" value="true" />
@@ -503,7 +496,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767813633266</updated>
     </task>
-    <option name="localTasksCounter" value="86" />
+    <task id="LOCAL-00086" summary="multiple workers and increment feature evaluation">
+      <option name="closed" value="true" />
+      <created>1767818798919</created>
+      <option name="number" value="00086" />
+      <option name="presentableId" value="LOCAL-00086" />
+      <option name="project" value="LOCAL" />
+      <updated>1767818798919</updated>
+    </task>
+    <option name="localTasksCounter" value="87" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -518,7 +519,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Minor edits for code quality WAC - 5 sec - 207/300" />
     <MESSAGE value="Book move - WAC - 5 sec - 205/300" />
     <MESSAGE value="Check for 3-fold repetition" />
     <MESSAGE value="board_repr_to_fen()" />
@@ -543,7 +543,8 @@
     <MESSAGE value="HalfKP loss 0.02" />
     <MESSAGE value="Early stopping" />
     <MESSAGE value="multiple workers" />
-    <option name="LAST_COMMIT_MESSAGE" value="multiple workers" />
+    <MESSAGE value="multiple workers and increment feature evaluation" />
+    <option name="LAST_COMMIT_MESSAGE" value="multiple workers and increment feature evaluation" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
