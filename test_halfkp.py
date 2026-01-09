@@ -18,21 +18,24 @@ except ImportError:
 
 
 class NNUEInference:
-    """Numpy-based inference engine that can load from .pt checkpoint"""
-
     def __init__(self, model: NNUENetwork):
-        """Initialize from PyTorch model"""
         model.eval()
+
         self.input_size = model.input_size
         self.hidden_size = model.hidden_size
-        self.ft_weight = model.ft.weight.detach().cpu().numpy()
-        self.ft_bias = model.ft.bias.detach().cpu().numpy()
+
+        # Feature transformer weights (flattened NNUE)
+        self.ft_weight = model.ft_weight.detach().cpu().numpy()
+        self.ft_bias = model.ft_bias.detach().cpu().numpy()
+
+        # Dense layers
         self.l1_weight = model.l1.weight.detach().cpu().numpy()
         self.l1_bias = model.l1.bias.detach().cpu().numpy()
         self.l2_weight = model.l2.weight.detach().cpu().numpy()
         self.l2_bias = model.l2.bias.detach().cpu().numpy()
         self.l3_weight = model.l3.weight.detach().cpu().numpy()
         self.l3_bias = model.l3.bias.detach().cpu().numpy()
+
 
     def clipped_relu(self, x):
         """ClippedReLU activation: clip to [0, 1]"""
@@ -48,8 +51,9 @@ class NNUEInference:
         for f in black_features:
             black_input[f] = 1.0
 
-        white_hidden = self.clipped_relu(np.dot(white_input, self.ft_weight.T) + self.ft_bias)
-        black_hidden = self.clipped_relu(np.dot(black_input, self.ft_weight.T) + self.ft_bias)
+        white_hidden = self.clipped_relu(np.dot(white_input, self.ft_weight) + self.ft_bias)
+        black_hidden = self.clipped_relu(np.dot(black_input, self.ft_weight) + self.ft_bias)
+
 
         if stm:
             hidden = np.concatenate([white_hidden, black_hidden])

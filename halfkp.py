@@ -37,29 +37,29 @@ BATCH_SIZE = 512
 GC_INTERVAL = 1000  # Run garbage collection every N batches
 
 
-@dataclass
-class WorkerStats:
-    """Statistics for a single worker"""
-    worker_id: int
-    file_path: str
-    games_processed: int = 0
-    positions_extracted: int = 0
-    batches_sent: int = 0
-    file_loops: int = 0
-    wait_time_seconds: float = 0.0
-    processing_time_seconds: float = 0.0
-    last_update: float = field(default_factory=time.time)
+# @dataclass
+# class WorkerStats:
+#     """Statistics for a single worker"""
+#     worker_id: int
+#     file_path: str
+#     games_processed: int = 0
+#     positions_extracted: int = 0
+#     batches_sent: int = 0
+#     file_loops: int = 0
+#     wait_time_seconds: float = 0.0
+#     processing_time_seconds: float = 0.0
+#     last_update: float = field(default_factory=time.time)
 
 
-@dataclass
-class MainProcessStats:
-    """Statistics for main process"""
-    batches_consumed: int = 0
-    train_batches: int = 0
-    val_batches: int = 0
-    wait_time_seconds: float = 0.0
-    processing_time_seconds: float = 0.0
-    last_update: float = field(default_factory=time.time)
+# @dataclass
+# class MainProcessStats:
+#     """Statistics for main process"""
+#     batches_consumed: int = 0
+#     train_batches: int = 0
+#     val_batches: int = 0
+#     wait_time_seconds: float = 0.0
+#     processing_time_seconds: float = 0.0
+#     last_update: float = field(default_factory=time.time)
 
 
 class SharedStats:
@@ -452,116 +452,116 @@ class NNUENetwork(nn.Module):
         return torch.tanh(x)
 
 
-def parse_evaluation(comment: str) -> Optional[float]:
-    """
-    Parse evaluation from PGN comment
-    Supports formats:
-    - [%eval 0.24] (centipawn score)
-    - [%eval #3] (mate in 3)
-    - [%eval -1.5] (negative score)
-    """
-    if not comment:
-        return None
+# def parse_evaluation(comment: str) -> Optional[float]:
+#     """
+#     Parse evaluation from PGN comment
+#     Supports formats:
+#     - [%eval 0.24] (centipawn score)
+#     - [%eval #3] (mate in 3)
+#     - [%eval -1.5] (negative score)
+#     """
+#     if not comment:
+#         return None
+#
+#     eval_pattern = r'\[%eval\s+(#)?(-?\d+\.?\d*)\]'
+#     match = re.search(eval_pattern, comment)
+#
+#     if match:
+#         is_mate = match.group(1) == '#'
+#         value = float(match.group(2))
+#
+#         if is_mate:
+#             cp = 10000 if value > 0 else -10000
+#         else:
+#             cp = value * 100
+#
+#         return np.tanh(cp / 400.0)
+#
+#     return None
 
-    eval_pattern = r'\[%eval\s+(#)?(-?\d+\.?\d*)\]'
-    match = re.search(eval_pattern, comment)
 
-    if match:
-        is_mate = match.group(1) == '#'
-        value = float(match.group(2))
-
-        if is_mate:
-            cp = 10000 if value > 0 else -10000
-        else:
-            cp = value * 100
-
-        return np.tanh(cp / 400.0)
-
-    return None
-
-
-def process_game(game, max_positions: int = 20, skip_early: int = 10) -> List[Tuple]:
-    """
-    Process a single game and return positions with evaluations.
-    Uses incremental feature updates for efficiency.
-    """
-    if game is None:
-        return []
-
-    positions = []
-    board = game.board()
-
-    # Initialize incremental updater after skipping early moves
-    feature_updater = None
-    move_count = 0
-
-    for node in game.mainline():
-        move_count += 1
-        current_move = node.move
-
-        # Check if this move is a capture BEFORE pushing it
-        is_capture = board.is_capture(current_move)
-
-        if len(positions) >= max_positions:
-            break
-
-        if move_count <= skip_early:
-            board.push(node.move)
-            continue
-
-        # Initialize feature updater on first position we might use
-        if feature_updater is None:
-            feature_updater = IncrementalFeatureUpdater(board)
-
-        # Update features incrementally (this also updates the updater's internal board)
-        feature_updater.push(node.move)
-        # Keep main board in sync
-        board.push(node.move)
-
-        if board.is_game_over():
-            continue
-
-        if board.is_check():
-            continue
-
-            # Skip if this move was a capture (position after capture is tactically unstable)
-        if is_capture:
-            continue
-
-        #comment = node.comment if hasattr(node, 'comment') else ''
-        #eval_score = parse_evaluation(comment)
-
-        ev = node.eval()
-        if ev is None:
-            score = None
-        else:
-            if ev.is_mate():
-                mate_in = ev.white().mate()
-                if mate_in < 0:
-                    score = -10_000
-                else:
-                    score = 10_000
-            else:
-                score = ev.white().score()
-                score = min(score, 10_000)
-                score = max(score, -10_000)
-
-            score = np.tanh(score / 400)
-
-        if score is not None:
-            # Get features from incremental updater (faster than full recompute)
-            white_feat, black_feat = feature_updater.get_features_unsorted()
-            stm = 1.0 if board.turn == chess.WHITE else 0.0
-
-            # CRITICAL FIX: Lichess eval is always from White's perspective.
-            # But our network outputs from the side-to-move's perspective.
-            # So when Black is to move, we need to negate the evaluation.
-            if board.turn == chess.BLACK:
-                score = -score
-
-            positions.append((white_feat, black_feat, stm, score))
-
-    return positions
+# def process_game(game, max_positions: int = 120, skip_early: int = 10) -> List[Tuple]:
+#     """
+#     Process a single game and return positions with evaluations.
+#     Uses incremental feature updates for efficiency.
+#     """
+#     if game is None:
+#         return []
+#
+#     positions = []
+#     board = game.board()
+#
+#     # Initialize incremental updater after skipping early moves
+#     feature_updater = None
+#     move_count = 0
+#
+#     for node in game.mainline():
+#         move_count += 1
+#         current_move = node.move
+#
+#         # Check if this move is a capture BEFORE pushing it
+#         is_capture = board.is_capture(current_move)
+#
+#         if len(positions) >= max_positions:
+#             break
+#
+#         if move_count <= skip_early:
+#             board.push(node.move)
+#             continue
+#
+#         # Initialize feature updater on first position we might use
+#         if feature_updater is None:
+#             feature_updater = IncrementalFeatureUpdater(board)
+#
+#         # Update features incrementally (this also updates the updater's internal board)
+#         feature_updater.push(node.move)
+#         # Keep main board in sync
+#         board.push(node.move)
+#
+#         if board.is_game_over():
+#             continue
+#
+#         if board.is_check():
+#             continue
+#
+#             # Skip if this move was a capture (position after capture is tactically unstable)
+#         if is_capture:
+#             continue
+#
+#         #comment = node.comment if hasattr(node, 'comment') else ''
+#         #eval_score = parse_evaluation(comment)
+#
+#         ev = node.eval()
+#         if ev is None:
+#             score = None
+#         else:
+#             if ev.is_mate():
+#                 mate_in = ev.white().mate()
+#                 if mate_in < 0:
+#                     score = -10_000
+#                 else:
+#                     score = 10_000
+#             else:
+#                 score = ev.white().score()
+#                 score = min(score, 10_000)
+#                 score = max(score, -10_000)
+#
+#             score = np.tanh(score / 400)
+#
+#         if score is not None:
+#             # Get features from incremental updater (faster than full recompute)
+#             white_feat, black_feat = feature_updater.get_features_unsorted()
+#             stm = 1.0 if board.turn == chess.WHITE else 0.0
+#
+#             # CRITICAL FIX: Lichess eval is always from White's perspective.
+#             # But our network outputs from the side-to-move's perspective.
+#             # So when Black is to move, we need to negate the evaluation.
+#             if board.turn == chess.BLACK:
+#                 score = -score
+#
+#             positions.append((white_feat, black_feat, stm, score))
+#
+#     return positions
 
 
 class ProcessGameWithValidation:
@@ -575,7 +575,7 @@ class ProcessGameWithValidation:
     def __init__(self):
         self.position_count = 0
 
-    def __call__(self, game, max_positions: int = 20, skip_early: int = 10) -> List[Tuple]:
+    def __call__(self, game, max_positions: int = 200, skip_early: int = 10) -> List[Tuple]:
         """
         Process a single game and return positions with evaluations.
         Uses incremental feature updates for efficiency.
@@ -594,21 +594,19 @@ class ProcessGameWithValidation:
         # Initialize incremental updater after skipping early moves
         feature_updater = None
         move_count = 0
-        last_move_was_capture = False
 
         for node in game.mainline():
             move_count += 1
             current_move = node.move
 
             # Check if this move is a capture BEFORE pushing it
-            is_capture = board.is_capture(current_move)
+            was_last_move_capture = board.is_capture(current_move)
 
             if len(positions) >= max_positions:
                 break
 
             if move_count <= skip_early:
                 board.push(current_move)
-                last_move_was_capture = is_capture
                 continue
 
             # Initialize feature updater on first position we might use
@@ -621,17 +619,14 @@ class ProcessGameWithValidation:
             board.push(node.move)
 
             if board.is_game_over():
-                last_move_was_capture = is_capture
                 continue
 
             # Skip if side to move is in check
             if board.is_check():
-                last_move_was_capture = is_capture
                 continue
 
             # Skip if this move was a capture (position after capture is tactically unstable)
-            if is_capture:
-                last_move_was_capture = is_capture
+            if was_last_move_capture:
                 continue
 
             #comment = node.comment if hasattr(node, 'comment') else ''
@@ -640,16 +635,29 @@ class ProcessGameWithValidation:
             if ev is None:
                 score = None
             else:
+                # if ev.is_mate():
+                #     mate_in = ev.white().mate()
+                #     if mate_in < 0:
+                #         score = -10_000
+                #     else:
+                #         score = 10_000
+                # else:
+                #     score = ev.white().score()
+                #     score = min(score, 10_000)
+                #     score = max(score, -10_000)
+
                 if ev.is_mate():
                     mate_in = ev.white().mate()
                     if mate_in < 0:
-                        score = -10_000
+                        mate_in = max(-10, mate_in)
+                        score = -10_000 - mate_in * 100
                     else:
-                        score = 10_000
+                        mate_in = min(10, mate_in)
+                        score = 10_000 - mate_in * 100
                 else:
                     score = ev.white().score()
-                    score = min(score, 10_000)
-                    score = max(score, -10_000)
+                    score = min(score, 10_000 - 10 * 100)
+                    score = max(score, -10_000 + 10 * 100)
 
                 score = np.tanh(score / 400)
 
@@ -693,8 +701,6 @@ class ProcessGameWithValidation:
                     score = -score
 
                 positions.append((white_feat, black_feat, stm, score))
-
-            last_move_was_capture = is_capture
 
         return positions
 
@@ -763,9 +769,9 @@ def worker_process(
         stop_event: Event,
         stats: SharedStats,
         batch_size: int = BATCH_SIZE,
-        max_positions_per_game: int = 20,
+        max_positions_per_game: int = 200,
         skip_early_moves: int = 10,
-        shuffle_buffer_size: int = 2000  # Reduced from 10000 for faster startup
+        shuffle_buffer_size: int = 5000#2000  # Reduced from 10000 for faster startup
 ):
     """
     Worker process that streams positions from a PGN file.
@@ -1086,7 +1092,7 @@ class ParallelTrainer:
             self.val_buffer.clear()
 
         while positions_processed < positions_per_epoch:
-            batch_data = self.get_batch(timeout=1.0)
+            batch_data = self.get_batch(timeout=2.0)
 
             if batch_data is None:
                 print("Warning: No batch received, waiting...")

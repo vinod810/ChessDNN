@@ -4,11 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="multiple workers and increment feature evaluation">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Training 40 epochs loss 0.5">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/halfkp.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/stockfish_eval.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish_eval.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/test_halfkp.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -111,14 +111,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00038" summary="Troubleshooting code">
-      <option name="closed" value="true" />
-      <created>1766938661428</created>
-      <option name="number" value="00038" />
-      <option name="presentableId" value="LOCAL-00038" />
-      <option name="project" value="LOCAL" />
-      <updated>1766938661428</updated>
     </task>
     <task id="LOCAL-00039" summary="Troubleshooting code">
       <option name="closed" value="true" />
@@ -504,7 +496,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767818798919</updated>
     </task>
-    <option name="localTasksCounter" value="87" />
+    <task id="LOCAL-00087" summary="Training 40 epochs loss 0.5">
+      <option name="closed" value="true" />
+      <created>1767850099138</created>
+      <option name="number" value="00087" />
+      <option name="presentableId" value="LOCAL-00087" />
+      <option name="project" value="LOCAL" />
+      <updated>1767850099138</updated>
+    </task>
+    <option name="localTasksCounter" value="88" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -519,7 +519,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Book move - WAC - 5 sec - 205/300" />
     <MESSAGE value="Check for 3-fold repetition" />
     <MESSAGE value="board_repr_to_fen()" />
     <MESSAGE value="Three-fold repetition fix." />
@@ -544,7 +543,8 @@
     <MESSAGE value="Early stopping" />
     <MESSAGE value="multiple workers" />
     <MESSAGE value="multiple workers and increment feature evaluation" />
-    <option name="LAST_COMMIT_MESSAGE" value="multiple workers and increment feature evaluation" />
+    <MESSAGE value="Training 40 epochs loss 0.5" />
+    <option name="LAST_COMMIT_MESSAGE" value="Training 40 epochs loss 0.5" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -25,4 +25,5 @@ DNN512 +6.9 ELO / 50 games
 
 NNUE Training
 All positions - Epoch 37 -Validation Loss: 0.049032
+Quiet positions only, 120+10 plys -
 
