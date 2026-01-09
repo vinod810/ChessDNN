@@ -37,8 +37,8 @@ POSITIONS_PER_EPOCH = 1_000_000
 BATCH_SIZE = 8192
 SHUFFLE_BUFFER_SIZE = BATCH_SIZE * 10
 QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512)
-LEARNING_RATE = 0.001 * int(BATCH_SIZE / 512)
-VALIDATION_SPLIT = 0.10
+LEARNING_RATE = 0.001 #* int(BATCH_SIZE / 512)
+VALIDATION_SPLIT = 0.05
 GC_INTERVAL = 1000  # Run garbage collection every N batches
 
 TANH_SCALE = 400  # 1200(CP) = 3 = ~pi = 0.99
@@ -1111,7 +1111,8 @@ class ParallelTrainer:
             process_start = time.time()
 
             # Train/validation split (main process decides)
-            is_validation = self.rng.random() < self.validation_split
+            #is_validation = self.rng.random() < self.validation_split
+            is_validation = self.stats.main_val_batches.value < positions_per_epoch / BATCH_SIZE * self.validation_split
 
             with self.stats.main_batches.get_lock():
                 self.stats.main_batches.value += 1
@@ -1157,7 +1158,7 @@ class ParallelTrainer:
                 self.stats.main_process_ms.value += int(process_time * 1000)
 
             # Progress update
-            if train_batch_count % int(POSITIONS_PER_EPOCH / BATCH_SIZE / 5) == 0: # 5 prints per epoch
+            if train_batch_count != 0 and train_batch_count % int(POSITIONS_PER_EPOCH / BATCH_SIZE / 5) == 0: # 5 prints per epoch
                 avg_loss = total_train_loss / max(1, train_batch_count)
                 print(f"  Batch {train_batch_count}: Loss={avg_loss:.6f}, "
                       f"Positions={positions_processed:,}/{positions_per_epoch:,}")
@@ -1178,6 +1179,8 @@ class ParallelTrainer:
         # Clear validation buffer after computing loss
         with self.val_buffer_lock:
             self.val_buffer.clear()
+        with self.stats.main_val_batches.get_lock():
+            self.stats.main_val_batches.value = 0
 
         gc.collect()
 
@@ -1234,12 +1237,12 @@ class ParallelTrainer:
         scheduler = None
         if lr_scheduler == "plateau":
             scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, mode='min', factor=0.5, patience=3,
+                self.optimizer, mode='min', factor=0.5, patience=5,
                 min_lr=1e-6
             )
         elif lr_scheduler == "step":
             scheduler = optim.lr_scheduler.StepLR(
-                self.optimizer, step_size=10, gamma=0.5
+                self.optimizer, step_size=100, gamma=0.5
             )
 
         self.grad_clip = grad_clip
@@ -1400,7 +1403,7 @@ if __name__ == "__main__":
         pgn_dir=pgn_dir,
         model=model,
         batch_size=BATCH_SIZE,
-        validation_split=0.05,
+        validation_split=VALIDATION_SPLIT,
         queue_size=QUEUE_MAX_SIZE,
         device=device,
         seed=42
@@ -1415,7 +1418,7 @@ if __name__ == "__main__":
         epochs=5000,
         lr=LEARNING_RATE,
         positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
-        early_stopping_patience=10,  # More patience since LR scheduler helps
+        early_stopping_patience=100,  # More patience since LR scheduler helps
         checkpoint_path="best_model.pt",
         lr_scheduler="plateau",  # Reduce LR on plateau
         grad_clip=1.0  # Gradient clipping
