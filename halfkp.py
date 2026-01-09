@@ -33,9 +33,19 @@ OUTPUT_SIZE = 1
 
 # Worker configuration
 QUEUE_MAX_SIZE = 100  # Max batches in queue
-BATCH_SIZE = 512
+POSITIONS_PER_EPOCH = 1_000_000
+BATCH_SIZE = 8192
+SHUFFLE_BUFFER_SIZE = BATCH_SIZE * 10
+QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512)
+LEARNING_RATE = 0.001 * int(BATCH_SIZE / 512)
+VALIDATION_SPLIT = 0.10
 GC_INTERVAL = 1000  # Run garbage collection every N batches
 
+TANH_SCALE = 400  # 1200(CP) = 3 = ~pi = 0.99
+MAX_SCORE = 10_000  # tanh(10) is almost 1
+MATE_FACTOR = 100
+MAX_MATE_DEPTH = 10
+MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
 
 # @dataclass
 # class WorkerStats:
@@ -649,17 +659,17 @@ class ProcessGameWithValidation:
                 if ev.is_mate():
                     mate_in = ev.white().mate()
                     if mate_in < 0:
-                        mate_in = max(-10, mate_in)
-                        score = -10_000 - mate_in * 100
+                        mate_in = max(-MAX_MATE_DEPTH, mate_in)
+                        score = -MAX_SCORE - mate_in * MATE_FACTOR
                     else:
-                        mate_in = min(10, mate_in)
-                        score = 10_000 - mate_in * 100
+                        mate_in = min(MAX_MATE_DEPTH, mate_in)
+                        score = MAX_SCORE - mate_in * MATE_FACTOR
                 else:
                     score = ev.white().score()
-                    score = min(score, 10_000 - 10 * 100)
-                    score = max(score, -10_000 + 10 * 100)
+                    score = min(score, MAX_NON_MATE_SCORE)
+                    score = max(score, -MAX_NON_MATE_SCORE)
 
-                score = np.tanh(score / 400)
+                score = np.tanh(score / TANH_SCALE)
 
             if score is not None:
                 # Get features from incremental updater (faster than full recompute)
@@ -771,7 +781,7 @@ def worker_process(
         batch_size: int = BATCH_SIZE,
         max_positions_per_game: int = 200,
         skip_early_moves: int = 10,
-        shuffle_buffer_size: int = 5000#2000  # Reduced from 10000 for faster startup
+        shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE #2000  # Reduced from 10000 for faster startup
 ):
     """
     Worker process that streams positions from a PGN file.
@@ -969,7 +979,7 @@ class ParallelTrainer:
             pgn_dir: str,
             model: nn.Module,
             batch_size: int = BATCH_SIZE,
-            validation_split: float = 0.05,
+            validation_split: float = VALIDATION_SPLIT,
             queue_size: int = QUEUE_MAX_SIZE,
             device: str = 'cpu',
             seed: int = 42
@@ -1001,7 +1011,7 @@ class ParallelTrainer:
 
         # Training state
         self.rng = random.Random(seed)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)  # Use self.model, not model
+        self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)  # Use self.model, not model
         self.criterion = nn.MSELoss()
 
         # Validation buffer with size limit
@@ -1075,7 +1085,7 @@ class ParallelTrainer:
                 if time.time() - wait_start > timeout:
                     return None
 
-    def train_epoch(self, positions_per_epoch: int = 100000) -> Tuple[float, float]:
+    def train_epoch(self, positions_per_epoch: int = POSITIONS_PER_EPOCH) -> Tuple[float, float]:
         """
         Train for one epoch.
         Returns (train_loss, val_loss)
@@ -1092,7 +1102,7 @@ class ParallelTrainer:
             self.val_buffer.clear()
 
         while positions_processed < positions_per_epoch:
-            batch_data = self.get_batch(timeout=2.0)
+            batch_data = self.get_batch(timeout=QUEUE_READ_TIMEOUT)
 
             if batch_data is None:
                 print("Warning: No batch received, waiting...")
@@ -1147,7 +1157,7 @@ class ParallelTrainer:
                 self.stats.main_process_ms.value += int(process_time * 1000)
 
             # Progress update
-            if train_batch_count % 100 == 0:
+            if train_batch_count % int(POSITIONS_PER_EPOCH / BATCH_SIZE / 5) == 0: # 5 prints per epoch
                 avg_loss = total_train_loss / max(1, train_batch_count)
                 print(f"  Batch {train_batch_count}: Loss={avg_loss:.6f}, "
                       f"Positions={positions_processed:,}/{positions_per_epoch:,}")
@@ -1207,7 +1217,7 @@ class ParallelTrainer:
     def train(
             self,
             epochs: int = 50,
-            lr: float = 0.001,
+            lr: float = LEARNING_RATE,
             positions_per_epoch: int = 100000,
             early_stopping_patience: int = 5,
             checkpoint_path: str = "best_model.pt",
@@ -1403,8 +1413,8 @@ if __name__ == "__main__":
     # - Gradient clipping for stability
     history = trainer.train(
         epochs=5000,
-        lr=0.001,
-        positions_per_epoch=1000_000,  # 1M positions per epoch (was 100k)
+        lr=LEARNING_RATE,
+        positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
         early_stopping_patience=10,  # More patience since LR scheduler helps
         checkpoint_path="best_model.pt",
         lr_scheduler="plateau",  # Reduce LR on plateau
@@ -1426,7 +1436,7 @@ if __name__ == "__main__":
     test_board = chess.Board()
     eval_score = inference.evaluate_board(test_board)
     print(f"Starting position evaluation: {eval_score:.4f}")
-    print(f"Centipawn equivalent: {np.arctanh(np.clip(eval_score, -0.99, 0.99)) * 400:.1f}")
+    print(f"Centipawn equivalent: {np.arctanh(np.clip(eval_score, -0.99, 0.99)) * TANH_SCALE:.1f}")
 
     # Save weights
     inference.save_weights("nnue_weights.bin")

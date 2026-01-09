@@ -280,6 +280,7 @@ def process_game_pgn(pgn_text: str) -> Tuple[List[bytes], dict]:
         # This avoids O(n²) complexity from replaying moves from start
         board = game.board()
 
+        # TODO make processing similar to NNUE. Skip tactical positions.
         for node in game.mainline():
             board.push(node.move)
 
