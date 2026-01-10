@@ -490,7 +490,7 @@ class NNUENetwork(nn.Module):
 #     return None
 
 
-# def process_game(game, max_positions: int = 120, skip_early: int = 10) -> List[Tuple]:
+# def process_game(game, max_plys_per_game: int = 120, opening_plys: int = 10) -> List[Tuple]:
 #     """
 #     Process a single game and return positions with evaluations.
 #     Uses incremental feature updates for efficiency.
@@ -512,10 +512,10 @@ class NNUENetwork(nn.Module):
 #         # Check if this move is a capture BEFORE pushing it
 #         is_capture = board.is_capture(current_move)
 #
-#         if len(positions) >= max_positions:
+#         if len(positions) >= max_plys_per_game:
 #             break
 #
-#         if move_count <= skip_early:
+#         if move_count <= opening_plys:
 #             board.push(node.move)
 #             continue
 #

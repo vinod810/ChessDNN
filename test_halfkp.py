@@ -9,7 +9,7 @@ try:
     from halfkp import NNUENetwork, NNUEFeatures, INPUT_SIZE, HIDDEN_SIZE # FIXME
 except ImportError:
     try:
-        #from nnue_train_parallel import NNUENetwork, NNUEFeatures, INPUT_SIZE, HIDDEN_SIZE
+        #from nnue_train_parallel import NNUENetwork, NNUEFeatures, INPUT_SIZE, FIRST_HIDDEN_SIZE
         pass
     except ImportError:
         print("Error: Could not import from halfkp.py or nnue_train_parallel.py")

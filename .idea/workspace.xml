@@ -4,9 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment=" 2 epochs train loss 0.12, max_games=200">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="train_nn.py">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/halfkp.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/test_halfkp.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/train_nn.py" beforeDir="false" afterPath="$PROJECT_DIR$/train_nn.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -35,6 +38,9 @@
     &quot;accountId&quot;: &quot;577e566d-777f-4436-8ae2-1f0e7379717c&quot;
   }
 }</component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 1
 }</component>
@@ -43,19 +49,20 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.best_move.executor&quot;: &quot;Debug&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;SHELLCHECK.PATH&quot;: &quot;/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/eapen/Documents/Projects/ChessDNN/engine.py&quot;,
-    &quot;run.code.analysis.last.selected.profile&quot;: &quot;pProject Default&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.best_move.executor": "Debug",
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "SHELLCHECK.PATH": "/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck",
+    "git-widget-placeholder": "master",
+    "last_opened_file_path": "/home/eapen/Documents/Projects/ChessDNN/engine.py",
+    "run.code.analysis.last.selected.profile": "pProject Default",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/test" />
@@ -68,7 +75,6 @@
   <component name="RunManager">
     <configuration name="engine" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="ChessDNN" />
-      <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <envs>
@@ -79,7 +85,6 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="RUN_TOOL" value="" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/engine.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
@@ -102,6 +107,7 @@
       </set>
     </attachedChunks>
   </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
       <changelist id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="" />
@@ -109,14 +115,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00041" summary="Printing parameters to aid testing">
-      <option name="closed" value="true" />
-      <created>1766958083796</created>
-      <option name="number" value="00041" />
-      <option name="presentableId" value="LOCAL-00041" />
-      <option name="project" value="LOCAL" />
-      <updated>1766958083796</updated>
     </task>
     <task id="LOCAL-00042" summary="Optimization uptoLMR_MOVE_THRESHOLD=2 from bottom. total=300, passed=193, success-rate=64.33%">
       <option name="closed" value="true" />
@@ -502,7 +500,14 @@
       <option name="project" value="LOCAL" />
       <updated>1767929063144</updated>
     </task>
-    <option name="localTasksCounter" value="90" />
+    <task id="LOCAL-00090" summary="train_nn.py">
+      <created>1768014744842</created>
+      <option name="number" value="00090" />
+      <option name="presentableId" value="LOCAL-00090" />
+      <option name="project" value="LOCAL" />
+      <updated>1768014744842</updated>
+    </task>
+    <option name="localTasksCounter" value="91" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -517,7 +522,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Three-fold repetition fix." />
     <MESSAGE value="Relative file path" />
     <MESSAGE value="Stockfish" />
     <MESSAGE value="total=300, passed=220, success-rate=73.33%" />
@@ -542,7 +546,8 @@
     <MESSAGE value="Training 40 epochs loss 0.5" />
     <MESSAGE value=" 10 epochs val loss 0.56, max_games=20" />
     <MESSAGE value=" 2 epochs train loss 0.12, max_games=200" />
-    <option name="LAST_COMMIT_MESSAGE" value=" 2 epochs train loss 0.12, max_games=200" />
+    <MESSAGE value="train_nn.py" />
+    <option name="LAST_COMMIT_MESSAGE" value="train_nn.py" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

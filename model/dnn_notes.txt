@@ -28,4 +28,8 @@ All positions - Epoch 37 - Validation Loss: 0.049032
 Quiet positions only, 20-10 plys epoch 10 - val loss 5.5
 Quiet positions only, 200-10 plys epoch ??  - val loss ??
 
+NN Training
+DNN -
+NNUE -
+
 

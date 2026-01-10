@@ -12,6 +12,7 @@ import struct
 import random
 import re
 import os
+import platform
 import gc
 import time
 import glob
@@ -22,54 +23,88 @@ from collections import deque
 import threading
 import ctypes
 
+"""
+Chess Neural Network Training Script
+Supports both NNUE and DNN architectures for chess position evaluation.
+
+ARCHITECTURE SELECTION:
+    Set NN_TYPE = "NNUE" or NN_TYPE = "DNN" in the Configuration section below.
+
+NNUE (Efficiently Updatable Neural Network):
+    - Input: Two 40960-dimensional sparse vectors (white/black king-piece features)
+    - Architecture: 40960 -> 256 (shared) -> 512 (concatenated) -> 32 -> 32 -> 1
+    - Hidden activation: Clipped ReLU [0, 1]
+    - Output activation: Linear (no activation)
+    - Features: King-relative piece positions for both perspectives
+    - Output: Position evaluation from side-to-move's perspective
+
+DNN (Deep Neural Network):
+    - Input: Single 768-dimensional one-hot encoded vector (from player's perspective)
+    - Architecture: 768 -> 1024 -> 256 -> 32 -> 1
+    - Hidden activation: Clipped ReLU [0, 1]
+    - Output activation: Linear (no activation)
+    - Features: Piece positions from perspective of player to move
+    - Output: Position evaluation from side-to-move's perspective
+
+Both networks are trained on tanh-normalized targets: tanh(centipawns / 400).
+Both networks output linearly and learn to produce values in approximately [-1, 1].
+Output range: approximately [-1, 1] for both architectures.
+"""
+
 # Configuration
+# Network type selection: "NNUE" or "DNN"
+NN_TYPE = "DNN"
+
+# NNUE Configuration
 KING_SQUARES = 64
 PIECE_SQUARES = 64
 PIECE_TYPES = 5  # P, N, B, R, Q (no King)
 COLORS = 2  # White, Black
-INPUT_SIZE = KING_SQUARES * PIECE_SQUARES * PIECE_TYPES * COLORS
-HIDDEN_SIZE = 256
+NNUE_INPUT_SIZE = KING_SQUARES * PIECE_SQUARES * PIECE_TYPES * COLORS
+NNUE_HIDDEN_SIZE = 256
+
+# DNN Configuration
+DNN_INPUT_SIZE = 768  # 64 squares * 6 piece types * 2 colors
+DNN_HIDDEN_LAYERS = [1024, 256, 32]
+
+# Dynamic configuration based on NN_TYPE
+INPUT_SIZE = NNUE_INPUT_SIZE if NN_TYPE == "NNUE" else DNN_INPUT_SIZE
+FIRST_HIDDEN_SIZE = NNUE_HIDDEN_SIZE if NN_TYPE == "NNUE" else DNN_HIDDEN_LAYERS[0]
 OUTPUT_SIZE = 1
+MODEL_PATH = "model/nnue.pt" if NN_TYPE == "NNUE" else "model/dnn.pt"
+
+# Main configuration
+BATCH_SIZE = 8192
+if platform.system() == "Windows":
+    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512) * 5 # Windows file reading is slow
+else:
+    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512)
 
 # Worker configuration
 QUEUE_MAX_SIZE = 100  # Max batches in queue
-POSITIONS_PER_EPOCH = 1_000_000
-BATCH_SIZE = 8192
 SHUFFLE_BUFFER_SIZE = BATCH_SIZE * 10
-QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512)
-LEARNING_RATE = 0.001 #* int(BATCH_SIZE / 512)
-VALIDATION_SPLIT = 0.05
+
+#Misc
 GC_INTERVAL = 1000  # Run garbage collection every N batches
 
-TANH_SCALE = 400  # 1200(CP) = 3 = ~pi = 0.99
-MAX_SCORE = 10_000  # tanh(10) is almost 1
+# Training
+LEARNING_RATE = 0.001
+VALIDATION_SPLIT = 0.05
+STEPS_PER_EPOCH = 1000
+POSITIONS_PER_EPOCH = BATCH_SIZE * STEPS_PER_EPOCH
+EPOCHS = 500
+EARLY_STOPPING_PATIENCE = 10
+LR_PATIENCE = 3
+
+# PGN
+MAX_PLYS_PER_GAME = 200
+OPENING_PLYS = 0
+
+TANH_SCALE = 400
+MAX_SCORE = 10_000
 MATE_FACTOR = 100
 MAX_MATE_DEPTH = 10
 MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
-
-# @dataclass
-# class WorkerStats:
-#     """Statistics for a single worker"""
-#     worker_id: int
-#     file_path: str
-#     games_processed: int = 0
-#     positions_extracted: int = 0
-#     batches_sent: int = 0
-#     file_loops: int = 0
-#     wait_time_seconds: float = 0.0
-#     processing_time_seconds: float = 0.0
-#     last_update: float = field(default_factory=time.time)
-
-
-# @dataclass
-# class MainProcessStats:
-#     """Statistics for main process"""
-#     batches_consumed: int = 0
-#     train_batches: int = 0
-#     val_batches: int = 0
-#     wait_time_seconds: float = 0.0
-#     processing_time_seconds: float = 0.0
-#     last_update: float = field(default_factory=time.time)
 
 
 class SharedStats:
@@ -175,7 +210,11 @@ class NNUEFeatures:
 
     @staticmethod
     def get_piece_index(piece_type: int, piece_color: bool) -> int:
-        """Convert piece type and color to index (0-9)"""
+        """Convert piece type and color to index (0-9)
+        Note: This method uses the piece_color boolean as-is. The caller is
+        responsible for flipping piece_color when extracting from black's perspective
+        to achieve relative encoding (my pieces vs opponent pieces).
+        """
         if piece_type == chess.KING:
             return -1
         type_idx = piece_type - 1
@@ -243,13 +282,72 @@ class NNUEFeatures:
         return white_features, black_features
 
 
+class DNNFeatures:
+    """Handles feature extraction for DNN network (768-dimensional one-hot encoding)"""
+
+    @staticmethod
+    def get_piece_index(piece_type: int, piece_color: bool) -> int:
+        """Convert piece type and color to index (0-11) using relative colors"""
+        # King=0, Queen=1, Rook=2, Bishop=3, Knight=4, Pawn=5
+        # Friendly pieces: 0-5, Opponent pieces: 6-11
+        type_map = {
+            chess.KING: 0,
+            chess.QUEEN: 1,
+            chess.ROOK: 2,
+            chess.BISHOP: 3,
+            chess.KNIGHT: 4,
+            chess.PAWN: 5
+        }
+        type_idx = type_map.get(piece_type, 0)
+        color_offset = 0 if piece_color else 6
+        return type_idx + color_offset
+
+    @staticmethod
+    def extract_features(board: chess.Board, perspective: bool) -> List[int]:
+        """
+        Extract 768-dimensional one-hot features from perspective of player to move.
+        Returns list of active feature indices.
+
+        Feature encoding: square * 12 + piece_index
+        where piece_index is 0-11 (6 piece types × 2 colors)
+        """
+        features = []
+
+        # If perspective is BLACK, we need to flip the board
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece is None:
+                continue
+
+            # Adjust square if viewing from black's perspective
+            if not perspective:
+                # Flip square vertically (A1 <-> A8)
+                rank = square // 8
+                file = square % 8
+                square = (7 - rank) * 8 + file
+
+            # Get piece index (0-11)
+            # Piece color should be relative to perspective:
+            # True = friendly piece (side to move), False = opponent piece
+            piece_is_friendly = (piece.color == chess.WHITE) == perspective
+            piece_idx = DNNFeatures.get_piece_index(piece.piece_type, piece_is_friendly)
+            # Calculate feature index: square * 12 + piece_index
+            feature_idx = square * 12 + piece_idx
+            features.append(feature_idx)
+
+        return features
+
+    @staticmethod
+    def board_to_features(board: chess.Board) -> List[int]:
+        """Extract features from perspective of side to move"""
+        return DNNFeatures.extract_features(board, board.turn == chess.WHITE)
+
+
 class IncrementalFeatureUpdater:
     """
     Efficiently maintains NNUE features with incremental updates.
-
     Instead of recomputing all features after each move, this class
     tracks which features need to be added/removed based on the move made.
-
     For king moves, a full recomputation is needed for that perspective
     since all features depend on the king square.
     """
@@ -410,7 +508,7 @@ class IncrementalFeatureUpdater:
 class NNUENetwork(nn.Module):
     """PyTorch NNUE Network"""
 
-    def __init__(self, input_size=INPUT_SIZE, hidden_size=HIDDEN_SIZE):
+    def __init__(self, input_size=INPUT_SIZE, hidden_size=FIRST_HIDDEN_SIZE):
         super(NNUENetwork, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -421,8 +519,23 @@ class NNUENetwork(nn.Module):
 
     def forward(self, white_features, black_features, stm):
         """
-        white_features, black_features: dense tensors
-        stm: side to move (1.0 for white, 0.0 for black)
+        Input: white_features (40960), black_features (40960), stm (1 or 0)
+          ↓
+        Feature Transform (shared weights): ft layer
+          ↓
+        w_hidden (256) and b_hidden (256)
+          ↓
+        Perspective Concatenation based on side-to-move
+          ↓
+        hidden (512) = [my_perspective, opponent_perspective]
+          ↓
+        l1: 512 → 32 (Clipped ReLU)
+          ↓
+        l2: 32 → 32 (Clipped ReLU)
+          ↓
+        l3: 32 → 1 (Linear)
+          ↓
+        Output: evaluation score
         """
         w_hidden = torch.clamp(self.ft(white_features), 0, 1)
         b_hidden = torch.clamp(self.ft(black_features), 0, 1)
@@ -442,11 +555,13 @@ class NNUENetwork(nn.Module):
         n_black = batch_size - n_white
 
         if n_white > 0 and n_black > 0:
-            # Mixed batch - normal case
-            hidden[white_to_move, :self.hidden_size] = w_hidden[white_to_move]
-            hidden[white_to_move, self.hidden_size:] = b_hidden[white_to_move]
-            hidden[~white_to_move, :self.hidden_size] = b_hidden[~white_to_move]
-            hidden[~white_to_move, self.hidden_size:] = w_hidden[~white_to_move]
+            # Positions where WHITE to move:
+            hidden[white_to_move, :self.hidden_size] = w_hidden[white_to_move]  # My perspective (white's)
+            hidden[white_to_move, self.hidden_size:] = b_hidden[white_to_move]  # Opponent perspective (black's)
+
+            # Positions where BLACK to move:
+            hidden[~white_to_move, :self.hidden_size] = b_hidden[~white_to_move]  # My perspective (black's)
+            hidden[~white_to_move, self.hidden_size:] = w_hidden[~white_to_move]  # Opponent perspective (white's)
         elif n_white > 0:
             # All white to move
             hidden[:, :self.hidden_size] = w_hidden
@@ -459,119 +574,35 @@ class NNUENetwork(nn.Module):
         x = torch.clamp(self.l1(hidden), 0, 1)
         x = torch.clamp(self.l2(x), 0, 1)
         x = self.l3(x)
-        return torch.tanh(x)
+        return x  # Linear output (no activation)
 
 
-# def parse_evaluation(comment: str) -> Optional[float]:
-#     """
-#     Parse evaluation from PGN comment
-#     Supports formats:
-#     - [%eval 0.24] (centipawn score)
-#     - [%eval #3] (mate in 3)
-#     - [%eval -1.5] (negative score)
-#     """
-#     if not comment:
-#         return None
-#
-#     eval_pattern = r'\[%eval\s+(#)?(-?\d+\.?\d*)\]'
-#     match = re.search(eval_pattern, comment)
-#
-#     if match:
-#         is_mate = match.group(1) == '#'
-#         value = float(match.group(2))
-#
-#         if is_mate:
-#             cp = 10000 if value > 0 else -10000
-#         else:
-#             cp = value * 100
-#
-#         return np.tanh(cp / 400.0)
-#
-#     return None
+class DNNNetwork(nn.Module):
+    """PyTorch DNN Network for chess position evaluation"""
 
+    def __init__(self, input_size=DNN_INPUT_SIZE, hidden_layers=None):
+        super(DNNNetwork, self).__init__()
+        if hidden_layers is None:
+            hidden_layers = DNN_HIDDEN_LAYERS
 
-# def process_game(game, max_positions: int = 120, skip_early: int = 10) -> List[Tuple]:
-#     """
-#     Process a single game and return positions with evaluations.
-#     Uses incremental feature updates for efficiency.
-#     """
-#     if game is None:
-#         return []
-#
-#     positions = []
-#     board = game.board()
-#
-#     # Initialize incremental updater after skipping early moves
-#     feature_updater = None
-#     move_count = 0
-#
-#     for node in game.mainline():
-#         move_count += 1
-#         current_move = node.move
-#
-#         # Check if this move is a capture BEFORE pushing it
-#         is_capture = board.is_capture(current_move)
-#
-#         if len(positions) >= max_positions:
-#             break
-#
-#         if move_count <= skip_early:
-#             board.push(node.move)
-#             continue
-#
-#         # Initialize feature updater on first position we might use
-#         if feature_updater is None:
-#             feature_updater = IncrementalFeatureUpdater(board)
-#
-#         # Update features incrementally (this also updates the updater's internal board)
-#         feature_updater.push(node.move)
-#         # Keep main board in sync
-#         board.push(node.move)
-#
-#         if board.is_game_over():
-#             continue
-#
-#         if board.is_check():
-#             continue
-#
-#             # Skip if this move was a capture (position after capture is tactically unstable)
-#         if is_capture:
-#             continue
-#
-#         #comment = node.comment if hasattr(node, 'comment') else ''
-#         #eval_score = parse_evaluation(comment)
-#
-#         ev = node.eval()
-#         if ev is None:
-#             score = None
-#         else:
-#             if ev.is_mate():
-#                 mate_in = ev.white().mate()
-#                 if mate_in < 0:
-#                     score = -10_000
-#                 else:
-#                     score = 10_000
-#             else:
-#                 score = ev.white().score()
-#                 score = min(score, 10_000)
-#                 score = max(score, -10_000)
-#
-#             score = np.tanh(score / 400)
-#
-#         if score is not None:
-#             # Get features from incremental updater (faster than full recompute)
-#             white_feat, black_feat = feature_updater.get_features_unsorted()
-#             stm = 1.0 if board.turn == chess.WHITE else 0.0
-#
-#             # CRITICAL FIX: Lichess eval is always from White's perspective.
-#             # But our network outputs from the side-to-move's perspective.
-#             # So when Black is to move, we need to negate the evaluation.
-#             if board.turn == chess.BLACK:
-#                 score = -score
-#
-#             positions.append((white_feat, black_feat, stm, score))
-#
-#     return positions
+        self.input_size = input_size
+        self.hidden_layers = hidden_layers
+
+        # Build layers: input -> hidden[0] -> hidden[1] -> hidden[2] -> output
+        self.l1 = nn.Linear(input_size, hidden_layers[0])
+        self.l2 = nn.Linear(hidden_layers[0], hidden_layers[1])
+        self.l3 = nn.Linear(hidden_layers[1], hidden_layers[2])
+        self.l4 = nn.Linear(hidden_layers[2], 1)
+
+    def forward(self, features):
+        """
+        features: dense tensor of shape (batch_size, 768)
+        """
+        x = torch.clamp(self.l1(features), 0, 1) # Clamped ReLU
+        x = torch.clamp(self.l2(x), 0, 1)
+        x = torch.clamp(self.l3(x), 0, 1)
+        x = self.l4(x)
+        return x  # Linear output (no activation)
 
 
 class ProcessGameWithValidation:
@@ -585,7 +616,33 @@ class ProcessGameWithValidation:
     def __init__(self):
         self.position_count = 0
 
-    def __call__(self, game, max_positions: int = 200, skip_early: int = 10) -> List[Tuple]:
+    def is_matching_full_vs_incremental(self, board, white_feat, black_feat):
+        # Full extraction for comparison
+        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
+
+        # Compare as sets (order doesn't matter)
+        white_match = set(white_feat) == set(white_feat_full)
+        black_match = set(black_feat) == set(black_feat_full)
+
+        if not white_match or not black_match:
+            print(f"\n⚠️  WARNING: Incremental feature mismatch at position {self.position_count}!")
+            print(f"    FEN: {board.fen()}")
+            if not white_match:
+                incremental_only = set(white_feat) - set(white_feat_full)
+                full_only = set(white_feat_full) - set(white_feat)
+                print(f"    White features - Incremental only: {incremental_only}")
+                print(f"    White features - Full only: {full_only}")
+            if not black_match:
+                incremental_only = set(black_feat) - set(black_feat_full)
+                full_only = set(black_feat_full) - set(black_feat)
+                print(f"    Black features - Incremental only: {incremental_only}")
+                print(f"    Black features - Full only: {full_only}")
+
+            return False
+        else:
+            return True
+
+    def __call__(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME, opening_plys: int = OPENING_PLYS) -> List[Tuple]:
         """
         Process a single game and return positions with evaluations.
         Uses incremental feature updates for efficiency.
@@ -612,10 +669,10 @@ class ProcessGameWithValidation:
             # Check if this move is a capture BEFORE pushing it
             was_last_move_capture = board.is_capture(current_move)
 
-            if len(positions) >= max_positions:
+            if len(positions) >= max_plys_per_game:
                 break
 
-            if move_count <= skip_early:
+            if move_count <= opening_plys:
                 board.push(current_move)
                 continue
 
@@ -639,26 +696,15 @@ class ProcessGameWithValidation:
             if was_last_move_capture:
                 continue
 
-            #comment = node.comment if hasattr(node, 'comment') else ''
-            #eval_score = parse_evaluation(comment)
+            # comment = node.comment if hasattr(node, 'comment') else ''
+            # eval_score = parse_evaluation(comment)
             ev = node.eval()
             if ev is None:
                 score = None
             else:
-                # if ev.is_mate():
-                #     mate_in = ev.white().mate()
-                #     if mate_in < 0:
-                #         score = -10_000
-                #     else:
-                #         score = 10_000
-                # else:
-                #     score = ev.white().score()
-                #     score = min(score, 10_000)
-                #     score = max(score, -10_000)
-
                 if ev.is_mate():
                     mate_in = ev.white().mate()
-                    if mate_in < 0:
+                    if mate_in < 0:  # -ve when black is winning
                         mate_in = max(-MAX_MATE_DEPTH, mate_in)
                         score = -MAX_SCORE - mate_in * MATE_FACTOR
                     else:
@@ -669,48 +715,31 @@ class ProcessGameWithValidation:
                     score = min(score, MAX_NON_MATE_SCORE)
                     score = max(score, -MAX_NON_MATE_SCORE)
 
+                # Lichess eval is always from White's perspective.
+                if board.turn == chess.BLACK:
+                        score = -score
+
                 score = np.tanh(score / TANH_SCALE)
 
             if score is not None:
-                # Get features from incremental updater (faster than full recompute)
-                white_feat, black_feat = feature_updater.get_features_unsorted()
+                if NN_TYPE == "NNUE":
+                    # Get features from incremental updater (faster than full recompute)
+                    white_feat, black_feat = feature_updater.get_features_unsorted()
 
-                # Periodic validation: compare incremental vs full extraction
-                self.position_count += 1
-                if self.position_count % self.VALIDATION_INTERVAL == 0:
-                    # Full extraction for comparison
-                    white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
+                    # Periodic validation: compare incremental vs full extraction
+                    self.position_count += 1
+                    if self.position_count % self.VALIDATION_INTERVAL == 0:
+                        if not self.is_matching_full_vs_incremental(board, white_feat, black_feat):
+                            # Use full-extraction as fallback
+                            white_feat, black_feat = NNUEFeatures.board_to_features(board)
 
-                    # Compare as sets (order doesn't matter)
-                    white_match = set(white_feat) == set(white_feat_full)
-                    black_match = set(black_feat) == set(black_feat_full)
+                    stm = 1.0 if board.turn == chess.WHITE else 0.0
+                    positions.append((white_feat, black_feat, stm, score))
 
-                    if not white_match or not black_match:
-                        print(f"\n⚠️  WARNING: Incremental feature mismatch at position {self.position_count}!")
-                        print(f"    FEN: {board.fen()}")
-                        if not white_match:
-                            incremental_only = set(white_feat) - set(white_feat_full)
-                            full_only = set(white_feat_full) - set(white_feat)
-                            print(f"    White features - Incremental only: {incremental_only}")
-                            print(f"    White features - Full only: {full_only}")
-                        if not black_match:
-                            incremental_only = set(black_feat) - set(black_feat_full)
-                            full_only = set(black_feat_full) - set(black_feat)
-                            print(f"    Black features - Incremental only: {incremental_only}")
-                            print(f"    Black features - Full only: {full_only}")
-
-                        # Use full extraction as fallback
-                        white_feat, black_feat = white_feat_full, black_feat_full
-
-                stm = 1.0 if board.turn == chess.WHITE else 0.0
-
-                # CRITICAL FIX: Lichess eval is always from White's perspective.
-                # But our network outputs from the side-to-move's perspective.
-                # So when Black is to move, we need to negate the evaluation.
-                if board.turn == chess.BLACK:
-                    score = -score
-
-                positions.append((white_feat, black_feat, stm, score))
+                else:  # DNN
+                    # Extract features from perspective of side to move
+                    feat = DNNFeatures.board_to_features(board)
+                    positions.append((feat, score))
 
         return positions
 
@@ -720,56 +749,81 @@ def encode_sparse_batch(positions: List[Tuple]) -> Dict[str, Any]:
     Encode a batch of positions into sparse format for efficient IPC.
     Instead of sending dense tensors, we send indices of non-zero elements.
 
-    Returns dict with:
-    - white_indices: list of lists of active indices per sample
-    - black_indices: list of lists of active indices per sample
-    - stm: numpy array of side-to-move values
-    - scores: numpy array of evaluation scores
-    - batch_size: number of samples
+    For NNUE: Returns dict with white_indices, black_indices, stm, scores, batch_size
+    For DNN: Returns dict with features, scores, batch_size (no stm needed as features are from perspective)
     """
-    white_indices = []
-    black_indices = []
-    stms = []
-    scores = []
+    if NN_TYPE == "NNUE":
+        white_indices = []
+        black_indices = []
+        stms = []
+        scores = []
 
-    for white_feat, black_feat, stm, score in positions:
-        white_indices.append(white_feat)  # Already a list of indices
-        black_indices.append(black_feat)
-        stms.append(stm)
-        scores.append(score)
+        for white_feat, black_feat, stm, score in positions:
+            white_indices.append(white_feat)
+            black_indices.append(black_feat)
+            stms.append(stm)
+            scores.append(score)
 
-    return {
-        'white_indices': white_indices,
-        'black_indices': black_indices,
-        'stm': np.array(stms, dtype=np.float32),
-        'scores': np.array(scores, dtype=np.float32),
-        'batch_size': len(positions)
-    }
+        return {
+            'white_indices': white_indices,
+            'black_indices': black_indices,
+            'stm': np.array(stms, dtype=np.float32),
+            'scores': np.array(scores, dtype=np.float32),
+            'batch_size': len(positions)
+        }
+    else:  # DNN
+        features = []
+        scores = []
+
+        for feat, score in positions:
+            features.append(feat)
+            scores.append(score)
+
+        return {
+            'features': features,
+            'scores': np.array(scores, dtype=np.float32),
+            'batch_size': len(positions)
+        }
 
 
 def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu') -> Tuple[torch.Tensor, ...]:
     """
     Decode sparse batch data back to dense tensors.
     Called in main process after receiving from queue.
+
+    For NNUE: Returns (white_input, black_input, stm, scores)
+    For DNN: Returns (features, scores) - note different return signature!
     """
     batch_size = batch_data['batch_size']
-    white_indices = batch_data['white_indices']
-    black_indices = batch_data['black_indices']
-
-    # Create dense tensors
-    white_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
-    black_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
-
-    for i in range(batch_size):
-        if white_indices[i]:
-            white_input[i, white_indices[i]] = 1.0
-        if black_indices[i]:
-            black_input[i, black_indices[i]] = 1.0
-
-    stm = torch.tensor(batch_data['stm'], dtype=torch.float32, device=device).unsqueeze(1)
     scores = torch.tensor(batch_data['scores'], dtype=torch.float32, device=device).unsqueeze(1)
 
-    return white_input, black_input, stm, scores
+    if NN_TYPE == "NNUE":
+        white_indices = batch_data['white_indices']
+        black_indices = batch_data['black_indices']
+
+        # Create dense tensors
+        white_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
+        black_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
+
+        for i in range(batch_size):
+            if white_indices[i]:
+                white_input[i, white_indices[i]] = 1.0
+            if black_indices[i]:
+                black_input[i, black_indices[i]] = 1.0
+
+        stm = torch.tensor(batch_data['stm'], dtype=torch.float32, device=device).unsqueeze(1)
+        return white_input, black_input, stm, scores
+    else:  # DNN
+        feature_indices = batch_data['features']
+
+        # Create dense tensor
+        features = torch.zeros(batch_size, INPUT_SIZE, device=device)
+
+        for i in range(batch_size):
+            if feature_indices[i]:
+                features[i, feature_indices[i]] = 1.0
+
+        return features, scores
 
 
 def worker_process(
@@ -779,9 +833,9 @@ def worker_process(
         stop_event: Event,
         stats: SharedStats,
         batch_size: int = BATCH_SIZE,
-        max_positions_per_game: int = 200,
-        skip_early_moves: int = 10,
-        shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE #2000  # Reduced from 10000 for faster startup
+        max_positions_per_game: int = MAX_PLYS_PER_GAME,
+        opening_plys: int = OPENING_PLYS,
+        shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE  # 2000  # Reduced from 10000 for faster startup
 ):
     """
     Worker process that streams positions from a PGN file.
@@ -810,23 +864,23 @@ def worker_process(
                         game = chess.pgn.read_game(text_stream)
                         if game is None:
                             # EOF reached, increment loop counter and break to restart
-                            with stats.worker_file_loops[worker_id].get_lock():
-                                stats.worker_file_loops[worker_id].value += 1
+                            #with stats.worker_file_loops[worker_id].get_lock(): # Rare event so lock is fine
+                            stats.worker_file_loops[worker_id].value += 1
                             break
 
                         # Process game with periodic validation (using local counter)
-                        positions = game_processor(game, max_positions_per_game, skip_early_moves)
+                        positions = game_processor(game, max_positions_per_game, opening_plys)
 
                         if positions:
                             position_buffer.extend(positions)
-                            with stats.worker_games[worker_id].get_lock():
-                                stats.worker_games[worker_id].value += 1
-                            with stats.worker_positions[worker_id].get_lock():
-                                stats.worker_positions[worker_id].value += len(positions)
+                            #with stats.worker_games[worker_id].get_lock():
+                            stats.worker_games[worker_id].value += 1
+                            #with stats.worker_positions[worker_id].get_lock():
+                            stats.worker_positions[worker_id].value += len(positions)
 
                         process_time = time.time() - process_start
-                        with stats.worker_process_ms[worker_id].get_lock():
-                            stats.worker_process_ms[worker_id].value += int(process_time * 1000)
+                        # with stats.worker_process_ms[worker_id].get_lock():
+                        stats.worker_process_ms[worker_id].value += int(process_time * 1000)
 
                         # When buffer is large enough, shuffle and send batches
                         while len(position_buffer) >= shuffle_buffer_size and not stop_event.is_set():
@@ -847,17 +901,17 @@ def worker_process(
                                 while not stop_event.is_set():
                                     try:
                                         output_queue.put(sparse_batch, timeout=0.1)
-                                        with stats.worker_batches[worker_id].get_lock():
-                                            stats.worker_batches[worker_id].value += 1
+                                        #with stats.worker_batches[worker_id].get_lock():
+                                        stats.worker_batches[worker_id].value += 1
                                         break
                                     except:
                                         # Queue full
-                                        with stats.queue_full_count.get_lock():
-                                            stats.queue_full_count.value += 1
+                                        # with stats.queue_full_count.get_lock():
+                                        stats.queue_full_count.value += 1
 
                                 wait_time = time.time() - wait_start
-                                with stats.worker_wait_ms[worker_id].get_lock():
-                                    stats.worker_wait_ms[worker_id].value += int(wait_time * 1000)
+                                #with stats.worker_wait_ms[worker_id].get_lock():
+                                stats.worker_wait_ms[worker_id].value += int(wait_time * 1000)
 
                                 # Clear batch_positions explicitly
                                 del batch_positions
@@ -910,8 +964,8 @@ def worker_process(
 class EarlyStopping:
     """Early stopping to stop training when validation loss doesn't improve"""
 
-    def __init__(self, patience: int = 5, min_delta: float = 0.0, verbose: bool = True,
-                 checkpoint_path: str = "best_model.pt"):
+    def __init__(self, patience: int = EARLY_STOPPING_PATIENCE, min_delta: float = 0.0, verbose: bool = True,
+                 checkpoint_path: str = MODEL_PATH):
         self.patience = patience
         self.min_delta = min_delta
         self.verbose = verbose
@@ -973,7 +1027,6 @@ class EarlyStopping:
 
 class ParallelTrainer:
     """Main training coordinator with parallel data loading"""
-
     def __init__(
             self,
             pgn_dir: str,
@@ -1070,12 +1123,12 @@ class ParallelTrainer:
             try:
                 batch = self.data_queue.get(timeout=timeout)
                 wait_time = time.time() - wait_start
-                with self.stats.main_wait_ms.get_lock():
-                    self.stats.main_wait_ms.value += int(wait_time * 1000)
+                #with self.stats.main_wait_ms.get_lock():
+                self.stats.main_wait_ms.value += int(wait_time * 1000)
                 return batch
             except:
-                with self.stats.queue_empty_count.get_lock():
-                    self.stats.queue_empty_count.value += 1
+                #with self.stats.queue_empty_count.get_lock():
+                self.stats.queue_empty_count.value += 1
 
                 # Check if all workers are dead
                 alive_workers = sum(1 for p in self.workers if p.is_alive())
@@ -1111,54 +1164,80 @@ class ParallelTrainer:
             process_start = time.time()
 
             # Train/validation split (main process decides)
-            #is_validation = self.rng.random() < self.validation_split
+            # is_validation = self.rng.random() < self.validation_split
             is_validation = self.stats.main_val_batches.value < positions_per_epoch / BATCH_SIZE * self.validation_split
 
-            with self.stats.main_batches.get_lock():
-                self.stats.main_batches.value += 1
+            #with self.stats.main_batches.get_lock():
+            self.stats.main_batches.value += 1
 
             if is_validation:
                 # Store for validation (with size limit via deque maxlen)
                 with self.val_buffer_lock:
                     self.val_buffer.append(batch_data)
-                with self.stats.main_val_batches.get_lock():
-                    self.stats.main_val_batches.value += 1
+                #with self.stats.main_val_batches.get_lock():
+                self.stats.main_val_batches.value += 1
             else:
                 # Training step
-                white_input, black_input, stm, target = decode_sparse_batch(
-                    batch_data, self.device
-                )
+                if NN_TYPE == "NNUE":
+                    white_input, black_input, stm, target = decode_sparse_batch(
+                        batch_data, self.device
+                    )
+                    self.optimizer.zero_grad()
+                    output = self.model(white_input, black_input, stm)
+                    loss = self.criterion(output, target)
+                    loss.backward()
 
-                self.optimizer.zero_grad()
-                output = self.model(white_input, black_input, stm)
-                loss = self.criterion(output, target)
-                loss.backward()
+                    # Gradient clipping for stability
+                    if hasattr(self, 'grad_clip') and self.grad_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
 
-                # Gradient clipping for stability
-                if hasattr(self, 'grad_clip') and self.grad_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                    self.optimizer.step()
 
-                self.optimizer.step()
+                    total_train_loss += loss.item()
+                    train_batch_count += 1
+                    positions_processed += batch_data['batch_size']
 
-                total_train_loss += loss.item()
-                train_batch_count += 1
-                positions_processed += batch_data['batch_size']
-
-                with self.stats.main_train_batches.get_lock():
+                    #with self.stats.main_train_batches.get_lock():
                     self.stats.main_train_batches.value += 1
 
-                # Clean up tensors
-                del white_input, black_input, stm, target, output, loss
+                    # Clean up tensors
+                    del white_input, black_input, stm, target, output, loss
+
+                else:  # DNN
+                    features, target = decode_sparse_batch(
+                        batch_data, self.device
+                    )
+                    self.optimizer.zero_grad()
+                    output = self.model(features)
+                    loss = self.criterion(output, target)
+                    loss.backward()
+
+                    # Gradient clipping for stability
+                    if hasattr(self, 'grad_clip') and self.grad_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+
+                    self.optimizer.step()
+
+                    total_train_loss += loss.item()
+                    train_batch_count += 1
+                    positions_processed += batch_data['batch_size']
+
+                    #with self.stats.main_train_batches.get_lock():
+                    self.stats.main_train_batches.value += 1
+
+                    # Clean up tensors
+                    del features, target, output, loss
 
             # Clean up batch data
             del batch_data
 
             process_time = time.time() - process_start
-            with self.stats.main_process_ms.get_lock():
-                self.stats.main_process_ms.value += int(process_time * 1000)
+            #with self.stats.main_process_ms.get_lock():
+            self.stats.main_process_ms.value += int(process_time * 1000)
 
             # Progress update
-            if train_batch_count != 0 and train_batch_count % int(POSITIONS_PER_EPOCH / BATCH_SIZE / 5) == 0: # 5 prints per epoch
+            if train_batch_count != 0 and train_batch_count % int(
+                    POSITIONS_PER_EPOCH / BATCH_SIZE / 50) == 0:  # 50 prints per epoch
                 avg_loss = total_train_loss / max(1, train_batch_count)
                 print(f"  Batch {train_batch_count}: Loss={avg_loss:.6f}, "
                       f"Positions={positions_processed:,}/{positions_per_epoch:,}")
@@ -1179,8 +1258,8 @@ class ParallelTrainer:
         # Clear validation buffer after computing loss
         with self.val_buffer_lock:
             self.val_buffer.clear()
-        with self.stats.main_val_batches.get_lock():
-            self.stats.main_val_batches.value = 0
+        #with self.stats.main_val_batches.get_lock():
+        self.stats.main_val_batches.value = 0
 
         gc.collect()
 
@@ -1198,18 +1277,26 @@ class ParallelTrainer:
 
         with torch.no_grad():
             for batch_data in val_batches:
-                white_input, black_input, stm, target = decode_sparse_batch(
-                    batch_data, self.device
-                )
-
-                output = self.model(white_input, black_input, stm)
-                loss = self.criterion(output, target)
-
-                total_loss += loss.item()
-                batch_count += 1
-
-                # Clean up
-                del white_input, black_input, stm, target, output, loss
+                if NN_TYPE == "NNUE":
+                    white_input, black_input, stm, target = decode_sparse_batch(
+                        batch_data, self.device
+                    )
+                    output = self.model(white_input, black_input, stm)
+                    loss = self.criterion(output, target)
+                    total_loss += loss.item()
+                    batch_count += 1
+                    # Clean up
+                    del white_input, black_input, stm, target, output, loss
+                else:  # DNN
+                    features, target = decode_sparse_batch(
+                        batch_data, self.device
+                    )
+                    output = self.model(features)
+                    loss = self.criterion(output, target)
+                    total_loss += loss.item()
+                    batch_count += 1
+                    # Clean up
+                    del features, target, output, loss
 
         # Clear the local copy
         del val_batches
@@ -1219,11 +1306,11 @@ class ParallelTrainer:
 
     def train(
             self,
-            epochs: int = 50,
+            epochs: int = EPOCHS,
             lr: float = LEARNING_RATE,
-            positions_per_epoch: int = 100000,
-            early_stopping_patience: int = 5,
-            checkpoint_path: str = "best_model.pt",
+            positions_per_epoch: int = POSITIONS_PER_EPOCH,
+            early_stopping_patience: int = EARLY_STOPPING_PATIENCE,
+            checkpoint_path: str = MODEL_PATH,
             lr_scheduler: str = "plateau",  # "plateau", "step", or "none"
             grad_clip: float = 1.0  # Gradient clipping max norm
     ) -> Dict[str, List[float]]:
@@ -1237,10 +1324,10 @@ class ParallelTrainer:
         scheduler = None
         if lr_scheduler == "plateau":
             scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, mode='min', factor=0.5, patience=10,
+                self.optimizer, mode='min', factor=0.5, patience=LR_PATIENCE,
                 min_lr=1e-6
             )
-        elif lr_scheduler == "step":
+        elif lr_scheduler == "step":  # Not used
             scheduler = optim.lr_scheduler.StepLR(
                 self.optimizer, step_size=100, gamma=0.5
             )
@@ -1301,83 +1388,154 @@ class ParallelTrainer:
         return history
 
 
-class NNUEInference:
-    """Numpy-based inference engine"""
-
-    def __init__(self, model: NNUENetwork):
-        model.eval()
-        self.ft_weight = model.ft.weight.detach().cpu().numpy()
-        self.ft_bias = model.ft.bias.detach().cpu().numpy()
-        self.l1_weight = model.l1.weight.detach().cpu().numpy()
-        self.l1_bias = model.l1.bias.detach().cpu().numpy()
-        self.l2_weight = model.l2.weight.detach().cpu().numpy()
-        self.l2_bias = model.l2.bias.detach().cpu().numpy()
-        self.l3_weight = model.l3.weight.detach().cpu().numpy()
-        self.l3_bias = model.l3.bias.detach().cpu().numpy()
-
-    def clipped_relu(self, x):
-        return np.clip(x, 0, 1)
-
-    def evaluate(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
-        white_input = np.zeros(INPUT_SIZE)
-        black_input = np.zeros(INPUT_SIZE)
-
-        for f in white_features:
-            white_input[f] = 1.0
-        for f in black_features:
-            black_input[f] = 1.0
-
-        white_hidden = self.clipped_relu(np.dot(white_input, self.ft_weight.T) + self.ft_bias)
-        black_hidden = self.clipped_relu(np.dot(black_input, self.ft_weight.T) + self.ft_bias)
-
-        if stm:
-            hidden = np.concatenate([white_hidden, black_hidden])
-        else:
-            hidden = np.concatenate([black_hidden, white_hidden])
-
-        x = self.clipped_relu(np.dot(hidden, self.l1_weight.T) + self.l1_bias)
-        x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
-        output = np.dot(x, self.l3_weight.T) + self.l3_bias
-
-        return np.tanh(output[0])
-
-    def evaluate_board(self, board: chess.Board) -> float:
-        white_feat, black_feat = NNUEFeatures.board_to_features(board)
-        return self.evaluate(white_feat, black_feat, board.turn == chess.WHITE)
-
-    def save_weights(self, filename: str):
-        with open(filename, 'wb') as f:
-            f.write(struct.pack('III', INPUT_SIZE, HIDDEN_SIZE, 32))
-            self.ft_weight.tofile(f)
-            self.ft_bias.tofile(f)
-            self.l1_weight.tofile(f)
-            self.l1_bias.tofile(f)
-            self.l2_weight.tofile(f)
-            self.l2_bias.tofile(f)
-            self.l3_weight.tofile(f)
-            self.l3_bias.tofile(f)
-
-    @classmethod
-    def load_weights(cls, filename: str):
-        with open(filename, 'rb') as f:
-            input_size, hidden_size, l1_size = struct.unpack('III', f.read(12))
-            model = NNUENetwork(input_size, hidden_size)
-            inference = cls(model)
-
-            inference.ft_weight = np.fromfile(f, dtype=np.float32,
-                                              count=hidden_size * input_size).reshape(hidden_size, input_size)
-            inference.ft_bias = np.fromfile(f, dtype=np.float32, count=hidden_size)
-            inference.l1_weight = np.fromfile(f, dtype=np.float32,
-                                              count=l1_size * hidden_size * 2).reshape(l1_size, hidden_size * 2)
-            inference.l1_bias = np.fromfile(f, dtype=np.float32, count=l1_size)
-            inference.l2_weight = np.fromfile(f, dtype=np.float32,
-                                              count=l1_size * l1_size).reshape(l1_size, l1_size)
-            inference.l2_bias = np.fromfile(f, dtype=np.float32, count=l1_size)
-            inference.l3_weight = np.fromfile(f, dtype=np.float32,
-                                              count=l1_size).reshape(1, l1_size)
-            inference.l3_bias = np.fromfile(f, dtype=np.float32, count=1)
-
-            return inference
+# class NNUEInference:
+#     """Numpy-based inference engine"""
+#
+#     def __init__(self, model: NNUENetwork):
+#         model.eval()
+#         self.ft_weight = model.ft.weight.detach().cpu().numpy()
+#         self.ft_bias = model.ft.bias.detach().cpu().numpy()
+#         self.l1_weight = model.l1.weight.detach().cpu().numpy()
+#         self.l1_bias = model.l1.bias.detach().cpu().numpy()
+#         self.l2_weight = model.l2.weight.detach().cpu().numpy()
+#         self.l2_bias = model.l2.bias.detach().cpu().numpy()
+#         self.l3_weight = model.l3.weight.detach().cpu().numpy()
+#         self.l3_bias = model.l3.bias.detach().cpu().numpy()
+#
+#     def clipped_relu(self, x):
+#         return np.clip(x, 0, 1)
+#
+#     def evaluate(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
+#         white_input = np.zeros(INPUT_SIZE)
+#         black_input = np.zeros(INPUT_SIZE)
+#
+#         for f in white_features:
+#             white_input[f] = 1.0
+#         for f in black_features:
+#             black_input[f] = 1.0
+#
+#         white_hidden = self.clipped_relu(np.dot(white_input, self.ft_weight.T) + self.ft_bias)
+#         black_hidden = self.clipped_relu(np.dot(black_input, self.ft_weight.T) + self.ft_bias)
+#
+#         if stm:
+#             hidden = np.concatenate([white_hidden, black_hidden])
+#         else:
+#             hidden = np.concatenate([black_hidden, white_hidden])
+#
+#         x = self.clipped_relu(np.dot(hidden, self.l1_weight.T) + self.l1_bias)
+#         x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
+#         output = np.dot(x, self.l3_weight.T) + self.l3_bias
+#
+#         return output[0]  # Linear output (no activation)
+#
+#     def evaluate_board(self, board: chess.Board) -> float:
+#         white_feat, black_feat = NNUEFeatures.board_to_features(board)
+#         return self.evaluate(white_feat, black_feat, board.turn == chess.WHITE)
+#
+#     def save_weights(self, filename: str):
+#         with open(filename, 'wb') as f:
+#             f.write(struct.pack('III', INPUT_SIZE, FIRST_HIDDEN_SIZE, 32))
+#             self.ft_weight.tofile(f)
+#             self.ft_bias.tofile(f)
+#             self.l1_weight.tofile(f)
+#             self.l1_bias.tofile(f)
+#             self.l2_weight.tofile(f)
+#             self.l2_bias.tofile(f)
+#             self.l3_weight.tofile(f)
+#             self.l3_bias.tofile(f)
+#
+#     @classmethod
+#     def load_weights(cls, filename: str):
+#         with open(filename, 'rb') as f:
+#             input_size, hidden_size, l1_size = struct.unpack('III', f.read(12))
+#             model = NNUENetwork(input_size, hidden_size)
+#             inference = cls(model)
+#
+#             inference.ft_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=hidden_size * input_size).reshape(hidden_size, input_size)
+#             inference.ft_bias = np.fromfile(f, dtype=np.float32, count=hidden_size)
+#             inference.l1_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=l1_size * hidden_size * 2).reshape(l1_size, hidden_size * 2)
+#             inference.l1_bias = np.fromfile(f, dtype=np.float32, count=l1_size)
+#             inference.l2_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=l1_size * l1_size).reshape(l1_size, l1_size)
+#             inference.l2_bias = np.fromfile(f, dtype=np.float32, count=l1_size)
+#             inference.l3_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=l1_size).reshape(1, l1_size)
+#             inference.l3_bias = np.fromfile(f, dtype=np.float32, count=1)
+#
+#             return inference
+#
+#
+# class DNNInference:
+#     """Numpy-based inference engine for DNN"""
+#
+#     def __init__(self, model: DNNNetwork):
+#         model.eval()
+#         self.l1_weight = model.l1.weight.detach().cpu().numpy()
+#         self.l1_bias = model.l1.bias.detach().cpu().numpy()
+#         self.l2_weight = model.l2.weight.detach().cpu().numpy()
+#         self.l2_bias = model.l2.bias.detach().cpu().numpy()
+#         self.l3_weight = model.l3.weight.detach().cpu().numpy()
+#         self.l3_bias = model.l3.bias.detach().cpu().numpy()
+#         self.l4_weight = model.l4.weight.detach().cpu().numpy()
+#         self.l4_bias = model.l4.bias.detach().cpu().numpy()
+#
+#     def clipped_relu(self, x):
+#         return np.clip(x, 0, 1)
+#
+#     def evaluate(self, features: List[int]) -> float:
+#         feature_input = np.zeros(DNN_INPUT_SIZE)
+#
+#         for f in features:
+#             feature_input[f] = 1.0
+#
+#         x = self.clipped_relu(np.dot(feature_input, self.l1_weight.T) + self.l1_bias)
+#         x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
+#         x = self.clipped_relu(np.dot(x, self.l3_weight.T) + self.l3_bias)
+#         output = np.dot(x, self.l4_weight.T) + self.l4_bias
+#
+#         return output[0]  # Linear output (no activation)
+#
+#     def evaluate_board(self, board: chess.Board) -> float:
+#         feat = DNNFeatures.board_to_features(board)
+#         return self.evaluate(feat)
+#
+#     def save_weights(self, filename: str):
+#         with open(filename, 'wb') as f:
+#             # Write header: input_size, hidden_layer_sizes
+#             f.write(struct.pack('IIII', DNN_INPUT_SIZE, DNN_HIDDEN_LAYERS[0],
+#                                 DNN_HIDDEN_LAYERS[1], DNN_HIDDEN_LAYERS[2]))
+#             self.l1_weight.tofile(f)
+#             self.l1_bias.tofile(f)
+#             self.l2_weight.tofile(f)
+#             self.l2_bias.tofile(f)
+#             self.l3_weight.tofile(f)
+#             self.l3_bias.tofile(f)
+#             self.l4_weight.tofile(f)
+#             self.l4_bias.tofile(f)
+#
+#     @classmethod
+#     def load_weights(cls, filename: str):
+#         with open(filename, 'rb') as f:
+#             input_size, h1, h2, h3 = struct.unpack('IIII', f.read(16))
+#             model = DNNNetwork(input_size, [h1, h2, h3])
+#             inference = cls(model)
+#
+#             inference.l1_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=h1 * input_size).reshape(h1, input_size)
+#             inference.l1_bias = np.fromfile(f, dtype=np.float32, count=h1)
+#             inference.l2_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=h2 * h1).reshape(h2, h1)
+#             inference.l2_bias = np.fromfile(f, dtype=np.float32, count=h2)
+#             inference.l3_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=h3 * h2).reshape(h3, h2)
+#             inference.l3_bias = np.fromfile(f, dtype=np.float32, count=h3)
+#             inference.l4_weight = np.fromfile(f, dtype=np.float32,
+#                                               count=h3).reshape(1, h3)
+#             inference.l4_bias = np.fromfile(f, dtype=np.float32, count=1)
+#
+#             return inference
 
 
 if __name__ == "__main__":
@@ -1387,15 +1545,20 @@ if __name__ == "__main__":
     pgn_dir = "./pgn"
 
     print("=" * 60)
-    print("NNUE Training with Parallel Data Loading")
+    print(f"{NN_TYPE} Training with Parallel Data Loading")
     print("=" * 60)
 
     # Detect device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
+    print(f"Network type: {NN_TYPE}")
 
-    # Create model
-    model = NNUENetwork()
+    # Create model based on NN_TYPE
+    if NN_TYPE == "NNUE":
+        model = NNUENetwork()
+    else:  # DNN
+        model = DNNNetwork()
+
     print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
 
     # Create trainer
@@ -1415,11 +1578,11 @@ if __name__ == "__main__":
     # - Longer patience since LR will be reduced
     # - Gradient clipping for stability
     history = trainer.train(
-        epochs=5000,
+        epochs=EPOCHS,
         lr=LEARNING_RATE,
         positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
-        early_stopping_patience=100,  # More patience since LR scheduler helps
-        checkpoint_path="best_model.pt",
+        early_stopping_patience=EARLY_STOPPING_PATIENCE,  # More patience since LR scheduler helps
+        checkpoint_path=MODEL_PATH,
         lr_scheduler="plateau",  # Reduce LR on plateau
         grad_clip=1.0  # Gradient clipping
     )
@@ -1432,22 +1595,27 @@ if __name__ == "__main__":
     print(f"Best validation loss: {min(history['val_loss']):.6f}")
     print(f"Epochs trained: {len(history['train_loss'])}")
 
-    # Create inference engine and test
-    print("\nCreating inference engine...")
-    inference = NNUEInference(model)
+    # # Create inference engine and test based on NN_TYPE
+    # print("\nCreating inference engine...")
+    # if NN_TYPE == "NNUE":
+    #     inference = NNUEInference(model)
+    #     weights_file = WEIGHTS_FILE_PATH"nnue_weights.bin"
+    # else:  # DNN
+    #     inference = DNNInference(model)
+    #     weights_file = "dnn_weights.bin"
+    #
+    # test_board = chess.Board()
+    # eval_score = inference.evaluate_board(test_board)
+    # print(f"Starting position evaluation: {eval_score:.4f}")
+    # print(f"Centipawn equivalent: {np.arctanh(np.clip(eval_score, -0.99, 0.99)) * TANH_SCALE:.1f}")
+    #
+    # # Save weights
+    # inference.save_weights(weights_file)
+    # print(f"Weights saved to {weights_file}")
 
-    test_board = chess.Board()
-    eval_score = inference.evaluate_board(test_board)
-    print(f"Starting position evaluation: {eval_score:.4f}")
-    print(f"Centipawn equivalent: {np.arctanh(np.clip(eval_score, -0.99, 0.99)) * TANH_SCALE:.1f}")
-
-    # Save weights
-    inference.save_weights("nnue_weights.bin")
-    print("Weights saved to nnue_weights.bin")
-
-    # Save history
-    import json
-
-    with open("training_history.json", "w") as f:
-        json.dump(history, f, indent=2)
-    print("Training history saved to training_history.json")
+    # # Save history
+    # import json
+    #
+    # with open("training_history.json", "w") as f:
+    #     json.dump(history, f, indent=2)
+    # print("Training history saved to training_history.json")
