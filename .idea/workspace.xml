@@ -4,12 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="train_nn.py">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="DNN, 70M positions, val=0.063">
+      <change afterPath="$PROJECT_DIR$/nn_eval.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/halfkp.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/test_halfkp.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/train_nn.py" beforeDir="false" afterPath="$PROJECT_DIR$/train_nn.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -115,14 +112,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00042" summary="Optimization uptoLMR_MOVE_THRESHOLD=2 from bottom. total=300, passed=193, success-rate=64.33%">
-      <option name="closed" value="true" />
-      <created>1767056688109</created>
-      <option name="number" value="00042" />
-      <option name="presentableId" value="LOCAL-00042" />
-      <option name="project" value="LOCAL" />
-      <updated>1767056688109</updated>
     </task>
     <task id="LOCAL-00043" summary="Claude - 1">
       <option name="closed" value="true" />
@@ -507,7 +496,14 @@
       <option name="project" value="LOCAL" />
       <updated>1768014744842</updated>
     </task>
-    <option name="localTasksCounter" value="91" />
+    <task id="LOCAL-00091" summary="DNN, 70M positions, val=0.063">
+      <created>1768085577782</created>
+      <option name="number" value="00091" />
+      <option name="presentableId" value="LOCAL-00091" />
+      <option name="project" value="LOCAL" />
+      <updated>1768085577782</updated>
+    </task>
+    <option name="localTasksCounter" value="92" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -522,7 +518,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Relative file path" />
     <MESSAGE value="Stockfish" />
     <MESSAGE value="total=300, passed=220, success-rate=73.33%" />
     <MESSAGE value="cond env neurofish" />
@@ -547,7 +542,8 @@
     <MESSAGE value=" 10 epochs val loss 0.56, max_games=20" />
     <MESSAGE value=" 2 epochs train loss 0.12, max_games=200" />
     <MESSAGE value="train_nn.py" />
-    <option name="LAST_COMMIT_MESSAGE" value="train_nn.py" />
+    <MESSAGE value="DNN, 70M positions, val=0.063" />
+    <option name="LAST_COMMIT_MESSAGE" value="DNN, 70M positions, val=0.063" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
