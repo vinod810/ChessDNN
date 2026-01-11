@@ -4,9 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="nn_tests.py - Accumulator correctness">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="nn_tests.py - true vs predicated MSE">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_tests.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -112,14 +111,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00045" summary="SINGULAR_MARGIN=130,81.85">
-      <option name="closed" value="true" />
-      <created>1767113602020</created>
-      <option name="number" value="00045" />
-      <option name="presentableId" value="LOCAL-00045" />
-      <option name="project" value="LOCAL" />
-      <updated>1767113602020</updated>
     </task>
     <task id="LOCAL-00046" summary="cached_board.py">
       <option name="closed" value="true" />
@@ -501,7 +492,14 @@
       <option name="project" value="LOCAL" />
       <updated>1768094440697</updated>
     </task>
-    <option name="localTasksCounter" value="94" />
+    <task id="LOCAL-00094" summary="nn_tests.py - true vs predicated MSE">
+      <created>1768100392160</created>
+      <option name="number" value="00094" />
+      <option name="presentableId" value="LOCAL-00094" />
+      <option name="project" value="LOCAL" />
+      <updated>1768100392160</updated>
+    </task>
+    <option name="localTasksCounter" value="95" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -516,7 +514,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="cond env neurofish" />
     <MESSAGE value="environment.yml" />
     <MESSAGE value="prepare-data.py all moves" />
     <MESSAGE value="total=300, passed=187, success-rate=62.33%" />
@@ -541,7 +538,8 @@
     <MESSAGE value="DNN, 70M positions, val=0.063" />
     <MESSAGE value="nn_eval.py" />
     <MESSAGE value="nn_tests.py - Accumulator correctness" />
-    <option name="LAST_COMMIT_MESSAGE" value="nn_tests.py - Accumulator correctness" />
+    <MESSAGE value="nn_tests.py - true vs predicated MSE" />
+    <option name="LAST_COMMIT_MESSAGE" value="nn_tests.py - true vs predicated MSE" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
