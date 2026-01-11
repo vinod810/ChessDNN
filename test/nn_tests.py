@@ -17,8 +17,6 @@ import sys
 import time
 from typing import List, Set, Tuple
 
-# TODO avoid maintaining board internally.
-
 # Import configuration and classes from train_nn
 try:
     from train_nn import (
