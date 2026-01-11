@@ -748,7 +748,7 @@ def test_eval_accuracy(inference, nn_type: str):
     print(f"{nn_type} Evaluation Accuracy Test")
     print("=" * 70)
 
-    csv_path = "../pgn/chessData.csv"  #random_fen.csv"
+    csv_path = "pgn/chessData.csv"  #random_fen.csv"
 
     # Try to read CSV file
     import csv
