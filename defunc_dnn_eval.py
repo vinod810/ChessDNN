@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 from numpy.typing import NDArray
 from typing import Any
-from build_model import tanh_to_score, DNN_MODEL_FILEPATH
+from defunc_build_model import tanh_to_score, DNN_MODEL_FILEPATH
 from cached_board import CachedBoard
 
 INF = 10_000

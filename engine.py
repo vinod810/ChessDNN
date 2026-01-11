@@ -10,8 +10,8 @@ import chess
 import chess.polyglot
 
 from cached_board import CachedBoard
-from dnn_eval import INF  # Returns  evaluation using a DNN model.
-from prepare_data import PIECE_VALUES
+from defunc_dnn_eval import INF  # Returns  evaluation using a DNN model.
+from defunc_prepare_data import PIECE_VALUES
 
 CURR_DIR = Path(__file__).resolve().parent
 
@@ -89,9 +89,9 @@ ESTIMATED_BRANCHING_FACTOR = 2.5  # Typical branching factor after pruning
 TIME_SAFETY_MARGIN = 0.7  # Only start new depth if we estimate having 70%+ of needed time
 
 if IS_NUMPY_EVAL:
-    from dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
+    from defunc_dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
 else:
-    from dnn_eval import dnn_eval
+    from defunc_dnn_eval import dnn_eval
 
 if not IS_BLAS_ENABLED:
     os.environ["OPENBLAS_NUM_THREADS"] = "1"

@@ -6,13 +6,13 @@ import os
 
 # Import from the main training file
 try:
-    from halfkp import NNUENetwork, NNUEFeatures, INPUT_SIZE, HIDDEN_SIZE # FIXME
+    from defunc_halfkp import NNUENetwork, NNUEFeatures, INPUT_SIZE, HIDDEN_SIZE # FIXME
 except ImportError:
     try:
         #from nnue_train_parallel import NNUENetwork, NNUEFeatures, INPUT_SIZE, FIRST_HIDDEN_SIZE
         pass
     except ImportError:
-        print("Error: Could not import from halfkp.py or nnue_train_parallel.py")
+        print("Error: Could not import from defunc_halfkp.py or nnue_train_parallel.py")
         print("Make sure one of these files is in the same directory")
         sys.exit(1)
 

@@ -4,7 +4,7 @@ import numpy as np
 from tensorflow.keras.callbacks import ModelCheckpoint
 from pathlib import Path
 
-from prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE, board_repr_to_fen
+from defunc_prepare_data import COMPRESSION, OUT_DIR, SHARD_SIZE, TANH_SCALE, BOARD_SHAPE, MAX_SCORE, board_repr_to_fen
 
 MAX_SHARDS = 1000 # Use a smaller number for quicker hyper param tuning
 DATA_DIR = OUT_DIR

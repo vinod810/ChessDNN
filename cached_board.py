@@ -14,7 +14,7 @@ from typing import Optional, List, Iterator, Dict, Tuple
 from dataclasses import dataclass, field
 from copy import deepcopy
 
-from prepare_data import BOARD_SHAPE, PIECE_TO_PLANE, PIECE_VALUES
+from defunc_prepare_data import BOARD_SHAPE, PIECE_TO_PLANE, PIECE_VALUES
 
 # ========== PST Tables ==========
 # fmt: off

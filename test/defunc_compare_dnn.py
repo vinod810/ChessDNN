@@ -6,13 +6,13 @@ import time
 import numpy as np
 from chess import Board
 
-from build_model import DNN_MODEL_FILEPATH, tanh_to_score
-from prepare_data import get_board_repr_and_material
+from defunc_build_model import DNN_MODEL_FILEPATH, tanh_to_score
+from defunc_prepare_data import get_board_repr_and_material
 from cached_board import CachedBoard
 
 # Import evaluators from their respective modules
-from dnn_eval import DNNEvaluator
-from dnn_eval_numpy import DNNEvaluatorNumPyOptimized
+from defunc_dnn_eval import DNNEvaluator
+from defunc_dnn_eval_numpy import DNNEvaluatorNumPyOptimized
 
 
 # Test FEN position

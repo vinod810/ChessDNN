@@ -15,7 +15,7 @@ from typing import Any, List, Dict, Optional
 import numpy as np
 from numpy.typing import NDArray
 
-from build_model import tanh_to_score
+from defunc_build_model import tanh_to_score
 from cached_board import CachedBoard
 
 INF = 10_000
@@ -365,7 +365,7 @@ def dnn_eval(board: CachedBoard, model_filepath: str) -> int:
 def main():
     """Interactive testing and benchmarking."""
     import time
-    from build_model import DNN_MODEL_FILEPATH
+    from defunc_build_model import DNN_MODEL_FILEPATH
 
     print(f"NumPy optimization status:")
     print(f"  - Numba available: {HAS_NUMBA}")
