@@ -184,7 +184,7 @@ class NNUEFeatures:
 
     @staticmethod
     def get_feature_index(king_sq: int, piece_sq: int, piece_type: int, piece_color: bool) -> int:
-        """Calculate the feature index for (king_square, piece_square, piece_type, piece_color)"""
+        """Calculate the feature index for (king_square, piece_square, piece_type, is_friendly_piece)"""
         piece_idx = NNUEFeatures.get_piece_index(piece_type, piece_color)
         if piece_idx == -1:
             return -1

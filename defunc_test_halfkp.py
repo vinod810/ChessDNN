@@ -443,16 +443,16 @@ def test_predefined_positions(weights_path: str = None):
 
 def print_usage():
     """Print usage information"""
-    print("\nUsage: python test_halfkp.py [OPTIONS] [WEIGHTS_FILE]")
+    print("\nUsage: python defunc_test_halfkp.py [OPTIONS] [WEIGHTS_FILE]")
     print("\nOptions:")
     print("  --test        Run predefined position tests")
     print("  --summary     Print model summary only (no interactive mode)")
     print("  --help, -h    Show this help message")
     print("\nExamples:")
-    print("  python test_halfkp.py                    # Interactive mode with auto-detected weights")
-    print("  python test_halfkp.py best_model.pt     # Interactive mode with specific .pt file")
-    print("  python test_halfkp.py --test            # Run predefined tests")
-    print("  python test_halfkp.py --summary model.pt  # Print model summary only")
+    print("  python defunc_test_halfkp.py                    # Interactive mode with auto-detected weights")
+    print("  python defunc_test_halfkp.py best_model.pt     # Interactive mode with specific .pt file")
+    print("  python defunc_test_halfkp.py --test            # Run predefined tests")
+    print("  python defunc_test_halfkp.py --summary model.pt  # Print model summary only")
 
 
 if __name__ == "__main__":
