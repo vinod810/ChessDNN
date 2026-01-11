@@ -344,14 +344,13 @@ class DNNFeatures:
 
 
 """
-Updated IncrementalFeatureUpdater (NNUE) with efficient stack-based pop() implementation
-"""
-import chess
-from typing import Set, List, Tuple, Dict, Optional
+Improved IncrementalFeatureUpdater (NNUE) - No Internal Board Copy
 
-"""
-Updated IncrementalFeatureUpdater (NNUE) with efficient stack-based pop() implementation
-that returns change information for accumulator updates.
+Key improvements:
+1. Does NOT maintain its own chess.Board instance
+2. Takes board as parameter to push() and pop()
+3. Caller maintains single source of truth for board state
+4. More memory efficient and eliminates sync issues
 """
 import chess
 from typing import Set, List, Tuple, Dict, Optional
@@ -360,19 +359,22 @@ from typing import Set, List, Tuple, Dict, Optional
 class IncrementalFeatureUpdater:
     """
     Efficiently maintains NNUE features with incremental updates and undo support.
-    Uses a history stack to track changes, enabling O(k) pop() operations.
 
-    For king moves (which require full recomputation), the entire feature set is saved
-    for that perspective to enable efficient restoration.
+    Design: Does NOT maintain internal board - caller passes board to each operation.
+    This eliminates memory duplication and synchronization issues.
     """
 
     def __init__(self, board: chess.Board):
-        """Initialize with a board position"""
-        self.board = board.copy()
-        # Store features as sets for O(1) add/remove
+        """
+        Initialize with initial board position.
+
+        Args:
+            board: Chess board in starting position (used only to extract initial features)
+        """
         self.white_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.WHITE))
         self.black_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.BLACK))
-        # Cache king squares
+
+        # Cache king squares for feature calculation
         self.white_king_sq = board.king(chess.WHITE)
         self.black_king_sq = board.king(chess.BLACK)
 
@@ -413,7 +415,7 @@ class IncrementalFeatureUpdater:
             change_record['black_removed'].add(black_feat)
 
     def _add_piece_features(self, square: int, piece_type: int, piece_color: bool,
-                            change_record: Dict):
+                           change_record: Dict):
         """Add features for a piece at the given square and record the change"""
         if piece_type == chess.KING:
             return
@@ -430,18 +432,26 @@ class IncrementalFeatureUpdater:
             self.black_features.add(black_feat)
             change_record['black_added'].add(black_feat)
 
-    def _recompute_perspective(self, perspective: bool):
+    def _recompute_perspective(self, board: chess.Board, perspective: bool):
         """Fully recompute features for one perspective (needed after king moves)"""
-        features = set(NNUEFeatures.extract_features(self.board, perspective))
+        features = set(NNUEFeatures.extract_features(board, perspective))
         if perspective:
             self.white_features = features
         else:
             self.black_features = features
 
-    def push(self, move: chess.Move):
+    def push(self, board: chess.Board, move: chess.Move):
         """
-        Update features after making a move and save changes for efficient undo.
-        Must be called BEFORE board.push(move).
+        Update features after making a move.
+
+        IMPORTANT: This method modifies the board by calling board.push(move)
+
+        Args:
+            board: Chess board in state BEFORE the move. This method will call board.push(move).
+            move: The move to apply
+
+        Example:
+            updater.push(board, move)  # Board is now in post-move state
         """
         from_sq = move.from_square
         to_sq = move.to_square
@@ -456,14 +466,14 @@ class IncrementalFeatureUpdater:
             'black_king_moved': False,
             'old_white_king_sq': self.white_king_sq,
             'old_black_king_sq': self.black_king_sq,
-            'old_white_features': None,  # Will store full set if king moves
-            'old_black_features': None  # Will store full set if king moves
+            'old_white_features': None,
+            'old_black_features': None
         }
 
-        piece = self.board.piece_at(from_sq)
+        # Read board state BEFORE the move
+        piece = board.piece_at(from_sq)
         if piece is None:
-            # Should not happen in valid games
-            self.board.push(move)
+            board.push(move)
             self.history_stack.append(change_record)
             self.last_change = change_record
             return
@@ -484,27 +494,25 @@ class IncrementalFeatureUpdater:
             change_record['old_black_features'] = self.black_features.copy()
 
         # Check for capture
-        captured_piece = self.board.piece_at(to_sq)
-        is_en_passant = self.board.is_en_passant(move)
+        captured_piece = board.piece_at(to_sq)
+        is_en_passant = board.is_en_passant(move)
 
         # Handle en passant capture
         if is_en_passant:
-            # The captured pawn is not on to_sq, it's on the en passant square
             ep_sq = to_sq + (-8 if moving_piece_color == chess.WHITE else 8)
-            captured_piece = self.board.piece_at(ep_sq)
+            captured_piece = board.piece_at(ep_sq)
             if captured_piece:
                 self._remove_piece_features(ep_sq, captured_piece.piece_type,
-                                            captured_piece.color, change_record)
+                                           captured_piece.color, change_record)
 
         # Remove captured piece features
         if captured_piece and not is_en_passant:
             self._remove_piece_features(to_sq, captured_piece.piece_type,
-                                        captured_piece.color, change_record)
+                                       captured_piece.color, change_record)
 
-        # Handle castling - need to move the rook too
-        is_castling = self.board.is_castling(move)
+        # Handle castling
+        is_castling = board.is_castling(move)
         if is_castling:
-            # Determine rook squares
             if to_sq > from_sq:  # Kingside
                 rook_from = chess.H1 if moving_piece_color == chess.WHITE else chess.H8
                 rook_to = chess.F1 if moving_piece_color == chess.WHITE else chess.F8
@@ -512,15 +520,14 @@ class IncrementalFeatureUpdater:
                 rook_from = chess.A1 if moving_piece_color == chess.WHITE else chess.A8
                 rook_to = chess.D1 if moving_piece_color == chess.WHITE else chess.D8
 
-            # Remove rook from old square
             self._remove_piece_features(rook_from, chess.ROOK, moving_piece_color, change_record)
 
-        # Remove moving piece from old square (if not king - king features handled by recompute)
+        # Remove moving piece from old square (if not king)
         if not is_white_king_move and not is_black_king_move:
             self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
 
-        # Make the move on internal board
-        self.board.push(move)
+        # NOW modify the board
+        board.push(move)
 
         # Update king square cache if king moved
         if is_white_king_move:
@@ -541,42 +548,38 @@ class IncrementalFeatureUpdater:
             self._add_piece_features(rook_to, chess.ROOK, moving_piece_color, change_record)
 
         # If king moved, recompute that perspective entirely
-        # (all features depend on king square)
         if is_white_king_move:
-            self._recompute_perspective(chess.WHITE)
+            self._recompute_perspective(board, chess.WHITE)
         elif is_black_king_move:
-            self._recompute_perspective(chess.BLACK)
+            self._recompute_perspective(board, chess.BLACK)
 
-        # Save the change record for efficient undo
+        # Save the change record
         self.history_stack.append(change_record)
         self.last_change = change_record
 
-    def pop(self) -> Dict:
+    def pop(self, board: chess.Board) -> Dict:
         """
-        Efficiently undo the last move using the history stack.
+        Efficiently undo the last move.
 
-        For regular moves: O(k) complexity where k = number of features changed (typically 2-8).
-        For king moves: O(n) complexity where n = total pieces, as we restore the saved feature set.
+        IMPORTANT: This method modifies the board by calling board.pop()
 
-        This is still much more efficient than full recomputation from scratch.
+        Args:
+            board: Chess board in current state. This method will call board.pop().
 
         Returns:
-            Dictionary with the changes that were reversed:
-            - 'white_added': Features that were added to white (now removed)
-            - 'white_removed': Features that were removed from white (now restored)
-            - 'black_added': Features that were added to black (now removed)
-            - 'black_removed': Features that were removed from black (now restored)
-            - 'white_king_moved': Whether white king moved
-            - 'black_king_moved': Whether black king moved
+            Dictionary with the changes that were reversed
+
+        Example:
+            change_record = updater.pop(board)  # Board is now in previous state
         """
         if not self.history_stack:
             raise ValueError("No moves to pop - history stack is empty")
 
-        # Undo the board move
-        self.board.pop()
-
-        # Retrieve and remove the last change record
+        # Retrieve the change record BEFORE popping the board
         change_record = self.history_stack.pop()
+
+        # NOW modify the board
+        board.pop()
 
         # Restore king squares
         self.white_king_sq = change_record['old_white_king_sq']
@@ -584,19 +587,15 @@ class IncrementalFeatureUpdater:
 
         # Handle white perspective
         if change_record['white_king_moved']:
-            # King moved: restore the saved feature set
             self.white_features = change_record['old_white_features']
         else:
-            # Regular move: reverse the incremental changes
             self.white_features -= change_record['white_added']
             self.white_features |= change_record['white_removed']
 
         # Handle black perspective
         if change_record['black_king_moved']:
-            # King moved: restore the saved feature set
             self.black_features = change_record['old_black_features']
         else:
-            # Regular move: reverse the incremental changes
             self.black_features -= change_record['black_added']
             self.black_features |= change_record['black_removed']
 
@@ -606,13 +605,7 @@ class IncrementalFeatureUpdater:
         return change_record
 
     def get_last_change(self) -> Optional[Dict]:
-        """
-        Get the changes from the last push() or pop() operation.
-        Useful for updating accumulators.
-
-        Returns:
-            Dictionary with change information or None if no operation has been performed yet.
-        """
+        """Get the changes from the last push() or pop() operation"""
         return self.last_change
 
     def get_features(self) -> Tuple[List[int], List[int]]:
@@ -624,12 +617,45 @@ class IncrementalFeatureUpdater:
         return list(self.white_features), list(self.black_features)
 
     def clear_history(self):
-        """Clear the history stack to free memory (call after search completes)"""
+        """Clear the history stack to free memory"""
         self.history_stack.clear()
 
     def history_size(self) -> int:
         """Get the number of moves in the history stack"""
         return len(self.history_stack)
+
+    def verify_sync(self, board: chess.Board) -> Tuple[bool, str]:
+        """
+        Verify that stored features match the actual board state.
+        Useful for debugging synchronization issues.
+
+        Args:
+            board: Chess board to verify against
+
+        Returns:
+            (is_synced, message): True if synced, False otherwise with error message
+        """
+        expected_white = set(NNUEFeatures.extract_features(board, chess.WHITE))
+        expected_black = set(NNUEFeatures.extract_features(board, chess.BLACK))
+
+        if self.white_features != expected_white:
+            diff_added = self.white_features - expected_white
+            diff_missing = expected_white - self.white_features
+            return False, f"White features out of sync: +{len(diff_added)} extra, -{len(diff_missing)} missing"
+
+        if self.black_features != expected_black:
+            diff_added = self.black_features - expected_black
+            diff_missing = expected_black - self.black_features
+            return False, f"Black features out of sync: +{len(diff_added)} extra, -{len(diff_missing)} missing"
+
+        # Verify king positions
+        if self.white_king_sq != board.king(chess.WHITE):
+            return False, f"White king position out of sync: stored={self.white_king_sq}, actual={board.king(chess.WHITE)}"
+
+        if self.black_king_sq != board.king(chess.BLACK):
+            return False, f"Black king position out of sync: stored={self.black_king_sq}, actual={board.king(chess.BLACK)}"
+
+        return True, "Features are synchronized with board"
 
 
 class NNUENetwork(nn.Module):
