@@ -34,7 +34,7 @@ except ImportError:
 
 # Configuration
 # Allowed values: "Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-accuracy"
-TEST_TYPE = "Accumulator-Correctness"
+TEST_TYPE = "Interactive-FEN"
 NN_TYPE = "DNN"
 
 """
@@ -612,6 +612,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
         "Nd4", "Rhxe8", "Nb3", "Bxd2", "N1xd2"
     ]
 
+# TODO include both king moves from both side
     print(f"\nPlaying game: 1. e4 d5 2. exd5 Bh3 3. Bb5+ Nd7 4. Nf3 e5")
     print(f"              5. dxe6 Qg5 6. O-O O-O-O 7. e7 Ngf6 8. e8=Q Bb4")
     print(f"              9. Nd4 Rhxe8 10. Nb3 Bxd2 11. N1xd2")
