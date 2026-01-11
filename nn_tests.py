@@ -7,6 +7,7 @@ Test Modes:
 - Interactive-FEN: Interactive FEN evaluation (default)
 - Incremental-vs-Full: Performance comparison
 - Accumulator-Correctness: Verify incremental == full evaluation
+- Eval-accuracy: Test prediction accuracy against ground truth CSV
 """
 
 import numpy as np
@@ -32,8 +33,8 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-# Allowed values: "Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness"
-TEST_TYPE = "Accumulator-Correctness"
+# Allowed values: "Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-accuracy"
+TEST_TYPE = "Eval-accuracy"
 
 
 class DNNIncrementalUpdater:
@@ -738,6 +739,381 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
     print("=" * 70)
 
 
+def test_eval_accuracy(inference, nn_type: str):
+    """
+    Test evaluation accuracy against ground truth from CSV file.
+    Computes MSE of tanh(cp/400) between predicted and true scores.
+    """
+    print("\n" + "=" * 70)
+    print(f"{nn_type} Evaluation Accuracy Test")
+    print("=" * 70)
+
+    csv_path = "pgn/chessData.csv" #random_fen.csv"
+
+    # Try to read CSV file
+    import csv
+    import os
+
+    if not os.path.exists(csv_path):
+        print(f"\n❌ ERROR: CSV file not found: {csv_path}")
+        print("Please ensure the file exists")
+        print("\nExpected format (comma-separated):")
+        print("  FEN,Evaluation")
+        print("  rnbqkb1r/pppppppp/B4n2/8/4P3/8/PPPP1PPP/RNBQK1NR b KQkq - 2 2,-459")
+        return
+
+    print(f"\nReading positions from: {csv_path}")
+
+    positions = []
+    try:
+        with open(csv_path, 'r') as f:
+            # Standard CSV with comma delimiter
+            reader = csv.DictReader(f)
+
+            # Debug: Show available columns
+            available_columns = reader.fieldnames
+            print(f"CSV columns found: {available_columns}")
+
+            for i, row in enumerate(reader):
+                if i >= 1000:  # Only first 1000 positions
+                    break
+
+                # Try to find FEN and Evaluation columns
+                fen = None
+                score = None
+
+                # Try exact matches first (FEN, Evaluation)
+                if 'FEN' in row:
+                    fen = row['FEN'].strip()
+                elif 'fen' in row:
+                    fen = row['fen'].strip()
+
+                if 'Evaluation' in row:
+                    try:
+                        score = float(row['Evaluation'].strip())
+                        #print(score)
+                    except (ValueError, AttributeError):
+                        pass
+                elif 'evaluation' in row:
+                    try:
+                        score = float(row['evaluation'].strip())
+                    except (ValueError, AttributeError):
+                        pass
+                elif 'score' in row:
+                    try:
+                        score = float(row['score'].strip())
+                    except (ValueError, AttributeError):
+                        pass
+                elif 'Score' in row:
+                    try:
+                        score = float(row['Score'].strip())
+                    except (ValueError, AttributeError):
+                        pass
+
+                # If exact match failed, try partial matches
+                if fen is None or score is None:
+                    for key in row.keys():
+                        key_lower = key.lower().strip()
+                        if fen is None and 'fen' in key_lower:
+                            fen = row[key].strip()
+                        if score is None and ('eval' in key_lower or 'score' in key_lower or 'cp' in key_lower):
+                            try:
+                                score = float(row[key].strip())
+                            except (ValueError, AttributeError):
+                                continue
+
+                if fen and score is not None:
+                    board = chess.Board(fen)
+                    score = score if board.turn == chess.WHITE else -score
+                    #print(score)
+                    positions.append({'fen': fen, 'true_cp': score})
+                elif i < 3:  # Show first few problematic rows for debugging
+                    print(f"  Warning: Row {i+1} - fen={'found' if fen else 'missing'}, score={'found' if score is not None else 'missing'}")
+
+        if not positions:
+            print("\n❌ ERROR: No valid positions found in CSV")
+            print(f"Available columns: {available_columns}")
+            print("\nPlease ensure CSV has:")
+            print("  - A column named 'FEN' (for FEN strings)")
+            print("  - A column named 'Evaluation' (for centipawn scores)")
+            return
+
+        print(f"✓ Loaded {len(positions)} positions")
+
+    except Exception as e:
+        print(f"❌ ERROR reading CSV: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+
+    # Evaluate all positions
+    print("\nEvaluating positions...")
+
+    true_tanh_values = []
+    pred_tanh_values = []
+    errors = []
+
+    for i, pos in enumerate(positions):
+        if (i + 1) % 100 == 0:
+            print(f"  Progress: {i + 1}/{len(positions)}")
+
+        try:
+            # Get predicted value
+            board = chess.Board(pos['fen'])
+
+            # Get true tanh value
+            true_cp = pos['true_cp']
+            true_tanh = np.tanh(true_cp / TANH_SCALE)
+
+            # Use full evaluation for accuracy test
+            if nn_type == "NNUE":
+                white_feat, black_feat = NNUEFeatures.board_to_features(board)
+                pred_output = inference.evaluate_full(white_feat, black_feat, board.turn == chess.WHITE)
+            else:  # DNN
+                features = DNNFeatures.board_to_features(board)
+                pred_output = inference.evaluate_full(features)
+
+            # pred_output is already in tanh space (network outputs ~tanh(cp/400))
+            pred_tanh = pred_output
+
+            true_tanh_values.append(true_tanh)
+            pred_tanh_values.append(pred_tanh)
+
+        except Exception as e:
+            errors.append((i, pos['fen'], str(e)))
+
+    if errors:
+        print(f"\n⚠ {len(errors)} positions failed to evaluate:")
+        for idx, fen, error in errors[:5]:  # Show first 5 errors
+            print(f"  Position {idx}: {error[:60]}")
+        if len(errors) > 5:
+            print(f"  ... and {len(errors) - 5} more")
+
+    # Compute MSE
+    true_tanh_values = np.array(true_tanh_values)
+    pred_tanh_values = np.array(pred_tanh_values)
+
+    mse = np.mean((true_tanh_values - pred_tanh_values) ** 2)
+    rmse = np.sqrt(mse)
+    mae = np.mean(np.abs(true_tanh_values - pred_tanh_values))
+
+    # Also compute MSE in centipawn space for reference
+    true_cp_values = true_tanh_values * TANH_SCALE
+    pred_cp_values = np.arctanh(np.clip(pred_tanh_values, -0.99, 0.99)) * TANH_SCALE
+    mse_cp = np.mean((true_cp_values - pred_cp_values) ** 2)
+    rmse_cp = np.sqrt(mse_cp)
+    mae_cp = np.mean(np.abs(true_cp_values - pred_cp_values))
+
+    # Results
+    print("\n" + "─" * 70)
+    print("Results:")
+    print("─" * 70)
+    print(f"Positions evaluated: {len(pred_tanh_values)}")
+    print(f"Positions failed:    {len(errors)}")
+    print()
+    print("Tanh Space (network output space):")
+    print(f"  MSE:  {mse:.6f}")
+    print(f"  RMSE: {rmse:.6f}")
+    print(f"  MAE:  {mae:.6f}")
+    print()
+    print("Centipawn Space (for reference):")
+    print(f"  MSE:  {mse_cp:.2f}")
+    print(f"  RMSE: {rmse_cp:.2f} cp")
+    print(f"  MAE:  {mae_cp:.2f} cp")
+
+    # Show some example predictions
+    print("\n" + "─" * 70)
+    print("Sample predictions (first 20):")
+    print("─" * 70)
+    for i in range(min(20, len(positions))):
+        true_cp = positions[i]['true_cp']
+        pred_cp = pred_cp_values[i]
+        diff = pred_cp - true_cp
+        print(f"{i+1:2d}. True: {true_cp:+7.1f} cp | Pred: {pred_cp:+7.1f} cp | Diff: {diff:+7.1f} cp")
+
+    print("\n" + "=" * 70)
+    print("Evaluation accuracy test complete!")
+    print("=" * 70)
+
+    # Evaluate all positions
+    print("\nEvaluating positions...")
+
+    true_tanh_values = []
+    pred_tanh_values = []
+    errors = []
+
+    # for i, pos in enumerate(positions):
+    #     if (i + 1) % 100 == 0:
+    #         print(f"  Progress: {i + 1}/{len(positions)}")
+    #
+    #     try:
+    #         # Get true tanh value
+    #         true_cp = pos['true_cp']
+    #         true_tanh = np.tanh(true_cp / TANH_SCALE)
+    #
+    #         # Get predicted value
+    #         board = chess.Board(pos['fen'])
+    #
+    #         # Use full evaluation for accuracy test
+    #         if nn_type == "NNUE":
+    #             white_feat, black_feat = NNUEFeatures.board_to_features(board)
+    #             pred_output = inference.evaluate_full(white_feat, black_feat, board.turn == chess.WHITE)
+    #         else:  # DNN
+    #             features = DNNFeatures.board_to_features(board)
+    #             pred_output = inference.evaluate_full(features)
+    #
+    #         # pred_output is already in tanh space (network outputs ~tanh(cp/400))
+    #         pred_tanh = pred_output
+    #
+    #         true_tanh_values.append(true_tanh)
+    #         pred_tanh_values.append(pred_tanh)
+    #
+    #     except Exception as e:
+    #         errors.append((i, pos['fen'], str(e)))
+    #
+    # if errors:
+    #     print(f"\n⚠ {len(errors)} positions failed to evaluate:")
+    #     for idx, fen, error in errors[:5]:  # Show first 5 errors
+    #         print(f"  Position {idx}: {error[:60]}")
+    #     if len(errors) > 5:
+    #         print(f"  ... and {len(errors) - 5} more")
+    #
+    # # Compute MSE
+    # true_tanh_values = np.array(true_tanh_values)
+    # pred_tanh_values = np.array(pred_tanh_values)
+    #
+    # mse = np.mean((true_tanh_values - pred_tanh_values) ** 2)
+    # rmse = np.sqrt(mse)
+    # mae = np.mean(np.abs(true_tanh_values - pred_tanh_values))
+    #
+    # # Also compute MSE in centipawn space for reference
+    # true_cp_values = true_tanh_values * TANH_SCALE
+    # pred_cp_values = np.arctanh(np.clip(pred_tanh_values, -0.99, 0.99)) * TANH_SCALE
+    # mse_cp = np.mean((true_cp_values - pred_cp_values) ** 2)
+    # rmse_cp = np.sqrt(mse_cp)
+    # mae_cp = np.mean(np.abs(true_cp_values - pred_cp_values))
+    #
+    # # Results
+    # print("\n" + "─" * 70)
+    # print("Results:")
+    # print("─" * 70)
+    # print(f"Positions evaluated: {len(pred_tanh_values)}")
+    # print(f"Positions failed:    {len(errors)}")
+    # print()
+    # print("Tanh Space (network output space):")
+    # print(f"  MSE:  {mse:.6f}")
+    # print(f"  RMSE: {rmse:.6f}")
+    # print(f"  MAE:  {mae:.6f}")
+    # print()
+    # print("Centipawn Space (for reference):")
+    # print(f"  MSE:  {mse_cp:.2f}")
+    # print(f"  RMSE: {rmse_cp:.2f} cp")
+    # print(f"  MAE:  {mae_cp:.2f} cp")
+    #
+    # # Show some example predictions
+    # print("\n" + "─" * 70)
+    # print("Sample predictions (first 10):")
+    # print("─" * 70)
+    # for i in range(min(10, len(positions))):
+    #     true_cp = positions[i]['true_cp']
+    #     pred_cp = pred_cp_values[i]
+    #     diff = pred_cp - true_cp
+    #     print(f"{i+1:2d}. True: {true_cp:+7.1f} cp | Pred: {pred_cp:+7.1f} cp | Diff: {diff:+7.1f} cp")
+    #
+    # print("\n" + "=" * 70)
+    # print("Evaluation accuracy test complete!")
+    # print("=" * 70)
+    #
+    # # Evaluate all positions
+    # print("\nEvaluating positions...")
+    #
+    # true_tanh_values = []
+    # pred_tanh_values = []
+    # errors = []
+    #
+    # for i, pos in enumerate(positions):
+    #     if (i + 1) % 100 == 0:
+    #         print(f"  Progress: {i + 1}/{len(positions)}")
+    #
+    #     try:
+    #         # Get true tanh value
+    #         true_cp = pos['true_cp']
+    #         true_tanh = np.tanh(true_cp / TANH_SCALE)
+    #
+    #         # Get predicted value
+    #         board = chess.Board(pos['fen'])
+    #
+    #         # Use full evaluation for accuracy test
+    #         if nn_type == "NNUE":
+    #             white_feat, black_feat = NNUEFeatures.board_to_features(board)
+    #             pred_output = inference.evaluate_full(white_feat, black_feat, board.turn == chess.WHITE)
+    #         else:  # DNN
+    #             features = DNNFeatures.board_to_features(board)
+    #             pred_output = inference.evaluate_full(features)
+    #
+    #         # pred_output is already in tanh space (network outputs ~tanh(cp/400))
+    #         pred_tanh = pred_output
+    #
+    #         true_tanh_values.append(true_tanh)
+    #         pred_tanh_values.append(pred_tanh)
+    #
+    #     except Exception as e:
+    #         errors.append((i, pos['fen'], str(e)))
+    #
+    # if errors:
+    #     print(f"\n⚠ {len(errors)} positions failed to evaluate:")
+    #     for idx, fen, error in errors[:5]:  # Show first 5 errors
+    #         print(f"  Position {idx}: {error}")
+    #     if len(errors) > 5:
+    #         print(f"  ... and {len(errors) - 5} more")
+    #
+    # # Compute MSE
+    # true_tanh_values = np.array(true_tanh_values)
+    # pred_tanh_values = np.array(pred_tanh_values)
+    #
+    # mse = np.mean((true_tanh_values - pred_tanh_values) ** 2)
+    # rmse = np.sqrt(mse)
+    # mae = np.mean(np.abs(true_tanh_values - pred_tanh_values))
+    #
+    # # Also compute MSE in centipawn space for reference
+    # true_cp_values = true_tanh_values * TANH_SCALE
+    # pred_cp_values = np.arctanh(np.clip(pred_tanh_values, -0.99, 0.99)) * TANH_SCALE
+    # mse_cp = np.mean((true_cp_values - pred_cp_values) ** 2)
+    # rmse_cp = np.sqrt(mse_cp)
+    # mae_cp = np.mean(np.abs(true_cp_values - pred_cp_values))
+    #
+    # # Results
+    # print("\n" + "─" * 70)
+    # print("Results:")
+    # print("─" * 70)
+    # print(f"Positions evaluated: {len(pred_tanh_values)}")
+    # print(f"Positions failed:    {len(errors)}")
+    # print()
+    # print("Tanh Space (network output space):")
+    # print(f"  MSE:  {mse:.6f}")
+    # print(f"  RMSE: {rmse:.6f}")
+    # print(f"  MAE:  {mae:.6f}")
+    # print()
+    # print("Centipawn Space (for reference):")
+    # print(f"  MSE:  {mse_cp:.2f}")
+    # print(f"  RMSE: {rmse_cp:.2f} cp")
+    # print(f"  MAE:  {mae_cp:.2f} cp")
+    #
+    # # Show some example predictions
+    # print("\n" + "─" * 70)
+    # print("Sample predictions (first 5):")
+    # print("─" * 70)
+    # for i in range(min(5, len(positions))):
+    #     true_cp = positions[i]['true_cp']
+    #     pred_cp = pred_cp_values[i]
+    #     diff = pred_cp - true_cp
+    #     print(f"{i+1}. True: {true_cp:+7.1f} cp | Pred: {pred_cp:+7.1f} cp | Diff: {diff:+7.1f} cp")
+    #
+    # print("\n" + "=" * 70)
+    # print("Evaluation accuracy test complete!")
+    # print("=" * 70)
+
+
 def performance_test_nnue(inference: NNUEInference):
     """Run performance comparison for NNUE: Full vs Incremental evaluation"""
     print("\n" + "=" * 70)
@@ -949,7 +1325,7 @@ def main():
         sys.exit(1)
 
     # Validate TEST_TYPE
-    valid_test_types = ["Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness"]
+    valid_test_types = ["Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-accuracy"]
     if TEST_TYPE not in valid_test_types:
         print(f"ERROR: Invalid TEST_TYPE '{TEST_TYPE}'")
         print(f"Must be one of: {', '.join(valid_test_types)}")
@@ -964,6 +1340,10 @@ def main():
             test_accumulator_correctness_nnue(inference)
         else:
             test_accumulator_correctness_dnn(inference)
+
+    elif TEST_TYPE == "Eval-accuracy":
+        print(f"\nRunning evaluation accuracy test for {NN_TYPE}...")
+        test_eval_accuracy(inference, NN_TYPE)
 
     elif TEST_TYPE == "Incremental-vs-Full":
         print(f"\nRunning performance comparison for {NN_TYPE}...")
