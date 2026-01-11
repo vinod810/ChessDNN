@@ -4,9 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Reorg files">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/train_nn.py" beforeDir="false" afterPath="$PROJECT_DIR$/train_nn.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -113,22 +114,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00049" summary="Minor optimizations by Claude">
-      <option name="closed" value="true" />
-      <created>1767141067051</created>
-      <option name="number" value="00049" />
-      <option name="presentableId" value="LOCAL-00049" />
-      <option name="project" value="LOCAL" />
-      <updated>1767141067051</updated>
-    </task>
-    <task id="LOCAL-00050" summary="cutechess.sh">
-      <option name="closed" value="true" />
-      <created>1767198558905</created>
-      <option name="number" value="00050" />
-      <option name="presentableId" value="LOCAL-00050" />
-      <option name="project" value="LOCAL" />
-      <updated>1767198558906</updated>
     </task>
     <task id="LOCAL-00051" summary="Claude improvements for detecting draw">
       <option name="closed" value="true" />
@@ -498,7 +483,21 @@
       <option name="project" value="LOCAL" />
       <updated>1768104503674</updated>
     </task>
-    <option name="localTasksCounter" value="98" />
+    <task id="LOCAL-00098" summary="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds">
+      <created>1768151572298</created>
+      <option name="number" value="00098" />
+      <option name="presentableId" value="LOCAL-00098" />
+      <option name="project" value="LOCAL" />
+      <updated>1768151572298</updated>
+    </task>
+    <task id="LOCAL-00099" summary="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds">
+      <created>1768151586059</created>
+      <option name="number" value="00099" />
+      <option name="presentableId" value="LOCAL-00099" />
+      <option name="project" value="LOCAL" />
+      <updated>1768151586059</updated>
+    </task>
+    <option name="localTasksCounter" value="100" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -513,7 +512,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="prepare-data.py all moves" />
     <MESSAGE value="total=300, passed=187, success-rate=62.33%" />
     <MESSAGE value="More caching total=300, passed=189, success-rate=63.0%" />
     <MESSAGE value="Numpy DNN - passed=200, success-rate=66.67%" />
@@ -538,7 +536,8 @@
     <MESSAGE value="nn_tests.py - Accumulator correctness" />
     <MESSAGE value="nn_tests.py - true vs predicated MSE" />
     <MESSAGE value="Reorg files" />
-    <option name="LAST_COMMIT_MESSAGE" value="Reorg files" />
+    <MESSAGE value="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds" />
+    <option name="LAST_COMMIT_MESSAGE" value="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

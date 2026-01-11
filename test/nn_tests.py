@@ -34,7 +34,7 @@ except ImportError:
 
 # Configuration
 # Allowed values: "Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-accuracy"
-TEST_TYPE = "Incremental-vs-Full"
+TEST_TYPE = "Accumulator-Correctness"
 NN_TYPE = "DNN"
 
 """
@@ -54,15 +54,20 @@ from typing import Set, List, Tuple, Dict, Optional
 class DNNIncrementalUpdater:
     """
     Incrementally maintains DNN features for both perspectives with efficient undo support.
-
-    Design: Does NOT maintain internal board - caller passes board to each operation.
+    Uses a history stack to track changes, enabling O(k) pop() operations where k = pieces affected.
+    Provides methods to retrieve change information for accumulator updates.
     """
 
     def __init__(self, board: chess.Board):
-        """Initialize with initial board position (read-only access)"""
+        """Initialize with a board position"""
+        self.board = board.copy()
         self.white_features: Set[int] = set(DNNFeatures.extract_features(board, chess.WHITE))
         self.black_features: Set[int] = set(DNNFeatures.extract_features(board, chess.BLACK))
+
+        # History stack for efficient undo
         self.history_stack: List[Dict[str, Set[int]]] = []
+
+        # Store the last change for easy accumulator updates
         self.last_change: Optional[Dict[str, Set[int]]] = None
 
     def _get_feature_for_perspective(self, perspective: bool, square: int,
@@ -72,6 +77,7 @@ class DNNIncrementalUpdater:
             rank = square // 8
             file = square % 8
             square = (7 - rank) * 8 + file
+
         is_friendly_piece = (piece_color == chess.WHITE) == perspective
         piece_idx = DNNFeatures.get_piece_index(piece_type, is_friendly_piece)
         return square * 12 + piece_idx
@@ -83,89 +89,145 @@ class DNNIncrementalUpdater:
         if white_feat in self.white_features:
             self.white_features.discard(white_feat)
             change_record['white_removed'].add(white_feat)
+
         black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
         if black_feat in self.black_features:
             self.black_features.discard(black_feat)
             change_record['black_removed'].add(black_feat)
 
     def _add_piece_features(self, square: int, piece_type: int, piece_color: bool,
-                           change_record: Dict[str, Set[int]]):
+                            change_record: Dict[str, Set[int]]):
         """Add features for a piece and record the change"""
         white_feat = self._get_feature_for_perspective(True, square, piece_type, piece_color)
         if white_feat not in self.white_features:
             self.white_features.add(white_feat)
             change_record['white_added'].add(white_feat)
+
         black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
         if black_feat not in self.black_features:
             self.black_features.add(black_feat)
             change_record['black_added'].add(black_feat)
 
-    def push(self, board: chess.Board, move: chess.Move):
-        """Update features after making a move. Modifies board by calling board.push(move)."""
+    def push(self, move: chess.Move):
+        """Update features after making a move and save changes for efficient undo"""
         from_sq = move.from_square
         to_sq = move.to_square
+
+        # Initialize change tracking for this move
         change_record = {
-            'white_added': set(), 'white_removed': set(),
-            'black_added': set(), 'black_removed': set()
+            'white_added': set(),
+            'white_removed': set(),
+            'black_added': set(),
+            'black_removed': set()
         }
-        piece = board.piece_at(from_sq)
+
+        piece = self.board.piece_at(from_sq)
         if piece is None:
-            board.push(move)
+            self.board.push(move)
             self.history_stack.append(change_record)
             self.last_change = change_record
             return
+
         moving_piece_type = piece.piece_type
         moving_piece_color = piece.color
-        captured_piece = board.piece_at(to_sq)
-        is_en_passant = board.is_en_passant(move)
+
+        captured_piece = self.board.piece_at(to_sq)
+        is_en_passant = self.board.is_en_passant(move)
+
+        # Handle en passant capture
         if is_en_passant:
             ep_sq = to_sq + (-8 if moving_piece_color == chess.WHITE else 8)
-            captured_piece = board.piece_at(ep_sq)
+            captured_piece = self.board.piece_at(ep_sq)
             if captured_piece:
                 self._remove_piece_features(ep_sq, captured_piece.piece_type,
-                                           captured_piece.color, change_record)
+                                            captured_piece.color, change_record)
+
+        # Handle regular capture
         if captured_piece and not is_en_passant:
             self._remove_piece_features(to_sq, captured_piece.piece_type,
-                                       captured_piece.color, change_record)
-        is_castling = board.is_castling(move)
+                                        captured_piece.color, change_record)
+
+        # Handle castling - move the rook
+        is_castling = self.board.is_castling(move)
         if is_castling:
-            if to_sq > from_sq:
+            if to_sq > from_sq:  # Kingside
                 rook_from = chess.H1 if moving_piece_color == chess.WHITE else chess.H8
                 rook_to = chess.F1 if moving_piece_color == chess.WHITE else chess.F8
-            else:
+            else:  # Queenside
                 rook_from = chess.A1 if moving_piece_color == chess.WHITE else chess.A8
                 rook_to = chess.D1 if moving_piece_color == chess.WHITE else chess.D8
+
             self._remove_piece_features(rook_from, chess.ROOK, moving_piece_color, change_record)
+
+        # Remove moving piece from old square
         self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
-        board.push(move)
+
+        # Make the move
+        self.board.push(move)
+
+        # Handle promotion
         if move.promotion:
             moving_piece_type = move.promotion
+
+        # Add moving piece to new square
         self._add_piece_features(to_sq, moving_piece_type, moving_piece_color, change_record)
+
+        # Add rook to new square for castling
         if is_castling:
             self._add_piece_features(rook_to, chess.ROOK, moving_piece_color, change_record)
+
+        # Save the change record for efficient undo
         self.history_stack.append(change_record)
         self.last_change = change_record
 
-    def pop(self, board: chess.Board) -> Dict[str, Set[int]]:
-        """Efficiently undo the last move. Modifies board by calling board.pop()."""
+    def pop(self) -> Dict[str, Set[int]]:
+        """
+        Efficiently undo the last move using the history stack.
+        O(k) complexity where k = number of features that changed (typically 2-8).
+
+        Returns:
+            Dictionary with the changes that were reversed:
+            - 'white_added': Features that were added to white (now removed)
+            - 'white_removed': Features that were removed from white (now restored)
+            - 'black_added': Features that were added to black (now removed)
+            - 'black_removed': Features that were removed from black (now restored)
+        """
         if not self.history_stack:
             raise ValueError("No moves to pop - history stack is empty")
+
+        # Undo the board move
+        self.board.pop()
+
+        # Retrieve and remove the last change record
         change_record = self.history_stack.pop()
-        board.pop()
+
+        # Reverse the changes:
+        # - Features that were added must be removed
+        # - Features that were removed must be added back
         self.white_features -= change_record['white_added']
         self.white_features |= change_record['white_removed']
         self.black_features -= change_record['black_added']
         self.black_features |= change_record['black_removed']
+
+        # Store as last change (but reversed)
         self.last_change = change_record
+
         return change_record
 
     def get_last_change(self) -> Optional[Dict[str, Set[int]]]:
-        """Get the changes from the last push() or pop() operation"""
+        """
+        Get the changes from the last push() or pop() operation.
+        Useful for updating accumulators.
+
+        Returns:
+            Dictionary with 'white_added', 'white_removed', 'black_added', 'black_removed'
+            or None if no operation has been performed yet.
+        """
         return self.last_change
 
-    def get_features(self, board: chess.Board) -> List[int]:
+    def get_features(self) -> List[int]:
         """Get features for current side to move"""
-        if board.turn == chess.WHITE:
+        if self.board.turn == chess.WHITE:
             return list(self.white_features)
         else:
             return list(self.black_features)
@@ -175,7 +237,7 @@ class DNNIncrementalUpdater:
         return list(self.white_features), list(self.black_features)
 
     def clear_history(self):
-        """Clear the history stack to free memory"""
+        """Clear the history stack to free memory (call after search completes)"""
         self.history_stack.clear()
 
     def history_size(self) -> int:
@@ -564,14 +626,14 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
     move_count = 0
     for move_san in moves_san:
-        move = board.parse_san(move_san)
+        move = updater.board.parse_san(move_san)
 
         # Track old features
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
 
         # Push move
-        updater.push(board, move)
+        updater.push(move)
 
         # Update accumulator
         new_white = set(updater.white_features)
@@ -594,19 +656,19 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
     # Get current features
     white_feat, black_feat = updater.get_features_unsorted()
-    stm = board.turn == chess.WHITE
+    stm = updater.board.turn == chess.WHITE
 
     # Evaluate with incremental (using accumulator)
     eval_incremental = inference.evaluate_incremental(white_feat, black_feat, stm)
 
     # Evaluate with full (matrix multiplication from scratch)
-    white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
+    white_feat_full, black_feat_full = NNUEFeatures.board_to_features(updater.board)
     eval_full = inference.evaluate_full(white_feat_full, black_feat_full, stm)
 
     # Compare
     diff = abs(eval_incremental - eval_full)
 
-    print(f"Position: {board.fen()}")
+    print(f"Position: {updater.board.fen()}")
     print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
     print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
     print(f"Difference:       {diff:.10e}")
@@ -623,7 +685,8 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
     print("Popping 8 moves...")
     for i in range(8):
-        change_record = updater.pop(board)
+        # Pop and update accumulator incrementally
+        change_record = updater.pop()
 
         # Update accumulator to reflect the reversed changes
         inference.update_accumulator(
@@ -632,10 +695,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
             change_record['black_removed'],  # Add back what was removed
             change_record['black_added']     # Remove what was added
         )
-
-    # Get features for evaluation
-    white_feat, black_feat = updater.get_features_unsorted()
-    stm = board.turn == chess.WHITE
+    stm = updater.board.turn == chess.WHITE
 
     # Evaluate with incremental
     eval_incremental = inference.evaluate_incremental(white_feat, black_feat, stm)
@@ -646,7 +706,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
     # Compare
     diff = abs(eval_incremental - eval_full)
 
-    print(f"Position: {board.fen()}")
+    print(f"Position: {updater.board.fen()}")
     print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
     print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
     print(f"Difference:       {diff:.10e}")
@@ -688,14 +748,14 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
 
     move_count = 0
     for move_san in moves_san:
-        move = board.parse_san(move_san)
+        move = updater.board.parse_san(move_san)
 
         # FIX: Track old features for BOTH perspectives (not just current side)
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
 
         # Push move
-        updater.push(board, move)
+        updater.push(move)
 
         # FIX: Get new features for BOTH perspectives
         new_white = set(updater.white_features)
@@ -723,20 +783,20 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         print("─" * 70)
 
         # Get current features
-        features = updater.get_features(board)
-        perspective = board.turn == chess.WHITE
+        features = updater.get_features()
+        perspective = updater.board.turn == chess.WHITE
 
         # Evaluate with incremental
         eval_incremental = inference.evaluate_incremental(features, perspective)
 
         # Evaluate with full
-        features_full = DNNFeatures.board_to_features(board)
+        features_full = DNNFeatures.board_to_features(updater.board)
         eval_full = inference.evaluate_full(features_full)
 
         # Compare
         diff = abs(eval_incremental - eval_full)
 
-        print(f"Position: {board.fen()}")
+        print(f"Position: {updater.board.fen()}")
         print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
         print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
         print(f"Difference:       {diff:.10e}")
@@ -753,9 +813,11 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
 
     print("Popping 8 moves...")
     for i in range(8):
-        change_record = updater.pop(board)
+        # Pop and update accumulator incrementally
+        change_record = updater.pop()
 
         # Update accumulator to reflect the reversed changes
+        # When we pop, we reverse: what was added gets removed, what was removed gets added back
         inference.update_accumulator(
             change_record['white_removed'],  # Add back what was removed
             change_record['white_added'],    # Remove what was added
@@ -767,20 +829,20 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
             False  # black perspective
         )
 
-    features = updater.get_features(board)
-    perspective = board.turn == chess.WHITE
+    features = updater.get_features()
+    perspective = updater.board.turn == chess.WHITE
 
     # Evaluate with incremental
     eval_incremental = inference.evaluate_incremental(features, perspective)
 
     # Evaluate with full
-    features_full = DNNFeatures.board_to_features(board)
+    features_full = DNNFeatures.board_to_features(updater.board)
     eval_full = inference.evaluate_full(features_full)
 
     # Compare
     diff = abs(eval_incremental - eval_full)
 
-    print(f"Position: {board.fen()}")
+    print(f"Position: {updater.board.fen()}")
     print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
     print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
     print(f"Difference:       {diff:.10e}")
@@ -1203,7 +1265,7 @@ def performance_test_nnue(inference: NNUEInference):
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
 
-        updater.push(board, move)
+        updater.push(move)
 
         new_white = set(updater.white_features)
         new_black = set(updater.black_features)
@@ -1214,21 +1276,20 @@ def performance_test_nnue(inference: NNUEInference):
         )
 
         output = inference.evaluate_incremental(
-            list(new_white), list(new_black), board.turn == chess.WHITE
+            list(new_white), list(new_black), updater.board.turn == chess.WHITE
         )
 
-        change_record = updater.pop(board)
+        updater.board.pop()
+        updater.white_features = old_white
+        updater.black_features = old_black
 
-        # Update accumulator to reflect the pop
         inference.update_accumulator(
-            change_record['white_removed'],  # Add back what was removed
-            change_record['white_added'],    # Remove what was added
-            change_record['black_removed'],  # Add back what was removed
-            change_record['black_added']     # Remove what was added
+            old_white - new_white, new_white - old_white,
+            old_black - new_black, new_black - old_black
         )
 
         output = inference.evaluate_incremental(
-            list(updater.white_features), list(updater.black_features), board.turn == chess.WHITE
+            list(old_white), list(old_black), board.turn == chess.WHITE
         )
 
     incremental_time = time.time() - start_time
@@ -1279,13 +1340,13 @@ def performance_test_dnn(inference: DNNInference):
     for _ in range(500):
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
-        old_perspective = board.turn == chess.WHITE
+        old_perspective = updater.board.turn == chess.WHITE
 
-        updater.push(board, move)
+        updater.push(move)
 
         new_white = set(updater.white_features)
         new_black = set(updater.black_features)
-        new_perspective = board.turn == chess.WHITE
+        new_perspective = updater.board.turn == chess.WHITE
 
         if new_perspective:
             added = new_white - old_white
@@ -1299,22 +1360,19 @@ def performance_test_dnn(inference: DNNInference):
         current_features = list(new_white) if new_perspective else list(new_black)
         output = inference.evaluate_incremental(current_features, new_perspective)
 
-        change_record = updater.pop(board)
+        updater.pop()
 
-        # Update accumulator using the change record
-        inference.update_accumulator(
-            change_record['white_removed'],
-            change_record['white_added'],
-            True
-        )
-        inference.update_accumulator(
-            change_record['black_removed'],
-            change_record['black_added'],
-            False
-        )
+        if old_perspective:
+            added_back = old_white - new_white
+            removed_back = new_white - old_white
+        else:
+            added_back = old_black - new_black
+            removed_back = new_black - old_black
 
-        old_features = updater.get_features(board)
-        output = inference.evaluate_incremental(old_features, board.turn == chess.WHITE)
+        inference.update_accumulator(added_back, removed_back, old_perspective)
+
+        old_features = list(old_white) if old_perspective else list(old_black)
+        output = inference.evaluate_incremental(old_features, old_perspective)
 
     incremental_time = time.time() - start_time
 
