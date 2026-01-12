@@ -46,7 +46,7 @@ class DNNEvaluator(NNEvaluator):
     """DNN-based evaluator with incremental updates."""
 
     def __init__(self, board: chess.Board, model_path: str):
-        from train_nn import DNNInference, DNNIncrementalUpdater
+        from nn_train import DNNInference, DNNIncrementalUpdater
 
         self.inference = DNNInference(model_path)
         self.updater = DNNIncrementalUpdater(board)
@@ -105,7 +105,7 @@ class NNUEEvaluator(NNEvaluator):
     """NNUE-based evaluator with incremental updates."""
 
     def __init__(self, board: chess.Board, model_path: str):
-        from train_nn import NNUEInference, IncrementalFeatureUpdater
+        from nn_train import NNUEInference, IncrementalFeatureUpdater
 
         self.inference = NNUEInference(model_path)
         self.updater = IncrementalFeatureUpdater(board)
@@ -158,7 +158,7 @@ class NNUEEvaluator(NNEvaluator):
 """
 # engine.py
 
-NN_TYPE = "NNUE"  # Config at top of file
+nn_type = "NNUE"  # Config at top of file
 MODEL_PATH = "model/nnue.pt"
 
 class ChessEngine:
@@ -168,7 +168,7 @@ class ChessEngine:
         
     def search(self, board: chess.Board, depth: int):
         # Create evaluator for this search
-        self.evaluator = NNEvaluator.create(board, NN_TYPE, MODEL_PATH)
+        self.evaluator = NNEvaluator.create(board, nn_type, MODEL_PATH)
         
         return self.negamax(depth, -INF, INF)
     

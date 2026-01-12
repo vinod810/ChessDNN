@@ -28,7 +28,7 @@ Chess Neural Network Training Script
 Supports both NNUE and DNN architectures for chess position evaluation.
 
 ARCHITECTURE SELECTION:
-    Set NN_TYPE = "NNUE" or NN_TYPE = "DNN" in the Configuration section below.
+    Set nn_type = "NNUE" or nn_type = "DNN" in the Configuration section below.
 
 NNUE (Efficiently Updatable Neural Network):
     - Input: Two 40960-dimensional sparse vectors (white/black king-piece features)
@@ -67,7 +67,7 @@ NNUE_HIDDEN_SIZE = 256
 DNN_INPUT_SIZE = 768  # 64 squares * 6 piece types * 2 colors
 DNN_HIDDEN_LAYERS = [1024, 256, 32]
 
-# Dynamic configuration based on NN_TYPE
+# Dynamic configuration based on nn_type
 INPUT_SIZE = NNUE_INPUT_SIZE if NN_TYPE == "NNUE" else DNN_INPUT_SIZE
 FIRST_HIDDEN_SIZE = NNUE_HIDDEN_SIZE if NN_TYPE == "NNUE" else DNN_HIDDEN_LAYERS[0]
 OUTPUT_SIZE = 1
@@ -1680,7 +1680,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
     print(f"Network type: {NN_TYPE}")
 
-    # Create model based on NN_TYPE
+    # Create model based on nn_type
     if NN_TYPE == "NNUE":
         model = NNUENetwork()
     else:  # DNN
@@ -1722,9 +1722,9 @@ if __name__ == "__main__":
     print(f"Best validation loss: {min(history['val_loss']):.6f}")
     print(f"Epochs trained: {len(history['train_loss'])}")
 
-    # # Create inference engine and test based on NN_TYPE
+    # # Create inference engine and test based on nn_type
     # print("\nCreating inference engine...")
-    # if NN_TYPE == "NNUE":
+    # if nn_type == "NNUE":
     #     inference = NNUEInference(model)
     #     weights_file = WEIGHTS_FILE_PATH"nnue_weights.bin"
     # else:  # DNN

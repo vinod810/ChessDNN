@@ -9,6 +9,7 @@ Test Modes:
 - Accumulator-Correctness: Verify incremental == full evaluation
 - Eval-accuracy: Test prediction accuracy against ground truth CSV
 """
+import os
 
 import numpy as np
 import chess
@@ -33,9 +34,11 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-# Allowed values: "Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-accuracy"
-TEST_TYPE = "Interactive-FEN"
-NN_TYPE = "DNN"
+valid_test_types_dict = {0: "Interactive-FEN", 1: "Incremental-vs-Full", 2: "Accumulator-Correctness",
+                         3: "Eval-Accuracy"}
+valid_test_types = list(valid_test_types_dict.values())
+test_type = None
+nn_type = None
 
 """
 Updated DNNIncrementalUpdater with efficient stack-based pop() implementation
@@ -604,18 +607,8 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
     print("NNUE Accumulator Correctness Test")
     print("=" * 70)
 
-    # Test game: 1. e4 d5 2. exd5 Bh3 3. Bb5+ Nd7 4. Nf3 e5 5. dxe6 Qg5
-    # 6. O-O O-O-O 7. e7 Ngf6 8. e8=Q Bb4 9. Nd4 Rhxe8 10. Nb3 Bxd2 11. N1xd2
-    moves_san = [
-        "e4", "d5", "exd5", "Bh3", "Bb5+", "Nd7", "Nf3", "e5",
-        "dxe6", "Qg5", "O-O", "O-O-O", "e7", "Ngf6", "e8=Q", "Bb4",
-        "Nd4", "Rhxe8", "Nb3", "Bxd2", "N1xd2"
-    ]
-
-# TODO include both king moves from both side
-    print(f"\nPlaying game: 1. e4 d5 2. exd5 Bh3 3. Bb5+ Nd7 4. Nf3 e5")
-    print(f"              5. dxe6 Qg5 6. O-O O-O-O 7. e7 Ngf6 8. e8=Q Bb4")
-    print(f"              9. Nd4 Rhxe8 10. Nb3 Bxd2 11. N1xd2")
+    moves_san = ["d4", "e5", "dxe5", "f5", "exf6", "Nh6", "Bf4", "Bd6", "Nc3", "O-O", "Qd3", "Nc6", "O-O-O",
+                 "a6", "fxg7", "Rb8", "gxf8=N", "Kxf8", "Kb1", "Bxf4"]
 
     # Play the game
     board = chess.Board()
@@ -648,11 +641,6 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
         move_count += 1
 
-        # Test 1:
-        print("\n" + "─" * 70)
-        print(f"Test 1: After move {move_count} ({move_san})")
-        print("─" * 70)
-
         # Get current features
         white_feat, black_feat = updater.get_features_unsorted()
         stm = updater.board.turn == chess.WHITE
@@ -666,6 +654,11 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
         # Compare
         diff = abs(eval_incremental - eval_full)
+
+        # Test 1:
+        print("\n" + "─" * 70)
+        print(f"Test 1: After move {move_count} ({move_san})")
+        print("─" * 70)
 
         print(f"Position: {updater.board.fen()}")
         print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
@@ -684,7 +677,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
 
     print("Popping 8 moves...")
-    for i in range(8):
+    for i in range(4):
         # Pop and update accumulator incrementally
         change_record = updater.pop()
 
@@ -695,30 +688,34 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
             change_record['black_removed'],  # Add back what was removed
             change_record['black_added']     # Remove what was added
         )
-    stm = updater.board.turn == chess.WHITE
+        stm = updater.board.turn == chess.WHITE
 
-    # Evaluate with incremental
-    eval_incremental = inference.evaluate_incremental(white_feat, black_feat, stm)
+        # Evaluate with incremental
+        eval_incremental = inference.evaluate_incremental(white_feat, black_feat, stm)
 
-    # Evaluate with full
-    eval_full = inference.evaluate_full(white_feat, black_feat, stm)
+        # Evaluate with full
+        eval_full = inference.evaluate_full(white_feat, black_feat, stm)
 
-    # Compare
-    diff = abs(eval_incremental - eval_full)
+        # Compare
+        diff = abs(eval_incremental - eval_full)
 
-    print(f"Position: {updater.board.fen()}")
-    print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
-    print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
-    print(f"Difference:       {diff:.10e}")
+        print("\n" + "─" * 70)
+        print(f"Test 1: After pop {i + 1}")
+        print("─" * 70)
 
-    if diff < 1e-6:
-        print("✓ PASS: Incremental and full evaluation match!")
-    else:
-        print("✗ FAIL: Evaluations differ!")
+        print(f"Position: {updater.board.fen()}")
+        print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
+        print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
+        print(f"Difference:       {diff:.10e}")
 
-    print("\n" + "=" * 70)
-    print("Accumulator correctness test complete!")
-    print("=" * 70)
+        if diff < 1e-6:
+            print("✓ PASS: Incremental and full evaluation match!")
+        else:
+            print("✗ FAIL: Evaluations differ!")
+
+        print("\n" + "=" * 70)
+        print("Accumulator correctness test complete!")
+        print("=" * 70)
 
 
 def test_accumulator_correctness_dnn(inference: DNNInference):
@@ -727,15 +724,8 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
     print("DNN Accumulator Correctness Test")
     print("=" * 70)
 
-    moves_san = [
-        "e4", "d5", "exd5", "Bh3", "Bb5+", "Nd7", "Nf3", "e5",
-        "dxe6", "Qg5", "O-O", "O-O-O", "e7", "Ngf6", "e8=Q", "Bb4",
-        "Nd4", "Rhxe8", "Nb3", "Bxd2", "N1xd2"
-    ]
-
-    print(f"\nPlaying game: 1. e4 d5 2. exd5 Bh3 3. Bb5+ Nd7 4. Nf3 e5")
-    print(f"              5. dxe6 Qg5 6. O-O O-O-O 7. e7 Ngf6 8. e8=Q Bb4")
-    print(f"              9. Nd4 Rhxe8 10. Nb3 Bxd2 11. N1xd2")
+    moves_san = ["d4", "e5", "dxe5", "f5", "exf6", "Nh6", "Bf4", "Bd6", "Nc3", "O-O", "Qd3", "Nc6", "O-O-O",
+                 "a6", "fxg7", "Rb8", "gxf8=N",  "Kxf8", "Kb1",  "Bxf4"]
 
     # Play the game
     board = chess.Board()
@@ -776,11 +766,6 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
 
         move_count += 1
 
-        # Test 1:
-        print("\n" + "─" * 70)
-        print(f"Test 1: After move {move_count} ({move_san})")
-        print("─" * 70)
-
         # Get current features
         features = updater.get_features()
         perspective = updater.board.turn == chess.WHITE
@@ -795,6 +780,11 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         # Compare
         diff = abs(eval_incremental - eval_full)
 
+        # Test 1:
+        print("\n" + "─" * 70)
+        print(f"Test 1: After move {move_count} ({move_san})")
+        print("─" * 70)
+
         print(f"Position: {updater.board.fen()}")
         print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
         print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
@@ -805,13 +795,8 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         else:
             print("✗ FAIL: Evaluations differ!")
 
-    # Test 2: Pop 8 times and compare again
-    print("\n" + "─" * 70)
-    print("Test 2: After popping 8 moves")
-    print("─" * 70)
-
-    print("Popping 8 moves...")
-    for i in range(8):
+    print("Popping 4 moves...")
+    for i in range(4):
         # Pop and update accumulator incrementally
         change_record = updater.pop()
 
@@ -828,32 +813,36 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
             False  # black perspective
         )
 
-    features = updater.get_features()
-    perspective = updater.board.turn == chess.WHITE
+        features = updater.get_features()
+        perspective = updater.board.turn == chess.WHITE
 
-    # Evaluate with incremental
-    eval_incremental = inference.evaluate_incremental(features, perspective)
+        # Evaluate with incremental
+        eval_incremental = inference.evaluate_incremental(features, perspective)
 
-    # Evaluate with full
-    features_full = DNNFeatures.board_to_features(updater.board)
-    eval_full = inference.evaluate_full(features_full)
+        # Evaluate with full
+        features_full = DNNFeatures.board_to_features(updater.board)
+        eval_full = inference.evaluate_full(features_full)
 
-    # Compare
-    diff = abs(eval_incremental - eval_full)
+        # Compare
+        diff = abs(eval_incremental - eval_full)
 
-    print(f"Position: {updater.board.fen()}")
-    print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
-    print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
-    print(f"Difference:       {diff:.10e}")
+        print("\n" + "─" * 70)
+        print(f"Test 1: After pop {i + 1}")
+        print("─" * 70)
 
-    if diff < 1e-6:
-        print("✓ PASS: Incremental and full evaluation match!")
-    else:
-        print("✗ FAIL: Evaluations differ!")
+        print(f"Position: {updater.board.fen()}")
+        print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
+        print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
+        print(f"Difference:       {diff:.10e}")
 
-    print("\n" + "=" * 70)
-    print("Accumulator correctness test complete!")
-    print("=" * 70)
+        if diff < 1e-6:
+            print("✓ PASS: Incremental and full evaluation match!")
+        else:
+            print("✗ FAIL: Evaluations differ!")
+
+        print("\n" + "=" * 70)
+        print("Accumulator correctness test complete!")
+        print("=" * 70)
 
 
 def test_eval_accuracy(inference, nn_type: str):
@@ -1218,7 +1207,7 @@ def interactive_loop(inference):
     print("\n" + "=" * 60)
     print("Chess Position Evaluator")
     print("=" * 60)
-    print(f"Network type: {NN_TYPE}")
+    print(f"Network type: {nn_type}")
     print(f"Model: {MODEL_PATH}")
     print("\nEnter FEN strings to evaluate positions.")
     print("Type 'help' for instructions, 'exit' or 'quit' to quit.")
@@ -1262,36 +1251,36 @@ def interactive_loop(inference):
 
 def main():
     """Main entry point"""
-    if NN_TYPE not in ["NNUE", "DNN"]:
-        print(f"ERROR: Invalid NN_TYPE '{NN_TYPE}'. Must be 'NNUE' or 'DNN'")
+    if nn_type not in ["NNUE", "DNN"]:
+        print(f"ERROR: Invalid NN_TYPE '{nn_type}'. Must be 'NNUE' or 'DNN'")
         sys.exit(1)
 
-    # Validate TEST_TYPE
-    valid_test_types = ["Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-accuracy"]
-    if TEST_TYPE not in valid_test_types:
-        print(f"ERROR: Invalid TEST_TYPE '{TEST_TYPE}'")
+    # Validate test_type
+    #valid_test_types = ["Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-Accuracy"]
+    if test_type not in valid_test_types:
+        print(f"ERROR: Invalid TEST_TYPE '{test_type}'")
         print(f"Must be one of: {', '.join(valid_test_types)}")
         sys.exit(1)
 
-    inference = load_model(MODEL_PATH, NN_TYPE)
+    inference = load_model(MODEL_PATH, nn_type)
 
-    if TEST_TYPE == "Accumulator-Correctness":
-        print(f"\nRunning accumulator correctness test for {NN_TYPE}...")
+    if test_type == "Accumulator-Correctness":
+        print(f"\nRunning accumulator correctness test for {nn_type}...")
 
-        if NN_TYPE == "NNUE":
+        if nn_type == "NNUE":
             test_accumulator_correctness_nnue(inference)
         else:
             test_accumulator_correctness_dnn(inference)
 
-    elif TEST_TYPE == "Eval-accuracy":
-        print(f"\nRunning evaluation accuracy test for {NN_TYPE}...")
-        test_eval_accuracy(inference, NN_TYPE)
+    elif test_type == "Eval-Accuracy":
+        print(f"\nRunning evaluation accuracy test for {nn_type}...")
+        test_eval_accuracy(inference, nn_type)
 
-    elif TEST_TYPE == "Incremental-vs-Full":
-        print(f"\nRunning performance comparison for {NN_TYPE}...")
+    elif test_type == "Incremental-vs-Full":
+        print(f"\nRunning performance comparison for {nn_type}...")
         print("Comparing: Matrix multiplication vs Accumulator (add/subtract)")
 
-        if NN_TYPE == "NNUE":
+        if nn_type == "NNUE":
             performance_test_nnue(inference)
         else:
             performance_test_dnn(inference)
@@ -1308,4 +1297,15 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3:
+        if sys.argv[1] == "DNN" or sys.argv[1] == "NNUE":
+            nn_type = sys.argv[1]
+        if sys.argv[2].isdigit() and 0 <= int(sys.argv[2]) < len(valid_test_types_dict):
+            test_type = valid_test_types_dict[int(sys.argv[2])]
+
+    if nn_type is None or test_type is None:
+        print(f"Usage: {os.path.basename(sys.argv[0])} NN-TYPE {'{DNN, NNUE}'}, Test-Types {valid_test_types_dict}")
+        print(f"Example: {os.path.basename(sys.argv[0])} DNN 0")
+        exit()
+
     main()
