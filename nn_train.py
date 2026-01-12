@@ -22,6 +22,10 @@ from dataclasses import dataclass, field
 from collections import deque
 import threading
 import ctypes
+import chess
+from typing import Set, List, Tuple, Dict, Optional
+import chess
+from typing import Set, List, Tuple, Dict, Optional
 
 """
 Chess Neural Network Training Script
@@ -76,7 +80,7 @@ MODEL_PATH = "model/nnue.pt" if NN_TYPE == "NNUE" else "model/dnn.pt"
 # Main configuration
 BATCH_SIZE = 8192
 if platform.system() == "Windows":
-    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512) * 5 # Windows file reading is slow
+    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512) * 5  # Windows file reading is slow
 else:
     QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512)
 
@@ -84,7 +88,7 @@ else:
 QUEUE_MAX_SIZE = 100  # Max batches in queue
 SHUFFLE_BUFFER_SIZE = BATCH_SIZE * 10
 
-#Misc
+# Misc
 GC_INTERVAL = 1000  # Run garbage collection every N batches
 
 # Training
@@ -209,7 +213,7 @@ class NNUEFeatures:
     """Handles feature extraction for NNUE network"""
 
     @staticmethod
-    def get_piece_index(piece_type: int, piece_color: bool) -> int:
+    def get_piece_index(piece_type: int, is_friendly_piece_color: bool) -> int:
         """Convert piece type and color to index (0-9)
         Note: This method uses the is_friendly_piece boolean as-is. The caller is
         responsible for flipping is_friendly_piece when extracting from black's perspective
@@ -218,13 +222,13 @@ class NNUEFeatures:
         if piece_type == chess.KING:
             return -1
         type_idx = piece_type - 1
-        color_idx = 1 if piece_color else 0
+        color_idx = 1 if is_friendly_piece_color else 0
         return type_idx + color_idx * PIECE_TYPES
 
     @staticmethod
-    def get_feature_index(king_sq: int, piece_sq: int, piece_type: int, piece_color: bool) -> int:
+    def get_feature_index(king_sq: int, piece_sq: int, piece_type: int, is_friendly_piece: bool) -> int:
         """Calculate the feature index for (king_square, piece_square, piece_type, is_friendly_piece)"""
-        piece_idx = NNUEFeatures.get_piece_index(piece_type, piece_color)
+        piece_idx = NNUEFeatures.get_piece_index(piece_type, is_friendly_piece)
         if piece_idx == -1:
             return -1
         return king_sq * (PIECE_SQUARES * PIECE_TYPES * COLORS) + \
@@ -258,15 +262,15 @@ class NNUEFeatures:
                 continue
 
             piece_square = square
-            piece_color = piece.color
+            is_friendly_piece = piece.color
             piece_type = piece.piece_type
 
             if not perspective:
                 piece_square = NNUEFeatures.flip_square(piece_square)
-                piece_color = not piece_color
+                is_friendly_piece = not is_friendly_piece
 
             feature_idx = NNUEFeatures.get_feature_index(
-                king_square, piece_square, piece_type, piece_color
+                king_square, piece_square, piece_type, is_friendly_piece
             )
 
             if feature_idx >= 0:
@@ -343,21 +347,7 @@ class DNNFeatures:
         return DNNFeatures.extract_features(board, board.turn == chess.WHITE)
 
 
-"""
-Updated IncrementalFeatureUpdater (NNUE) with efficient stack-based pop() implementation
-"""
-import chess
-from typing import Set, List, Tuple, Dict, Optional
-
-"""
-Updated IncrementalFeatureUpdater (NNUE) with efficient stack-based pop() implementation
-that returns change information for accumulator updates.
-"""
-import chess
-from typing import Set, List, Tuple, Dict, Optional
-
-
-class IncrementalFeatureUpdater:
+class NNUEIncrementalUpdater:
     """
     Efficiently maintains NNUE features with incremental updates and undo support.
     Uses a history stack to track changes, enabling O(k) pop() operations.
@@ -383,16 +373,16 @@ class IncrementalFeatureUpdater:
         self.last_change: Optional[Dict] = None
 
     def _get_feature_for_perspective(self, perspective: bool, piece_sq: int,
-                                     piece_type: int, piece_color: bool) -> int:
+                                     piece_type: int, is_friendly_piece: bool) -> int:
         """Get feature index for a piece from a given perspective"""
         if perspective:
             king_sq = self.white_king_sq
         else:
             king_sq = NNUEFeatures.flip_square(self.black_king_sq)
             piece_sq = NNUEFeatures.flip_square(piece_sq)
-            piece_color = not piece_color
+            is_friendly_piece = not is_friendly_piece
 
-        return NNUEFeatures.get_feature_index(king_sq, piece_sq, piece_type, piece_color)
+        return NNUEFeatures.get_feature_index(king_sq, piece_sq, piece_type, is_friendly_piece)
 
     def _remove_piece_features(self, square: int, piece_type: int, piece_color: bool,
                                change_record: Dict):
@@ -725,7 +715,7 @@ class DNNNetwork(nn.Module):
         """
         features: dense tensor of shape (batch_size, 768)
         """
-        x = torch.clamp(self.l1(features), 0, 1) # Clamped ReLU
+        x = torch.clamp(self.l1(features), 0, 1)  # Clamped ReLU
         x = torch.clamp(self.l2(x), 0, 1)
         x = torch.clamp(self.l3(x), 0, 1)
         x = self.l4(x)
@@ -769,7 +759,8 @@ class ProcessGameWithValidation:
         else:
             return True
 
-    def __call__(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME, opening_plys: int = OPENING_PLYS) -> List[Tuple]:
+    def __call__(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME, opening_plys: int = OPENING_PLYS) -> List[
+        Tuple]:
         """
         Process a single game and return positions with evaluations.
         Uses incremental feature updates for efficiency.
@@ -805,7 +796,7 @@ class ProcessGameWithValidation:
 
             # Initialize feature updater on first position we might use
             if feature_updater is None:
-                feature_updater = IncrementalFeatureUpdater(board)
+                feature_updater = NNUEIncrementalUpdater(board)
 
             # Update features incrementally (this also updates the updater's internal board)
             feature_updater.push(node.move)
@@ -823,8 +814,6 @@ class ProcessGameWithValidation:
             if was_last_move_capture:
                 continue
 
-            # comment = node.comment if hasattr(node, 'comment') else ''
-            # eval_score = parse_evaluation(comment)
             ev = node.eval()
             if ev is None:
                 score = None
@@ -844,7 +833,7 @@ class ProcessGameWithValidation:
 
                 # Lichess eval is always from White's perspective.
                 if board.turn == chess.BLACK:
-                        score = -score
+                    score = -score
 
                 score = np.tanh(score / TANH_SCALE)
 
@@ -991,7 +980,7 @@ def worker_process(
                         game = chess.pgn.read_game(text_stream)
                         if game is None:
                             # EOF reached, increment loop counter and break to restart
-                            #with stats.worker_file_loops[worker_id].get_lock(): # Rare event so lock is fine
+                            # with stats.worker_file_loops[worker_id].get_lock(): # Rare event so lock is fine
                             stats.worker_file_loops[worker_id].value += 1
                             break
 
@@ -1000,9 +989,9 @@ def worker_process(
 
                         if positions:
                             position_buffer.extend(positions)
-                            #with stats.worker_games[worker_id].get_lock():
+                            # with stats.worker_games[worker_id].get_lock():
                             stats.worker_games[worker_id].value += 1
-                            #with stats.worker_positions[worker_id].get_lock():
+                            # with stats.worker_positions[worker_id].get_lock():
                             stats.worker_positions[worker_id].value += len(positions)
 
                         process_time = time.time() - process_start
@@ -1028,7 +1017,7 @@ def worker_process(
                                 while not stop_event.is_set():
                                     try:
                                         output_queue.put(sparse_batch, timeout=0.1)
-                                        #with stats.worker_batches[worker_id].get_lock():
+                                        # with stats.worker_batches[worker_id].get_lock():
                                         stats.worker_batches[worker_id].value += 1
                                         break
                                     except:
@@ -1037,7 +1026,7 @@ def worker_process(
                                         stats.queue_full_count.value += 1
 
                                 wait_time = time.time() - wait_start
-                                #with stats.worker_wait_ms[worker_id].get_lock():
+                                # with stats.worker_wait_ms[worker_id].get_lock():
                                 stats.worker_wait_ms[worker_id].value += int(wait_time * 1000)
 
                                 # Clear batch_positions explicitly
@@ -1154,6 +1143,7 @@ class EarlyStopping:
 
 class ParallelTrainer:
     """Main training coordinator with parallel data loading"""
+
     def __init__(
             self,
             pgn_dir: str,
@@ -1250,11 +1240,11 @@ class ParallelTrainer:
             try:
                 batch = self.data_queue.get(timeout=timeout)
                 wait_time = time.time() - wait_start
-                #with self.stats.main_wait_ms.get_lock():
+                # with self.stats.main_wait_ms.get_lock():
                 self.stats.main_wait_ms.value += int(wait_time * 1000)
                 return batch
             except:
-                #with self.stats.queue_empty_count.get_lock():
+                # with self.stats.queue_empty_count.get_lock():
                 self.stats.queue_empty_count.value += 1
 
                 # Check if all workers are dead
@@ -1294,14 +1284,14 @@ class ParallelTrainer:
             # is_validation = self.rng.random() < self.validation_split
             is_validation = self.stats.main_val_batches.value < positions_per_epoch / BATCH_SIZE * self.validation_split
 
-            #with self.stats.main_batches.get_lock():
+            # with self.stats.main_batches.get_lock():
             self.stats.main_batches.value += 1
 
             if is_validation:
                 # Store for validation (with size limit via deque maxlen)
                 with self.val_buffer_lock:
                     self.val_buffer.append(batch_data)
-                #with self.stats.main_val_batches.get_lock():
+                # with self.stats.main_val_batches.get_lock():
                 self.stats.main_val_batches.value += 1
             else:
                 # Training step
@@ -1324,7 +1314,7 @@ class ParallelTrainer:
                     train_batch_count += 1
                     positions_processed += batch_data['batch_size']
 
-                    #with self.stats.main_train_batches.get_lock():
+                    # with self.stats.main_train_batches.get_lock():
                     self.stats.main_train_batches.value += 1
 
                     # Clean up tensors
@@ -1349,7 +1339,7 @@ class ParallelTrainer:
                     train_batch_count += 1
                     positions_processed += batch_data['batch_size']
 
-                    #with self.stats.main_train_batches.get_lock():
+                    # with self.stats.main_train_batches.get_lock():
                     self.stats.main_train_batches.value += 1
 
                     # Clean up tensors
@@ -1359,7 +1349,7 @@ class ParallelTrainer:
             del batch_data
 
             process_time = time.time() - process_start
-            #with self.stats.main_process_ms.get_lock():
+            # with self.stats.main_process_ms.get_lock():
             self.stats.main_process_ms.value += int(process_time * 1000)
 
             # Progress update
@@ -1385,7 +1375,7 @@ class ParallelTrainer:
         # Clear validation buffer after computing loss
         with self.val_buffer_lock:
             self.val_buffer.clear()
-        #with self.stats.main_val_batches.get_lock():
+        # with self.stats.main_val_batches.get_lock():
         self.stats.main_val_batches.value = 0
 
         gc.collect()

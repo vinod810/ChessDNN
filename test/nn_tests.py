@@ -17,6 +17,10 @@ import torch
 import sys
 import time
 from typing import List, Set, Tuple
+import chess
+from typing import Set, List, Tuple, Dict
+import chess
+from typing import Set, List, Tuple, Dict, Optional
 
 # Import configuration and classes from train_nn
 try:
@@ -26,7 +30,7 @@ try:
         DNN_INPUT_SIZE, DNN_HIDDEN_LAYERS,
         NNUEFeatures, DNNFeatures,
         NNUENetwork, DNNNetwork,
-        IncrementalFeatureUpdater
+        NNUEIncrementalUpdater
     )
 except ImportError:
     print("ERROR: Could not import from nn_train.py")
@@ -39,20 +43,6 @@ valid_test_types_dict = {0: "Interactive-FEN", 1: "Incremental-vs-Full", 2: "Acc
 valid_test_types = list(valid_test_types_dict.values())
 test_type = None
 nn_type = None
-
-"""
-Updated DNNIncrementalUpdater with efficient stack-based pop() implementation
-"""
-import chess
-from typing import Set, List, Tuple, Dict
-
-"""
-Updated DNNIncrementalUpdater with efficient stack-based pop() implementation
-and methods to retrieve change information for accumulator updates.
-"""
-import chess
-from typing import Set, List, Tuple, Dict, Optional
-
 
 class DNNIncrementalUpdater:
     """
@@ -612,7 +602,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
     # Play the game
     board = chess.Board()
-    updater = IncrementalFeatureUpdater(board)
+    updater = NNUEIncrementalUpdater(board)
 
     # Initialize accumulator
     white_feat, black_feat = updater.get_features_unsorted()
@@ -1069,7 +1059,7 @@ def performance_test_nnue(inference: NNUEInference):
     # Test 2: Incremental evaluation
     print("\n2. Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)")
 
-    updater = IncrementalFeatureUpdater(board)
+    updater = NNUEIncrementalUpdater(board)
     white_feat, black_feat = updater.get_features_unsorted()
     inference._refresh_accumulator(white_feat, black_feat)
 

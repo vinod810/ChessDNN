@@ -105,10 +105,10 @@ class NNUEEvaluator(NNEvaluator):
     """NNUE-based evaluator with incremental updates."""
 
     def __init__(self, board: chess.Board, model_path: str):
-        from nn_train import NNUEInference, IncrementalFeatureUpdater
+        from nn_train import NNUEInference, NNUEIncrementalUpdater
 
         self.inference = NNUEInference(model_path)
-        self.updater = IncrementalFeatureUpdater(board)
+        self.updater = NNUEIncrementalUpdater(board)
 
         # Initialize accumulator
         white_feat, black_feat = self.updater.get_features_unsorted()

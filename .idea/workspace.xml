@@ -4,11 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="nn_evaluator.py">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="tests to cover King moves">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/defunc_halfkp.py" beforeDir="false" afterPath="$PROJECT_DIR$/defunc_halfkp.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/train_nn.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -115,14 +116,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00055" summary="WAC - 5 sec - 207/300">
-      <option name="closed" value="true" />
-      <created>1767309732496</created>
-      <option name="number" value="00055" />
-      <option name="presentableId" value="LOCAL-00055" />
-      <option name="project" value="LOCAL" />
-      <updated>1767309732496</updated>
     </task>
     <task id="LOCAL-00056" summary="Minor edits for code quality WAC - 5 sec - 207/300">
       <option name="closed" value="true" />
@@ -494,7 +487,14 @@
       <option name="project" value="LOCAL" />
       <updated>1768215370006</updated>
     </task>
-    <option name="localTasksCounter" value="104" />
+    <task id="LOCAL-00104" summary="tests to cover King moves">
+      <created>1768220183293</created>
+      <option name="number" value="00104" />
+      <option name="presentableId" value="LOCAL-00104" />
+      <option name="project" value="LOCAL" />
+      <updated>1768220183293</updated>
+    </task>
+    <option name="localTasksCounter" value="105" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -509,7 +509,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Numpy DNN - passed=200, success-rate=66.67%" />
     <MESSAGE value="print vars" />
     <MESSAGE value="Before NNUE" />
     <MESSAGE value="Removed komodo and model dirs from oldfish. passed=208, success-rate=69.33%" />
@@ -534,7 +533,8 @@
     <MESSAGE value="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds" />
     <MESSAGE value="Revert fixed" />
     <MESSAGE value="nn_evaluator.py" />
-    <option name="LAST_COMMIT_MESSAGE" value="nn_evaluator.py" />
+    <MESSAGE value="tests to cover King moves" />
+    <option name="LAST_COMMIT_MESSAGE" value="tests to cover King moves" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

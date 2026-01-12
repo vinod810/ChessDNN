@@ -521,7 +521,7 @@ class NNUENetwork(nn.Module):
 #
 #         # Initialize feature updater on first position we might use
 #         if feature_updater is None:
-#             feature_updater = IncrementalFeatureUpdater(board)
+#             feature_updater = NNUEIncrementalUpdater(board)
 #
 #         # Update features incrementally (this also updates the updater's internal board)
 #         feature_updater.push(node.move)
