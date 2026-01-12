@@ -917,7 +917,9 @@ def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu') -> Tupl
         white_indices = batch_data['white_indices']
         black_indices = batch_data['black_indices']
 
-        # Create dense tensors
+        # Note: Training does matrix multiplication at the first layer.  It is okay as the data pipeline is the
+        #       bottleneck. In contrast, the Inference class uses accumulators for more efficient operation where it
+        #       actually matters.
         white_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
         black_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
 

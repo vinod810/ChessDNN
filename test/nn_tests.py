@@ -44,6 +44,7 @@ valid_test_types = list(valid_test_types_dict.values())
 test_type = None
 nn_type = None
 
+
 class DNNIncrementalUpdater:
     """
     Incrementally maintains DNN features for both perspectives with efficient undo support.
@@ -237,6 +238,7 @@ class DNNIncrementalUpdater:
         """Get the number of moves in the history stack"""
         return len(self.history_stack)
 
+
 class NNUEInference:
     """Numpy-based inference engine for NNUE with incremental evaluation support"""
 
@@ -343,7 +345,7 @@ class NNUEInference:
                 self.black_accumulator += self.ft_weight[:, f]
 
     def update_accumulator(self, added_features_white: Set[int], removed_features_white: Set[int],
-                          added_features_black: Set[int], removed_features_black: Set[int]):
+                           added_features_black: Set[int], removed_features_black: Set[int]):
         """Update accumulators incrementally"""
         if self.white_accumulator is None or self.black_accumulator is None:
             raise RuntimeError("Accumulators not initialized. Call _refresh_accumulator() first.")
@@ -597,6 +599,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
     print("NNUE Accumulator Correctness Test")
     print("=" * 70)
 
+    # Includes captures, en-passant, castlings, king moves and promotion.
     moves_san = ["d4", "e5", "dxe5", "f5", "exf6", "Nh6", "Bf4", "Bd6", "Nc3", "O-O", "Qd3", "Nc6", "O-O-O",
                  "a6", "fxg7", "Rb8", "gxf8=N", "Kxf8", "Kb1", "Bxf4"]
 
@@ -665,7 +668,6 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
         print("Test 2: After popping 8 moves")
         print("─" * 70)
 
-
     print("Popping 8 moves...")
     for i in range(4):
         # Pop and update accumulator incrementally
@@ -674,9 +676,9 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
         # Update accumulator to reflect the reversed changes
         inference.update_accumulator(
             change_record['white_removed'],  # Add back what was removed
-            change_record['white_added'],    # Remove what was added
+            change_record['white_added'],  # Remove what was added
             change_record['black_removed'],  # Add back what was removed
-            change_record['black_added']     # Remove what was added
+            change_record['black_added']  # Remove what was added
         )
         stm = updater.board.turn == chess.WHITE
 
@@ -715,7 +717,7 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
     print("=" * 70)
 
     moves_san = ["d4", "e5", "dxe5", "f5", "exf6", "Nh6", "Bf4", "Bd6", "Nc3", "O-O", "Qd3", "Nc6", "O-O-O",
-                 "a6", "fxg7", "Rb8", "gxf8=N",  "Kxf8", "Kb1",  "Bxf4"]
+                 "a6", "fxg7", "Rb8", "gxf8=N", "Kxf8", "Kb1", "Bxf4"]
 
     # Play the game
     board = chess.Board()
@@ -794,12 +796,12 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         # When we pop, we reverse: what was added gets removed, what was removed gets added back
         inference.update_accumulator(
             change_record['white_removed'],  # Add back what was removed
-            change_record['white_added'],    # Remove what was added
+            change_record['white_added'],  # Remove what was added
             True  # white perspective
         )
         inference.update_accumulator(
             change_record['black_removed'],  # Add back what was removed
-            change_record['black_added'],    # Remove what was added
+            change_record['black_added'],  # Remove what was added
             False  # black perspective
         )
 
@@ -844,7 +846,7 @@ def test_eval_accuracy(inference, nn_type: str):
     print(f"{nn_type} Evaluation Accuracy Test")
     print("=" * 70)
 
-    csv_path = "pgn/chessData.csv"  #random_fen.csv"
+    csv_path = "pgn/chessData.csv"  # random_fen.csv"
 
     # Try to read CSV file
     import csv
@@ -887,7 +889,7 @@ def test_eval_accuracy(inference, nn_type: str):
                 if 'Evaluation' in row:
                     try:
                         score = float(row['Evaluation'].strip())
-                        #print(score)
+                        # print(score)
                     except (ValueError, AttributeError):
                         pass
                 elif 'evaluation' in row:
@@ -921,10 +923,11 @@ def test_eval_accuracy(inference, nn_type: str):
                 if fen and score is not None:
                     board = chess.Board(fen)
                     score = score if board.turn == chess.WHITE else -score
-                    #print(score)
+                    # print(score)
                     positions.append({'fen': fen, 'true_cp': score})
                 elif i < 3:  # Show first few problematic rows for debugging
-                    print(f"  Warning: Row {i+1} - fen={'found' if fen else 'missing'}, score={'found' if score is not None else 'missing'}")
+                    print(
+                        f"  Warning: Row {i + 1} - fen={'found' if fen else 'missing'}, score={'found' if score is not None else 'missing'}")
 
         if not positions:
             print("\n❌ ERROR: No valid positions found in CSV")
@@ -1025,7 +1028,7 @@ def test_eval_accuracy(inference, nn_type: str):
         true_cp = positions[i]['true_cp']
         pred_cp = pred_cp_values[i]
         diff = pred_cp - true_cp
-        print(f"{i+1:2d}. True: {true_cp:+7.1f} cp | Pred: {pred_cp:+7.1f} cp | Diff: {diff:+7.1f} cp")
+        print(f"{i + 1:2d}. True: {true_cp:+7.1f} cp | Pred: {pred_cp:+7.1f} cp | Diff: {diff:+7.1f} cp")
 
     print("\n" + "=" * 70)
     print("Evaluation accuracy test complete!")
@@ -1054,7 +1057,7 @@ def performance_test_nnue(inference: NNUEInference):
     full_time = time.time() - start_time
 
     print(f"   Time: {full_time:.4f} seconds")
-    print(f"   Avg per evaluation: {full_time/1000*1000:.3f} ms")
+    print(f"   Avg per evaluation: {full_time / 1000 * 1000:.3f} ms")
 
     # Test 2: Incremental evaluation
     print("\n2. Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)")
@@ -1098,13 +1101,13 @@ def performance_test_nnue(inference: NNUEInference):
     incremental_time = time.time() - start_time
 
     print(f"   Time: {incremental_time:.4f} seconds")
-    print(f"   Avg per push/pop cycle: {incremental_time/500*1000:.3f} ms")
+    print(f"   Avg per push/pop cycle: {incremental_time / 500 * 1000:.3f} ms")
 
     print("\n" + "─" * 70)
     print("Results:")
-    print(f"  Full (matrix multiply):     {full_time/1000*1000:.3f} ms per evaluation")
-    print(f"  Incremental (add/subtract): {incremental_time/500*1000:.3f} ms per cycle")
-    print(f"  Speedup: {full_time/(incremental_time)*500/1000:.2f}x")
+    print(f"  Full (matrix multiply):     {full_time / 1000 * 1000:.3f} ms per evaluation")
+    print(f"  Incremental (add/subtract): {incremental_time / 500 * 1000:.3f} ms per cycle")
+    print(f"  Speedup: {full_time / (incremental_time) * 500 / 1000:.2f}x")
     print("\nKey: Incremental uses accumulator (add/subtract weight vectors)")
     print("instead of full matrix multiplication for the first layer.")
     print("=" * 70)
@@ -1129,7 +1132,7 @@ def performance_test_dnn(inference: DNNInference):
     full_time = time.time() - start_time
 
     print(f"   Time: {full_time:.4f} seconds")
-    print(f"   Avg per evaluation: {full_time/1000*1000:.3f} ms")
+    print(f"   Avg per evaluation: {full_time / 1000 * 1000:.3f} ms")
 
     # Test 2: Incremental evaluation
     print("\n2. Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)")
@@ -1180,13 +1183,13 @@ def performance_test_dnn(inference: DNNInference):
     incremental_time = time.time() - start_time
 
     print(f"   Time: {incremental_time:.4f} seconds")
-    print(f"   Avg per push/pop cycle: {incremental_time/500*1000:.3f} ms")
+    print(f"   Avg per push/pop cycle: {incremental_time / 500 * 1000:.3f} ms")
 
     print("\n" + "─" * 70)
     print("Results:")
-    print(f"  Full (matrix multiply):     {full_time/1000*1000:.3f} ms per evaluation")
-    print(f"  Incremental (add/subtract): {incremental_time/500*1000:.3f} ms per cycle")
-    print(f"  Speedup: {full_time/(incremental_time)*500/1000:.2f}x")
+    print(f"  Full (matrix multiply):     {full_time / 1000 * 1000:.3f} ms per evaluation")
+    print(f"  Incremental (add/subtract): {incremental_time / 500 * 1000:.3f} ms per cycle")
+    print(f"  Speedup: {full_time / (incremental_time) * 500 / 1000:.2f}x")
     print("\nKey: Incremental uses accumulator (add/subtract weight vectors)")
     print("instead of full matrix multiplication for the first layer.")
     print("=" * 70)
@@ -1246,7 +1249,7 @@ def main():
         sys.exit(1)
 
     # Validate test_type
-    #valid_test_types = ["Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-Accuracy"]
+    # valid_test_types = ["Interactive-FEN", "Incremental-vs-Full", "Accumulator-Correctness", "Eval-Accuracy"]
     if test_type not in valid_test_types:
         print(f"ERROR: Invalid TEST_TYPE '{test_type}'")
         print(f"Must be one of: {', '.join(valid_test_types)}")
