@@ -19,7 +19,7 @@ from typing import List, Set, Tuple
 
 # Import configuration and classes from train_nn
 try:
-    from train_nn import (
+    from nn_train import (
         MODEL_PATH, TANH_SCALE,
         NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE,
         DNN_INPUT_SIZE, DNN_HIDDEN_LAYERS,
@@ -28,8 +28,8 @@ try:
         IncrementalFeatureUpdater
     )
 except ImportError:
-    print("ERROR: Could not import from train_nn.py")
-    print("Make sure train_nn.py (or train_nn_fixed.py) is in the same directory")
+    print("ERROR: Could not import from nn_train.py")
+    print("Make sure nn_train.py (or train_nn_fixed.py) is in the same directory")
     sys.exit(1)
 
 # Configuration
