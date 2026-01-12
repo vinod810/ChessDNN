@@ -21,6 +21,12 @@ import chess
 from typing import Set, List, Tuple, Dict
 import chess
 from typing import Set, List, Tuple, Dict, Optional
+# Import required modules for PGN processing
+import glob
+import zstandard as zstd
+import io
+import chess.pgn
+import os
 
 # Import configuration and classes from train_nn
 try:
@@ -839,108 +845,142 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
 
 def test_eval_accuracy(inference, nn_type: str):
     """
-    Test evaluation accuracy against ground truth from CSV file.
+    Test evaluation accuracy against ground truth from PGN file.
     Computes MSE of tanh(cp/400) between predicted and true scores.
+    Extracts 1000 positions from annotated PGN games (matching ProcessGameWithValidation logic).
     """
     print("\n" + "=" * 70)
     print(f"{nn_type} Evaluation Accuracy Test")
     print("=" * 70)
 
-    csv_path = "pgn/chessData.csv"  # random_fen.csv"
+    # Find PGN files
+    pgn_dir = "pgn"
+    pgn_files = glob.glob(f"{pgn_dir}/*.pgn.zst")
 
-    # Try to read CSV file
-    import csv
-    import os
-
-    if not os.path.exists(csv_path):
-        print(f"\n❌ ERROR: CSV file not found: {csv_path}")
-        print("Please ensure the file exists")
-        print("\nExpected format (comma-separated):")
-        print("  FEN,Evaluation")
-        print("  rnbqkb1r/pppppppp/B4n2/8/4P3/8/PPPP1PPP/RNBQK1NR b KQkq - 2 2,-459")
+    if not pgn_files:
+        print(f"\n❌ ERROR: No PGN files found in {pgn_dir}/")
+        print("Please ensure .pgn.zst files exist in the pgn directory")
         return
 
-    print(f"\nReading positions from: {csv_path}")
+    # Use the first PGN file
+    pgn_file = pgn_files[0]
+    print(f"\nReading positions from: {pgn_file}")
+
+    # Configuration (matching ProcessGameWithValidation logic)
+    MAX_PLYS_PER_GAME = 200
+    OPENING_PLYS = 0
+    TARGET_POSITIONS = 100_000
+
+    # Import constants from training module
+    from nn_train import TANH_SCALE, MAX_SCORE, MATE_FACTOR, MAX_MATE_DEPTH, MAX_NON_MATE_SCORE
 
     positions = []
+    games_processed = 0
+
     try:
-        with open(csv_path, 'r') as f:
-            # Standard CSV with comma delimiter
-            reader = csv.DictReader(f)
+        print("Extracting positions from games...")
 
-            # Debug: Show available columns
-            available_columns = reader.fieldnames
-            print(f"CSV columns found: {available_columns}")
+        with open(pgn_file, 'rb') as f:
+            dctx = zstd.ZstdDecompressor()
+            with dctx.stream_reader(f) as reader:
+                text_stream = io.TextIOWrapper(reader, encoding='utf-8')
 
-            for i, row in enumerate(reader):
-                if i >= 1000:  # Only first 1000 positions
-                    break
+                while len(positions) < TARGET_POSITIONS:
+                    game = chess.pgn.read_game(text_stream)
+                    if game is None:
+                        break  # End of file
 
-                # Try to find FEN and Evaluation columns
-                fen = None
-                score = None
+                    games_processed += 1
 
-                # Try exact matches first (FEN, Evaluation)
-                if 'FEN' in row:
-                    fen = row['FEN'].strip()
-                elif 'fen' in row:
-                    fen = row['fen'].strip()
+                    # Skip variant games
+                    if any("Variant" in key for key in game.headers.keys()):
+                        continue
 
-                if 'Evaluation' in row:
-                    try:
-                        score = float(row['Evaluation'].strip())
-                        # print(score)
-                    except (ValueError, AttributeError):
-                        pass
-                elif 'evaluation' in row:
-                    try:
-                        score = float(row['evaluation'].strip())
-                    except (ValueError, AttributeError):
-                        pass
-                elif 'score' in row:
-                    try:
-                        score = float(row['score'].strip())
-                    except (ValueError, AttributeError):
-                        pass
-                elif 'Score' in row:
-                    try:
-                        score = float(row['Score'].strip())
-                    except (ValueError, AttributeError):
-                        pass
+                    board = game.board()
+                    move_count = 0
+                    game_positions = []
 
-                # If exact match failed, try partial matches
-                if fen is None or score is None:
-                    for key in row.keys():
-                        key_lower = key.lower().strip()
-                        if fen is None and 'fen' in key_lower:
-                            fen = row[key].strip()
-                        if score is None and ('eval' in key_lower or 'score' in key_lower or 'cp' in key_lower):
-                            try:
-                                score = float(row[key].strip())
-                            except (ValueError, AttributeError):
-                                continue
+                    # Process game mainline
+                    for node in game.mainline():
+                        move_count += 1
+                        current_move = node.move
 
-                if fen and score is not None:
-                    board = chess.Board(fen)
-                    score = score if board.turn == chess.WHITE else -score
-                    # print(score)
-                    positions.append({'fen': fen, 'true_cp': score})
-                elif i < 3:  # Show first few problematic rows for debugging
-                    print(
-                        f"  Warning: Row {i + 1} - fen={'found' if fen else 'missing'}, score={'found' if score is not None else 'missing'}")
+                        # Check if this move is a capture BEFORE pushing it
+                        was_last_move_capture = board.is_capture(current_move)
+
+                        if len(game_positions) >= MAX_PLYS_PER_GAME:
+                            break
+
+                        # Skip opening moves
+                        if move_count <= OPENING_PLYS:
+                            board.push(current_move)
+                            continue
+
+                        # Push the move
+                        board.push(current_move)
+
+                        # Skip game-over positions
+                        if board.is_game_over():
+                            continue
+
+                        # Skip if side to move is in check
+                        if board.is_check():
+                            continue
+
+                        # Skip if this move was a capture (position after capture is tactically unstable)
+                        if was_last_move_capture:
+                            continue
+
+                        # Get evaluation
+                        ev = node.eval()
+                        if ev is None:
+                            continue
+
+                        # Convert evaluation to score (matching ProcessGameWithValidation logic)
+                        if ev.is_mate():
+                            mate_in = ev.white().mate()
+                            if mate_in < 0:  # -ve when black is winning
+                                mate_in = max(-MAX_MATE_DEPTH, mate_in)
+                                score_cp = -MAX_SCORE - mate_in * MATE_FACTOR
+                            else:
+                                mate_in = min(MAX_MATE_DEPTH, mate_in)
+                                score_cp = MAX_SCORE - mate_in * MATE_FACTOR
+                        else:
+                            score_cp = ev.white().score()
+                            score_cp = min(score_cp, MAX_NON_MATE_SCORE)
+                            score_cp = max(score_cp, -MAX_NON_MATE_SCORE)
+
+                        # Store position data
+                        # Score is from white's perspective, adjust for side to move
+                        fen = board.fen()
+                        true_cp = score_cp if board.turn == chess.WHITE else -score_cp
+
+                        game_positions.append({
+                            'fen': fen,
+                            'true_cp': true_cp
+                        })
+
+                    # Add positions from this game to our collection
+                    positions.extend(game_positions)
+
+                    if games_processed % int(TARGET_POSITIONS / 10 / 10) == 0:
+                        print(f"  Processed {games_processed} games, collected {len(positions)} positions...")
+
+                    if len(positions) >= TARGET_POSITIONS:
+                        break
+
+        # Trim to exactly TARGET_POSITIONS
+        positions = positions[:TARGET_POSITIONS]
 
         if not positions:
-            print("\n❌ ERROR: No valid positions found in CSV")
-            print(f"Available columns: {available_columns}")
-            print("\nPlease ensure CSV has:")
-            print("  - A column named 'FEN' (for FEN strings)")
-            print("  - A column named 'Evaluation' (for centipawn scores)")
+            print("\n❌ ERROR: No valid positions found in PGN file")
+            print("Please ensure the PGN file contains games with engine evaluations")
             return
 
-        print(f"✓ Loaded {len(positions)} positions")
+        print(f"✓ Loaded {len(positions)} positions from {games_processed} games")
 
     except Exception as e:
-        print(f"❌ ERROR reading CSV: {e}")
+        print(f"❌ ERROR reading PGN: {e}")
         import traceback
         traceback.print_exc()
         return
@@ -953,7 +993,7 @@ def test_eval_accuracy(inference, nn_type: str):
     errors = []
 
     for i, pos in enumerate(positions):
-        if (i + 1) % 100 == 0:
+        if (i + 1) % int(TARGET_POSITIONS / 10) == 0:
             print(f"  Progress: {i + 1}/{len(positions)}")
 
         try:
