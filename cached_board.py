@@ -16,6 +16,7 @@ from copy import deepcopy
 
 from defunc_prepare_data import BOARD_SHAPE, PIECE_TO_PLANE, PIECE_VALUES
 
+# TODO Use cython to fix bottleneck functions
 # ========== PST Tables ==========
 # fmt: off
 PST_PAWN = [
