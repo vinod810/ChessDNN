@@ -39,9 +39,12 @@ Larger DNN netwrok Archtectures are better in positional play than smaller archi
     * Edit->Engines>New. Then browse to the cloned directory and select uci_engine.py
   * You are now ready to play against the engine. Good luck!
 
+## Project Description
+nn_train.py - Trains the NNUE or DNN network.
+
 ## Future work
 768 input parameters. Stockfish NNE style overparmterization of input and use accumelators instead of matrix multiple at the first hidden layer.
-
+Cython for improving performance
 
 ## Authors
 Eapen Kuruvilla 

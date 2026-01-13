@@ -1066,9 +1066,10 @@ def test_eval_accuracy(inference, nn_type: str):
     print("─" * 70)
     for i in range(min(20, len(positions))):
         true_cp = positions[i]['true_cp']
+        fen = positions[i]['fen']
         pred_cp = pred_cp_values[i]
         diff = pred_cp - true_cp
-        print(f"{i + 1:2d}. True: {true_cp:+7.1f} cp | Pred: {pred_cp:+7.1f} cp | Diff: {diff:+7.1f} cp")
+        print(f"{i + 1:2d}. True: {true_cp:+7.1f} cp | Pred: {pred_cp:+7.1f} cp | Diff: {diff:+7.1f} cp | {fen}")
 
     print("\n" + "=" * 70)
     print("Evaluation accuracy test complete!")

@@ -4,8 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Minor edits">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/dnn_notes.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -113,14 +115,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00058" summary="Book move - WAC - 5 sec - 205/300">
-      <option name="closed" value="true" />
-      <created>1767319321562</created>
-      <option name="number" value="00058" />
-      <option name="presentableId" value="LOCAL-00058" />
-      <option name="project" value="LOCAL" />
-      <updated>1767319321562</updated>
     </task>
     <task id="LOCAL-00059" summary="Check for 3-fold repetition">
       <option name="closed" value="true" />
@@ -489,7 +483,14 @@
       <option name="project" value="LOCAL" />
       <updated>1768232477435</updated>
     </task>
-    <option name="localTasksCounter" value="107" />
+    <task id="LOCAL-00107" summary="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207">
+      <created>1768251107315</created>
+      <option name="number" value="00107" />
+      <option name="presentableId" value="LOCAL-00107" />
+      <option name="project" value="LOCAL" />
+      <updated>1768251107315</updated>
+    </task>
+    <option name="localTasksCounter" value="108" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -504,7 +505,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Before NNUE" />
     <MESSAGE value="Removed komodo and model dirs from oldfish. passed=208, success-rate=69.33%" />
     <MESSAGE value="QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL: passed=227 success-rate=75.67%" />
     <MESSAGE value="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%" />
@@ -529,7 +529,8 @@
     <MESSAGE value="nn_evaluator.py" />
     <MESSAGE value="tests to cover King moves" />
     <MESSAGE value="Minor edits" />
-    <option name="LAST_COMMIT_MESSAGE" value="Minor edits" />
+    <MESSAGE value="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207" />
+    <option name="LAST_COMMIT_MESSAGE" value="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -18,7 +18,7 @@ medium,512-256-32-1,relu,mse,0.057,233
 
 Against Stockfish1700 (2 epochs training)
 DNN512 - +77.8
-DNN1024 - 181.7 +/-113.2
+DNN1024 - +181.7 +/-113.2
 
 DNN1024 vs. DNN512
 DNN512 +6.9 ELO / 50 games
@@ -29,7 +29,7 @@ Quiet positions only, 20-10 plys epoch 10 - val loss 5.5
 Quiet positions only, 200-10 plys epoch ??  - val loss ??
 
 NN Training
-DNN -
+DNN - Val , Test - (mse), (mae)
 NNUE -
 
 
