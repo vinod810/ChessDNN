@@ -16,7 +16,8 @@ from copy import deepcopy
 
 from defunc_prepare_data import BOARD_SHAPE, PIECE_TO_PLANE, PIECE_VALUES
 
-# TODO Use https://github.com/zedeckj/bulletchess?tab=readme-ov-file
+# TODO Use C++ chess  library directly e.g.https://github.com/Disservin/chess-library
+#  TODO Use https://github.com/zedeckj/bulletchess?tab=readme-ov-file
 # TODO Use cython to fix bottleneck functions
 # TODO or use https://github.com/thefcraft/FastChess - No zobrist hash
 
