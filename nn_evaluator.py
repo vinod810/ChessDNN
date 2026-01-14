@@ -134,13 +134,19 @@ class NNUEEvaluator(NNEvaluator):
     def pop(self):
         change_record = self.updater.pop()
 
-        # NNUE update_accumulator signature
-        self.inference.update_accumulator(
-            change_record['white_removed'],
-            change_record['white_added'],
-            change_record['black_removed'],
-            change_record['black_added']
-        )
+        # King moves require full accumulator refresh because ALL features
+        # change when king position changes (delta tracking doesn't work)
+        if change_record['white_king_moved'] or change_record['black_king_moved']:
+            white_feat, black_feat = self.updater.get_features_unsorted()
+            self.inference._refresh_accumulator(white_feat, black_feat)
+        else:
+            # Regular move: use incremental updates
+            self.inference.update_accumulator(
+                change_record['white_removed'],
+                change_record['white_added'],
+                change_record['black_removed'],
+                change_record['black_added']
+            )
 
     def evaluate(self) -> float:
         if self.updater.board.is_game_over():
@@ -155,6 +161,7 @@ class NNUEEvaluator(NNEvaluator):
     def get_board(self) -> chess.Board:
         return self.updater.board
 
+
 """
 # engine.py
 
@@ -165,18 +172,18 @@ class ChessEngine:
     def __init__(self):
         self.evaluator = None
         self.tt = {}
-        
+
     def search(self, board: chess.Board, depth: int):
         # Create evaluator for this search
         self.evaluator = NNEvaluator.create(board, nn_type, MODEL_PATH)
-        
+
         return self.negamax(depth, -INF, INF)
-    
+
     def negamax(self, depth, alpha, beta):
         ...
         if depth == 0:
             return self.evaluator.evaluate_centipawns(), []
-        
+
         for move in moves:
             self.evaluator.push(move)
             score, pv = self.negamax(depth-1, -beta, -alpha)

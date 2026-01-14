@@ -670,29 +670,39 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
             print("✗ FAIL: Evaluations differ!")
 
         # Test 2: Pop 8 times and compare again
-        print("\n" + "─" * 70)
-        print("Test 2: After popping 8 moves")
-        print("─" * 70)
+        #print("\n" + "─" * 70)
+        #print("Test 2: After popping 8 moves")
+        #print("─" * 70)
 
     print("Popping 8 moves...")
     for i in range(4):
         # Pop and update accumulator incrementally
         change_record = updater.pop()
 
-        # Update accumulator to reflect the reversed changes
-        inference.update_accumulator(
-            change_record['white_removed'],  # Add back what was removed
-            change_record['white_added'],  # Remove what was added
-            change_record['black_removed'],  # Add back what was removed
-            change_record['black_added']  # Remove what was added
-        )
+        # Get CURRENT features after pop
+        white_feat, black_feat = updater.get_features_unsorted()
         stm = updater.board.turn == chess.WHITE
+
+        # FIX: King moves require full accumulator refresh because ALL features
+        # change when king position changes (delta tracking doesn't work)
+        if change_record['white_king_moved'] or change_record['black_king_moved']:
+            # Refresh accumulators from scratch for king moves
+            inference._refresh_accumulator(white_feat, black_feat)
+        else:
+            # Regular move: use incremental updates to reverse the changes
+            inference.update_accumulator(
+                change_record['white_removed'],  # Add back what was removed
+                change_record['white_added'],  # Remove what was added
+                change_record['black_removed'],  # Add back what was removed
+                change_record['black_added']  # Remove what was added
+            )
 
         # Evaluate with incremental
         eval_incremental = inference.evaluate_incremental(white_feat, black_feat, stm)
 
-        # Evaluate with full
-        eval_full = inference.evaluate_full(white_feat, black_feat, stm)
+        # Evaluate with full (use fresh features from board)
+        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(updater.board)
+        eval_full = inference.evaluate_full(white_feat_full, black_feat_full, stm)
 
         # Compare
         diff = abs(eval_incremental - eval_full)

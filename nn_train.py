@@ -57,7 +57,7 @@ Output range: approximately [-1, 1] for both architectures.
 
 # Configuration
 # Network type selection: "NNUE" or "DNN"
-NN_TYPE = "DNN"
+NN_TYPE = "NNUE"
 
 # NNUE Configuration
 KING_SQUARES = 64
