@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 
 import chess
-
+from nn_inference import NNUEInference
+from nn_inference import NNUEIncrementalUpdater
+from nn_inference import DNNInference, DNNIncrementalUpdater
+from nn_inference import load_model, MAX_SCORE
 
 class NNEvaluator(ABC):
     """
@@ -48,9 +51,8 @@ class DNNEvaluator(NNEvaluator):
     """DNN-based evaluator with incremental updates."""
 
     def __init__(self, board: chess.Board, model_path: str):
-        from nn_train import DNNInference, DNNIncrementalUpdater
-
-        self.inference = DNNInference(model_path)
+        # self.inference = DNNInference(model_path)
+        self.inference = load_model(model_path, "DNN")
         self.updater = DNNIncrementalUpdater(board)
 
         # Initialize accumulators
@@ -92,7 +94,7 @@ class DNNEvaluator(NNEvaluator):
     def evaluate(self) -> float:
         if self.updater.board.is_game_over():
             if self.updater.board.is_checkmate():
-                return -INF + self.updater.board.ply()
+                return -MAX_SCORE + self.updater.board.ply()
             return 0.0
 
         features = self.updater.get_features()
@@ -107,10 +109,8 @@ class NNUEEvaluator(NNEvaluator):
     """NNUE-based evaluator with incremental updates."""
 
     def __init__(self, board: chess.Board, model_path: str):
-        from nn_train import NNUEInference
-        from nn_inference import NNUEIncrementalUpdater
-
-        self.inference = NNUEInference(model_path)
+        #self.inference = NNUEInference(model_path)
+        self.inference = load_model(model_path, "NNUE")
         self.updater = NNUEIncrementalUpdater(board)
 
         # Initialize accumulator
@@ -154,7 +154,7 @@ class NNUEEvaluator(NNEvaluator):
     def evaluate(self) -> float:
         if self.updater.board.is_game_over():
             if self.updater.board.is_checkmate():
-                return -INF + self.updater.board.ply()
+                return -MAX_SCORE + self.updater.board.ply()
             return 0.0
 
         white_feat, black_feat = self.updater.get_features_unsorted()

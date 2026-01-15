@@ -27,8 +27,9 @@ import os
 # Import configuration and classes from train_nn
 #try:
 from nn_inference import (NNUEFeatures, DNNFeatures, NNUEIncrementalUpdater, DNNIncrementalUpdater, NNUEInference,
-                          DNNInference, TANH_SCALE, ProcessGameWithValidation, MAX_PLYS_PER_GAME, OPENING_PLYS,
+                          DNNInference, TANH_SCALE, MAX_PLYS_PER_GAME, OPENING_PLYS,
                           load_model)
+from nn_train import ProcessGameWithValidation
 
 #except ImportError:
 #    print("ERROR: Could not import from nn_train.py")
