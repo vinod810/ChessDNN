@@ -1,6 +1,5 @@
 import sys
 from typing import List, Tuple, Set, Dict, Optional
-
 import chess
 import numpy as np
 import torch
@@ -17,12 +16,6 @@ DNN_HIDDEN_LAYERS = [1024, 256, 32]
 OUTPUT_SIZE = 1
 TANH_SCALE = 400
 MAX_SCORE = 10_000
-MATE_FACTOR = 100
-MAX_MATE_DEPTH = 10
-MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
-
-MAX_PLYS_PER_GAME = 200
-OPENING_PLYS = 10
 
 class NNUEFeatures:
     """Handles feature extraction for NNUE network"""
@@ -173,7 +166,7 @@ class NNUEIncrementalUpdater:
 
     def __init__(self, board: chess.Board):
         """Initialize with a board position"""
-        self.board = board.copy()
+        #self.board = board.copy()
         # Store features as sets for O(1) add/remove
         self.white_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.WHITE))
         self.black_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.BLACK))
@@ -235,15 +228,15 @@ class NNUEIncrementalUpdater:
             self.black_features.add(black_feat)
             change_record['black_added'].add(black_feat)
 
-    def _recompute_perspective(self, perspective: bool):
+    def _recompute_perspective(self, board: chess.Board, perspective: bool):
         """Fully recompute features for one perspective (needed after king moves)"""
-        features = set(NNUEFeatures.extract_features(self.board, perspective))
+        features = set(NNUEFeatures.extract_features(board, perspective))
         if perspective:
             self.white_features = features
         else:
             self.black_features = features
 
-    def push(self, move: chess.Move):
+    def update_pre_push(self, board_before_push: chess.Board, move: chess.Move):
         """
         Update features after making a move and save changes for efficient undo.
         Must be called BEFORE board.push(move).
@@ -265,13 +258,13 @@ class NNUEIncrementalUpdater:
             'old_black_features': None  # Will store full set if king moves
         }
 
-        piece = self.board.piece_at(from_sq)
+        piece = board_before_push.piece_at(from_sq)
         if piece is None:
             # Should not happen in valid games
-            self.board.push(move)
+            # self.board.push(move)
             self.history_stack.append(change_record)
             self.last_change = change_record
-            return
+            return None, None, None
 
         moving_piece_type = piece.piece_type
         moving_piece_color = piece.color
@@ -289,14 +282,14 @@ class NNUEIncrementalUpdater:
             change_record['old_black_features'] = self.black_features.copy()
 
         # Check for capture
-        captured_piece = self.board.piece_at(to_sq)
-        is_en_passant = self.board.is_en_passant(move)
+        captured_piece = board_before_push.piece_at(to_sq)
+        is_en_passant = board_before_push.is_en_passant(move)
 
         # Handle en passant capture
         if is_en_passant:
             # The captured pawn is not on to_sq, it's on the en passant square
             ep_sq = to_sq + (-8 if moving_piece_color == chess.WHITE else 8)
-            captured_piece = self.board.piece_at(ep_sq)
+            captured_piece = board_before_push.piece_at(ep_sq)
             if captured_piece:
                 self._remove_piece_features(ep_sq, captured_piece.piece_type,
                                             captured_piece.color, change_record)
@@ -307,7 +300,8 @@ class NNUEIncrementalUpdater:
                                         captured_piece.color, change_record)
 
         # Handle castling - need to move the rook too
-        is_castling = self.board.is_castling(move)
+        is_castling = board_before_push.is_castling(move)
+        rook_to = None
         if is_castling:
             # Determine rook squares
             if to_sq > from_sq:  # Kingside
@@ -325,7 +319,7 @@ class NNUEIncrementalUpdater:
             self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
 
         # Make the move on internal board
-        self.board.push(move)
+        # self.board.push(move)
 
         # Update king square cache if king moved
         if is_white_king_move:
@@ -345,12 +339,15 @@ class NNUEIncrementalUpdater:
         if is_castling:
             self._add_piece_features(rook_to, chess.ROOK, moving_piece_color, change_record)
 
+        return is_white_king_move, is_black_king_move, change_record
+
+    def update_post_push(self, board_after_push: chess.Board, is_white_king_move, is_black_king_move, change_record):
         # If king moved, recompute that perspective entirely
         # (all features depend on king square)
         if is_white_king_move:
-            self._recompute_perspective(chess.WHITE)
+            self._recompute_perspective(board_after_push, chess.WHITE)
         elif is_black_king_move:
-            self._recompute_perspective(chess.BLACK)
+            self._recompute_perspective(board_after_push, chess.BLACK)
 
         # Save the change record for efficient undo
         self.history_stack.append(change_record)
@@ -378,7 +375,7 @@ class NNUEIncrementalUpdater:
             raise ValueError("No moves to pop - history stack is empty")
 
         # Undo the board move
-        self.board.pop()
+        # self.board.pop()
 
         # Retrieve and remove the last change record
         change_record = self.history_stack.pop()
@@ -547,7 +544,7 @@ class DNNIncrementalUpdater:
 
     def __init__(self, board: chess.Board):
         """Initialize with a board position"""
-        self.board = board.copy()
+        # self.board = board.copy()
         self.white_features: Set[int] = set(DNNFeatures.extract_features(board, chess.WHITE))
         self.black_features: Set[int] = set(DNNFeatures.extract_features(board, chess.BLACK))
 
@@ -595,7 +592,7 @@ class DNNIncrementalUpdater:
             self.black_features.add(black_feat)
             change_record['black_added'].add(black_feat)
 
-    def push(self, move: chess.Move):
+    def push(self, board_before_push: chess.Board, move: chess.Move):
         """Update features after making a move and save changes for efficient undo"""
         from_sq = move.from_square
         to_sq = move.to_square
@@ -608,9 +605,9 @@ class DNNIncrementalUpdater:
             'black_removed': set()
         }
 
-        piece = self.board.piece_at(from_sq)
+        piece = board_before_push.piece_at(from_sq)
         if piece is None:
-            self.board.push(move)
+            #self.board.push(move)
             self.history_stack.append(change_record)
             self.last_change = change_record
             return
@@ -618,13 +615,13 @@ class DNNIncrementalUpdater:
         moving_piece_type = piece.piece_type
         moving_piece_color = piece.color
 
-        captured_piece = self.board.piece_at(to_sq)
-        is_en_passant = self.board.is_en_passant(move)
+        captured_piece = board_before_push.piece_at(to_sq)
+        is_en_passant = board_before_push.is_en_passant(move)
 
         # Handle en passant capture
         if is_en_passant:
             ep_sq = to_sq + (-8 if moving_piece_color == chess.WHITE else 8)
-            captured_piece = self.board.piece_at(ep_sq)
+            captured_piece = board_before_push.piece_at(ep_sq)
             if captured_piece:
                 self._remove_piece_features(ep_sq, captured_piece.piece_type,
                                             captured_piece.color, change_record)
@@ -635,7 +632,8 @@ class DNNIncrementalUpdater:
                                         captured_piece.color, change_record)
 
         # Handle castling - move the rook
-        is_castling = self.board.is_castling(move)
+        is_castling = board_before_push.is_castling(move)
+        rook_to = None
         if is_castling:
             if to_sq > from_sq:  # Kingside
                 rook_from = chess.H1 if moving_piece_color == chess.WHITE else chess.H8
@@ -650,7 +648,7 @@ class DNNIncrementalUpdater:
         self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
 
         # Make the move
-        self.board.push(move)
+        #self.board.push(move)
 
         # Handle promotion
         if move.promotion:
@@ -683,7 +681,7 @@ class DNNIncrementalUpdater:
             raise ValueError("No moves to pop - history stack is empty")
 
         # Undo the board move
-        self.board.pop()
+        #self.board.pop()
 
         # Retrieve and remove the last change record
         change_record = self.history_stack.pop()
@@ -712,9 +710,9 @@ class DNNIncrementalUpdater:
         """
         return self.last_change
 
-    def get_features(self) -> List[int]:
+    def get_features(self, board: chess.Board) -> List[int]:
         """Get features for current side to move"""
-        if self.board.turn == chess.WHITE:
+        if board.turn == chess.WHITE:
             return list(self.white_features)
         else:
             return list(self.black_features)

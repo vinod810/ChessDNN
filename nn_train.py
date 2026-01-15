@@ -5,7 +5,7 @@ import io
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from typing import Any, Optional, List, Tuple
+from typing import Any
 import random
 import os
 import platform
@@ -21,9 +21,13 @@ import chess
 from typing import List, Tuple, Dict, Optional
 
 from nn_inference import NNUENetwork, DNNNetwork, \
-    MAX_PLYS_PER_GAME, OPENING_PLYS, NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, \
-    DNN_HIDDEN_LAYERS, NNUEFeatures, MAX_MATE_DEPTH, MAX_SCORE, MATE_FACTOR, MAX_NON_MATE_SCORE, NNUEIncrementalUpdater, \
+    NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, \
+    DNN_HIDDEN_LAYERS, NNUEFeatures, MAX_SCORE, NNUEIncrementalUpdater, \
     TANH_SCALE, DNNFeatures
+
+MATE_FACTOR = 100
+MAX_MATE_DEPTH = 10
+MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
 
 """
 Chess Neural Network Training Script
@@ -272,6 +276,10 @@ def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu') -> Tupl
                 features[i, feature_indices[i]] = 1.0
 
         return features, scores
+
+
+MAX_PLYS_PER_GAME = 200
+OPENING_PLYS = 10
 
 
 def worker_process(
@@ -1004,9 +1012,9 @@ if __name__ == "__main__":
 
     # Create model based on nn_type
     if NN_TYPE == "NNUE":
-        model = NNUENetwork()
+        model = NNUENetwork(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
     else:  # DNN
-        model = DNNNetwork()
+        model = DNNNetwork(DNN_INPUT_SIZE)
 
     print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
 
@@ -1247,9 +1255,9 @@ class ProcessGameWithValidation:
                 feature_updater = NNUEIncrementalUpdater(board)
 
             # Update features incrementally (this also updates the updater's internal board)
-            feature_updater.push(node.move)
-            # Keep main board in sync
+            is_white_king_move, is_black_king_move, change_record = feature_updater.update_pre_push(board, node.move)
             board.push(node.move)
+            feature_updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
 
             if board.is_game_over():
                 continue
@@ -1286,3 +1294,6 @@ class ProcessGameWithValidation:
                     positions.append((feat, score_tanh))
 
         return positions
+
+
+

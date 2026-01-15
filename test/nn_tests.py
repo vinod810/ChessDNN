@@ -27,9 +27,8 @@ import os
 # Import configuration and classes from train_nn
 #try:
 from nn_inference import (NNUEFeatures, DNNFeatures, NNUEIncrementalUpdater, DNNIncrementalUpdater, NNUEInference,
-                          DNNInference, TANH_SCALE, MAX_PLYS_PER_GAME, OPENING_PLYS,
-                          load_model)
-from nn_train import ProcessGameWithValidation
+                          DNNInference, TANH_SCALE, load_model)
+from nn_train import ProcessGameWithValidation, MAX_PLYS_PER_GAME, OPENING_PLYS
 
 #except ImportError:
 #    print("ERROR: Could not import from nn_train.py")
@@ -143,14 +142,17 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
     move_count = 0
     for move_san in moves_san:
-        move = updater.board.parse_san(move_san)
+        move = board.parse_san(move_san)
 
         # Track old features
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
 
         # Push move
-        updater.push(move)
+        #updater.push(move)
+        is_white_king_move, is_black_king_move, change_record = updater.update_pre_push(board, move)
+        board.push(move)
+        updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
 
         # Update accumulator
         new_white = set(updater.white_features)
@@ -166,13 +168,13 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
 
         # Get current features
         white_feat, black_feat = updater.get_features_unsorted()
-        stm = updater.board.turn == chess.WHITE
+        stm = board.turn == chess.WHITE
 
         # Evaluate with incremental (using accumulator)
         eval_incremental = inference.evaluate_incremental(white_feat, black_feat, stm)
 
         # Evaluate with full (matrix multiplication from scratch)
-        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(updater.board)
+        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
         eval_full = inference.evaluate_full(white_feat_full, black_feat_full, stm)
 
         # Compare
@@ -183,7 +185,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
         print(f"Test 1: After move {move_count} ({move_san})")
         print("─" * 70)
 
-        print(f"Position: {updater.board.fen()}")
+        print(f"Position: {board.fen()}")
         print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
         print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
         print(f"Difference:       {diff:.10e}")
@@ -193,19 +195,15 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
         else:
             print("✗ FAIL: Evaluations differ!")
 
-        # Test 2: Pop 8 times and compare again
-        #print("\n" + "─" * 70)
-        #print("Test 2: After popping 8 moves")
-        #print("─" * 70)
-
     print("Popping 8 moves...")
     for i in range(4):
         # Pop and update accumulator incrementally
+        board.pop()
         change_record = updater.pop()
 
         # Get CURRENT features after pop
         white_feat, black_feat = updater.get_features_unsorted()
-        stm = updater.board.turn == chess.WHITE
+        stm = board.turn == chess.WHITE
 
         # FIX: King moves require full accumulator refresh because ALL features
         # change when king position changes (delta tracking doesn't work)
@@ -225,7 +223,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
         eval_incremental = inference.evaluate_incremental(white_feat, black_feat, stm)
 
         # Evaluate with full (use fresh features from board)
-        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(updater.board)
+        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
         eval_full = inference.evaluate_full(white_feat_full, black_feat_full, stm)
 
         # Compare
@@ -235,7 +233,7 @@ def test_accumulator_correctness_nnue(inference: NNUEInference):
         print(f"Test 1: After pop {i + 1}")
         print("─" * 70)
 
-        print(f"Position: {updater.board.fen()}")
+        print(f"Position: {board.fen()}")
         print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
         print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
         print(f"Difference:       {diff:.10e}")
@@ -270,14 +268,15 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
 
     move_count = 0
     for move_san in moves_san:
-        move = updater.board.parse_san(move_san)
+        move = board.parse_san(move_san)
 
         # FIX: Track old features for BOTH perspectives (not just current side)
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
 
         # Push move
-        updater.push(move)
+        updater.push(board, move)
+        board.push(move)
 
         # FIX: Get new features for BOTH perspectives
         new_white = set(updater.white_features)
@@ -299,14 +298,14 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         move_count += 1
 
         # Get current features
-        features = updater.get_features()
-        perspective = updater.board.turn == chess.WHITE
+        features = updater.get_features(board)
+        perspective = board.turn == chess.WHITE
 
         # Evaluate with incremental
         eval_incremental = inference.evaluate_incremental(features, perspective)
 
         # Evaluate with full
-        features_full = DNNFeatures.board_to_features(updater.board)
+        features_full = DNNFeatures.board_to_features(board)
         eval_full = inference.evaluate_full(features_full)
 
         # Compare
@@ -317,7 +316,7 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         print(f"Test 1: After move {move_count} ({move_san})")
         print("─" * 70)
 
-        print(f"Position: {updater.board.fen()}")
+        print(f"Position: {board.fen()}")
         print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
         print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
         print(f"Difference:       {diff:.10e}")
@@ -330,6 +329,7 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
     print("Popping 4 moves...")
     for i in range(4):
         # Pop and update accumulator incrementally
+        board.pop()
         change_record = updater.pop()
 
         # Update accumulator to reflect the reversed changes
@@ -345,14 +345,14 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
             False  # black perspective
         )
 
-        features = updater.get_features()
-        perspective = updater.board.turn == chess.WHITE
+        features = updater.get_features(board)
+        perspective = board.turn == chess.WHITE
 
         # Evaluate with incremental
         eval_incremental = inference.evaluate_incremental(features, perspective)
 
         # Evaluate with full
-        features_full = DNNFeatures.board_to_features(updater.board)
+        features_full = DNNFeatures.board_to_features(board)
         eval_full = inference.evaluate_full(features_full)
 
         # Compare
@@ -362,7 +362,7 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         print(f"Test 1: After pop {i + 1}")
         print("─" * 70)
 
-        print(f"Position: {updater.board.fen()}")
+        print(f"Position: {board.fen()}")
         print(f"Incremental eval: {eval_incremental:.10f} ({output_to_centipawns(eval_incremental):+.2f} cp)")
         print(f"Full eval:        {eval_full:.10f} ({output_to_centipawns(eval_full):+.2f} cp)")
         print(f"Difference:       {diff:.10e}")
@@ -589,7 +589,10 @@ def performance_test_nnue(inference: NNUEInference):
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
 
-        updater.push(move)
+        #updater.push(move)
+        is_white_king_move, is_black_king_move, change_record = updater.update_pre_push(board, move)
+        board.push(move)
+        updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
 
         new_white = set(updater.white_features)
         new_black = set(updater.black_features)
@@ -599,11 +602,11 @@ def performance_test_nnue(inference: NNUEInference):
             new_black - old_black, old_black - new_black
         )
 
-        output = inference.evaluate_incremental(
-            list(new_white), list(new_black), updater.board.turn == chess.WHITE
-        )
+        #output = inference.evaluate_incremental(
+        #    list(new_white), list(new_black), board.turn == chess.WHITE
+        #)
 
-        updater.board.pop()
+        board.pop()
         updater.white_features = old_white
         updater.black_features = old_black
 
@@ -612,9 +615,9 @@ def performance_test_nnue(inference: NNUEInference):
             old_black - new_black, new_black - old_black
         )
 
-        output = inference.evaluate_incremental(
-            list(old_white), list(old_black), board.turn == chess.WHITE
-        )
+        #output = inference.evaluate_incremental(
+        #    list(old_white), list(old_black), board.turn == chess.WHITE
+        #)
 
     incremental_time = time.time() - start_time
 
@@ -625,7 +628,7 @@ def performance_test_nnue(inference: NNUEInference):
     print("Results:")
     print(f"  Full (matrix multiply):     {full_time / 1000 * 1000:.3f} ms per evaluation")
     print(f"  Incremental (add/subtract): {incremental_time / 500 * 1000:.3f} ms per cycle")
-    print(f"  Speedup: {full_time / (incremental_time) * 500 / 1000:.2f}x")
+    print(f"  Speedup: {full_time / incremental_time * 500 / 1000:.2f}x")
     print("\nKey: Incremental uses accumulator (add/subtract weight vectors)")
     print("instead of full matrix multiplication for the first layer.")
     print("=" * 70)
@@ -664,13 +667,14 @@ def performance_test_dnn(inference: DNNInference):
     for _ in range(500):
         old_white = set(updater.white_features)
         old_black = set(updater.black_features)
-        old_perspective = updater.board.turn == chess.WHITE
+        old_perspective = board.turn == chess.WHITE
 
-        updater.push(move)
+        updater.push(board, move)
+        board.push(move)
 
         new_white = set(updater.white_features)
         new_black = set(updater.black_features)
-        new_perspective = updater.board.turn == chess.WHITE
+        new_perspective = board.turn == chess.WHITE
 
         if new_perspective:
             added = new_white - old_white
@@ -681,9 +685,10 @@ def performance_test_dnn(inference: DNNInference):
 
         inference.update_accumulator(added, removed, new_perspective)
 
-        current_features = list(new_white) if new_perspective else list(new_black)
-        output = inference.evaluate_incremental(current_features, new_perspective)
+        #current_features = list(new_white) if new_perspective else list(new_black)
+        #output = inference.evaluate_incremental(current_features, new_perspective)
 
+        board.pop()
         updater.pop()
 
         if old_perspective:
@@ -695,8 +700,8 @@ def performance_test_dnn(inference: DNNInference):
 
         inference.update_accumulator(added_back, removed_back, old_perspective)
 
-        old_features = list(old_white) if old_perspective else list(old_black)
-        output = inference.evaluate_incremental(old_features, old_perspective)
+        #old_features = list(old_white) if old_perspective else list(old_black)
+        #output = inference.evaluate_incremental(old_features, old_perspective)
 
     incremental_time = time.time() - start_time
 
@@ -707,7 +712,7 @@ def performance_test_dnn(inference: DNNInference):
     print("Results:")
     print(f"  Full (matrix multiply):     {full_time / 1000 * 1000:.3f} ms per evaluation")
     print(f"  Incremental (add/subtract): {incremental_time / 500 * 1000:.3f} ms per cycle")
-    print(f"  Speedup: {full_time / (incremental_time) * 500 / 1000:.2f}x")
+    print(f"  Speedup: {full_time / incremental_time * 500 / 1000:.2f}x")
     print("\nKey: Incremental uses accumulator (add/subtract weight vectors)")
     print("instead of full matrix multiplication for the first layer.")
     print("=" * 70)
