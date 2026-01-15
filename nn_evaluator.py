@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+import chess
+
 
 class NNEvaluator(ABC):
     """
@@ -105,7 +107,8 @@ class NNUEEvaluator(NNEvaluator):
     """NNUE-based evaluator with incremental updates."""
 
     def __init__(self, board: chess.Board, model_path: str):
-        from nn_train import NNUEInference, NNUEIncrementalUpdater
+        from nn_train import NNUEInference
+        from nn_inference import NNUEIncrementalUpdater
 
         self.inference = NNUEInference(model_path)
         self.updater = NNUEIncrementalUpdater(board)

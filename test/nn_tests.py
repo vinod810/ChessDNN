@@ -9,18 +9,12 @@ Test Modes:
 - Accumulator-Correctness: Verify incremental == full evaluation
 - Eval-accuracy: Test prediction accuracy against ground truth CSV
 """
-import os
 
 import numpy as np
-import chess
 import torch
 import sys
 import time
-from typing import List, Set, Tuple
 import chess
-from typing import Set, List, Tuple, Dict
-import chess
-from typing import Set, List, Tuple, Dict, Optional
 # Import required modules for PGN processing
 import glob
 import zstandard as zstd
@@ -28,16 +22,14 @@ import io
 import chess.pgn
 import os
 
+# TODO move all the main classes to nn_inference.py
+# TODO Can you rewrite nn_tests.py to reuse as much as code from nn_evaluator.py?  This way any bug in nn_evaluator.py will be caught.
+
 # Import configuration and classes from train_nn
 try:
-    from nn_train import (
-        MODEL_PATH, TANH_SCALE,
-        NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE,
-        DNN_INPUT_SIZE, DNN_HIDDEN_LAYERS,
-        NNUEFeatures, DNNFeatures,
-        NNUENetwork, DNNNetwork,
-        NNUEIncrementalUpdater
-    )
+    from nn_inference import NNUEFeatures, DNNFeatures, NNUEIncrementalUpdater, NNUENetwork, DNNNetwork, \
+    DNNIncrementalUpdater, NNUEInference, DNNInference, NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE, DNN_INPUT_SIZE, \
+    DNN_HIDDEN_LAYERS, MODEL_PATH, TANH_SCALE, MAX_SCORE, MATE_FACTOR, MAX_MATE_DEPTH, MAX_NON_MATE_SCORE
 except ImportError:
     print("ERROR: Could not import from nn_train.py")
     print("Make sure nn_train.py (or train_nn_fixed.py) is in the same directory")
@@ -49,427 +41,6 @@ valid_test_types_dict = {0: "Interactive-FEN", 1: "Incremental-vs-Full", 2: "Acc
 valid_test_types = list(valid_test_types_dict.values())
 test_type = None
 nn_type = None
-
-
-class DNNIncrementalUpdater:
-    """
-    Incrementally maintains DNN features for both perspectives with efficient undo support.
-    Uses a history stack to track changes, enabling O(k) pop() operations where k = pieces affected.
-    Provides methods to retrieve change information for accumulator updates.
-    """
-
-    def __init__(self, board: chess.Board):
-        """Initialize with a board position"""
-        self.board = board.copy()
-        self.white_features: Set[int] = set(DNNFeatures.extract_features(board, chess.WHITE))
-        self.black_features: Set[int] = set(DNNFeatures.extract_features(board, chess.BLACK))
-
-        # History stack for efficient undo
-        self.history_stack: List[Dict[str, Set[int]]] = []
-
-        # Store the last change for easy accumulator updates
-        self.last_change: Optional[Dict[str, Set[int]]] = None
-
-    def _get_feature_for_perspective(self, perspective: bool, square: int,
-                                     piece_type: int, piece_color: bool) -> int:
-        """Get feature index for a piece from a given perspective"""
-        if not perspective:
-            rank = square // 8
-            file = square % 8
-            square = (7 - rank) * 8 + file
-
-        is_friendly_piece = (piece_color == chess.WHITE) == perspective
-        piece_idx = DNNFeatures.get_piece_index(piece_type, is_friendly_piece)
-        return square * 12 + piece_idx
-
-    def _remove_piece_features(self, square: int, piece_type: int, piece_color: bool,
-                               change_record: Dict[str, Set[int]]):
-        """Remove features for a piece and record the change"""
-        white_feat = self._get_feature_for_perspective(True, square, piece_type, piece_color)
-        if white_feat in self.white_features:
-            self.white_features.discard(white_feat)
-            change_record['white_removed'].add(white_feat)
-
-        black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
-        if black_feat in self.black_features:
-            self.black_features.discard(black_feat)
-            change_record['black_removed'].add(black_feat)
-
-    def _add_piece_features(self, square: int, piece_type: int, piece_color: bool,
-                            change_record: Dict[str, Set[int]]):
-        """Add features for a piece and record the change"""
-        white_feat = self._get_feature_for_perspective(True, square, piece_type, piece_color)
-        if white_feat not in self.white_features:
-            self.white_features.add(white_feat)
-            change_record['white_added'].add(white_feat)
-
-        black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
-        if black_feat not in self.black_features:
-            self.black_features.add(black_feat)
-            change_record['black_added'].add(black_feat)
-
-    def push(self, move: chess.Move):
-        """Update features after making a move and save changes for efficient undo"""
-        from_sq = move.from_square
-        to_sq = move.to_square
-
-        # Initialize change tracking for this move
-        change_record = {
-            'white_added': set(),
-            'white_removed': set(),
-            'black_added': set(),
-            'black_removed': set()
-        }
-
-        piece = self.board.piece_at(from_sq)
-        if piece is None:
-            self.board.push(move)
-            self.history_stack.append(change_record)
-            self.last_change = change_record
-            return
-
-        moving_piece_type = piece.piece_type
-        moving_piece_color = piece.color
-
-        captured_piece = self.board.piece_at(to_sq)
-        is_en_passant = self.board.is_en_passant(move)
-
-        # Handle en passant capture
-        if is_en_passant:
-            ep_sq = to_sq + (-8 if moving_piece_color == chess.WHITE else 8)
-            captured_piece = self.board.piece_at(ep_sq)
-            if captured_piece:
-                self._remove_piece_features(ep_sq, captured_piece.piece_type,
-                                            captured_piece.color, change_record)
-
-        # Handle regular capture
-        if captured_piece and not is_en_passant:
-            self._remove_piece_features(to_sq, captured_piece.piece_type,
-                                        captured_piece.color, change_record)
-
-        # Handle castling - move the rook
-        is_castling = self.board.is_castling(move)
-        if is_castling:
-            if to_sq > from_sq:  # Kingside
-                rook_from = chess.H1 if moving_piece_color == chess.WHITE else chess.H8
-                rook_to = chess.F1 if moving_piece_color == chess.WHITE else chess.F8
-            else:  # Queenside
-                rook_from = chess.A1 if moving_piece_color == chess.WHITE else chess.A8
-                rook_to = chess.D1 if moving_piece_color == chess.WHITE else chess.D8
-
-            self._remove_piece_features(rook_from, chess.ROOK, moving_piece_color, change_record)
-
-        # Remove moving piece from old square
-        self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
-
-        # Make the move
-        self.board.push(move)
-
-        # Handle promotion
-        if move.promotion:
-            moving_piece_type = move.promotion
-
-        # Add moving piece to new square
-        self._add_piece_features(to_sq, moving_piece_type, moving_piece_color, change_record)
-
-        # Add rook to new square for castling
-        if is_castling:
-            self._add_piece_features(rook_to, chess.ROOK, moving_piece_color, change_record)
-
-        # Save the change record for efficient undo
-        self.history_stack.append(change_record)
-        self.last_change = change_record
-
-    def pop(self) -> Dict[str, Set[int]]:
-        """
-        Efficiently undo the last move using the history stack.
-        O(k) complexity where k = number of features that changed (typically 2-8).
-
-        Returns:
-            Dictionary with the changes that were reversed:
-            - 'white_added': Features that were added to white (now removed)
-            - 'white_removed': Features that were removed from white (now restored)
-            - 'black_added': Features that were added to black (now removed)
-            - 'black_removed': Features that were removed from black (now restored)
-        """
-        if not self.history_stack:
-            raise ValueError("No moves to pop - history stack is empty")
-
-        # Undo the board move
-        self.board.pop()
-
-        # Retrieve and remove the last change record
-        change_record = self.history_stack.pop()
-
-        # Reverse the changes:
-        # - Features that were added must be removed
-        # - Features that were removed must be added back
-        self.white_features -= change_record['white_added']
-        self.white_features |= change_record['white_removed']
-        self.black_features -= change_record['black_added']
-        self.black_features |= change_record['black_removed']
-
-        # Store as last change (but reversed)
-        self.last_change = change_record
-
-        return change_record
-
-    def get_last_change(self) -> Optional[Dict[str, Set[int]]]:
-        """
-        Get the changes from the last push() or pop() operation.
-        Useful for updating accumulators.
-
-        Returns:
-            Dictionary with 'white_added', 'white_removed', 'black_added', 'black_removed'
-            or None if no operation has been performed yet.
-        """
-        return self.last_change
-
-    def get_features(self) -> List[int]:
-        """Get features for current side to move"""
-        if self.board.turn == chess.WHITE:
-            return list(self.white_features)
-        else:
-            return list(self.black_features)
-
-    def get_features_both(self) -> Tuple[List[int], List[int]]:
-        """Get features for both perspectives"""
-        return list(self.white_features), list(self.black_features)
-
-    def clear_history(self):
-        """Clear the history stack to free memory (call after search completes)"""
-        self.history_stack.clear()
-
-    def history_size(self) -> int:
-        """Get the number of moves in the history stack"""
-        return len(self.history_stack)
-
-
-class NNUEInference:
-    """Numpy-based inference engine for NNUE with incremental evaluation support"""
-
-    def __init__(self, model: NNUENetwork):
-        """Extract weights from PyTorch model to numpy arrays"""
-        model.eval()
-        with torch.no_grad():
-            self.ft_weight = model.ft.weight.cpu().numpy()
-            self.ft_bias = model.ft.bias.cpu().numpy()
-            self.l1_weight = model.l1.weight.cpu().numpy()
-            self.l1_bias = model.l1.bias.cpu().numpy()
-            self.l2_weight = model.l2.weight.cpu().numpy()
-            self.l2_bias = model.l2.bias.cpu().numpy()
-            self.l3_weight = model.l3.weight.cpu().numpy()
-            self.l3_bias = model.l3.bias.cpu().numpy()
-
-        self.hidden_size = model.hidden_size
-
-        # For incremental evaluation (accumulator-based)
-        self.white_accumulator = None
-        self.black_accumulator = None
-
-    @staticmethod
-    def clipped_relu(x):
-        """Clipped ReLU activation [0, 1]"""
-        return np.clip(x, 0, 1)
-
-    def evaluate_full(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
-        """
-        Full evaluation using matrix multiplication.
-
-        Args:
-            white_features: Active feature indices for white's perspective
-            black_features: Active feature indices for black's perspective
-            stm: True if white to move, False if black to move
-
-        Returns:
-            Evaluation score (linear output, approximately in [-1, 1])
-        """
-        # Create sparse input vectors
-        white_input = np.zeros(self.ft_weight.shape[1], dtype=np.float32)
-        black_input = np.zeros(self.ft_weight.shape[1], dtype=np.float32)
-
-        for f in white_features:
-            if 0 <= f < len(white_input):
-                white_input[f] = 1.0
-        for f in black_features:
-            if 0 <= f < len(black_input):
-                black_input[f] = 1.0
-
-        # Feature transform - MATRIX MULTIPLICATION
-        white_hidden = self.clipped_relu(np.dot(white_input, self.ft_weight.T) + self.ft_bias)
-        black_hidden = self.clipped_relu(np.dot(black_input, self.ft_weight.T) + self.ft_bias)
-
-        # Perspective concatenation
-        if stm:
-            hidden = np.concatenate([white_hidden, black_hidden])
-        else:
-            hidden = np.concatenate([black_hidden, white_hidden])
-
-        # Further layers
-        x = self.clipped_relu(np.dot(hidden, self.l1_weight.T) + self.l1_bias)
-        x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
-        output = np.dot(x, self.l3_weight.T) + self.l3_bias
-
-        return output[0]
-
-    def evaluate_incremental(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
-        """
-        Incremental evaluation using accumulators (add/subtract instead of matrix multiply).
-        Must call _refresh_accumulator() before first use!
-        """
-        if self.white_accumulator is None or self.black_accumulator is None:
-            raise RuntimeError("Accumulators not initialized. Call _refresh_accumulator() first.")
-
-        # Apply clipped relu to accumulators (no matrix multiply!)
-        white_hidden = self.clipped_relu(self.white_accumulator)
-        black_hidden = self.clipped_relu(self.black_accumulator)
-
-        # Perspective concatenation
-        if stm:
-            hidden = np.concatenate([white_hidden, black_hidden])
-        else:
-            hidden = np.concatenate([black_hidden, white_hidden])
-
-        # Further layers (same as full evaluation)
-        x = self.clipped_relu(np.dot(hidden, self.l1_weight.T) + self.l1_bias)
-        x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
-        output = np.dot(x, self.l3_weight.T) + self.l3_bias
-
-        return output[0]
-
-    def _refresh_accumulator(self, white_features: List[int], black_features: List[int]):
-        """Refresh accumulators from features"""
-        self.white_accumulator = self.ft_bias.copy()
-        self.black_accumulator = self.ft_bias.copy()
-
-        for f in white_features:
-            if 0 <= f < self.ft_weight.shape[1]:
-                self.white_accumulator += self.ft_weight[:, f]
-
-        for f in black_features:
-            if 0 <= f < self.ft_weight.shape[1]:
-                self.black_accumulator += self.ft_weight[:, f]
-
-    def update_accumulator(self, added_features_white: Set[int], removed_features_white: Set[int],
-                           added_features_black: Set[int], removed_features_black: Set[int]):
-        """Update accumulators incrementally"""
-        if self.white_accumulator is None or self.black_accumulator is None:
-            raise RuntimeError("Accumulators not initialized. Call _refresh_accumulator() first.")
-
-        for f in added_features_white:
-            if 0 <= f < self.ft_weight.shape[1]:
-                self.white_accumulator += self.ft_weight[:, f]
-        for f in removed_features_white:
-            if 0 <= f < self.ft_weight.shape[1]:
-                self.white_accumulator -= self.ft_weight[:, f]
-
-        for f in added_features_black:
-            if 0 <= f < self.ft_weight.shape[1]:
-                self.black_accumulator += self.ft_weight[:, f]
-        for f in removed_features_black:
-            if 0 <= f < self.ft_weight.shape[1]:
-                self.black_accumulator -= self.ft_weight[:, f]
-
-    def evaluate_board(self, board: chess.Board) -> float:
-        """Evaluate a chess board position (uses full evaluation)"""
-        white_feat, black_feat = NNUEFeatures.board_to_features(board)
-        return self.evaluate_full(white_feat, black_feat, board.turn == chess.WHITE)
-
-
-class DNNInference:
-    """Numpy-based inference engine for DNN with incremental evaluation support"""
-
-    def __init__(self, model: DNNNetwork):
-        """Extract weights from PyTorch model to numpy arrays"""
-        model.eval()
-        with torch.no_grad():
-            self.l1_weight = model.l1.weight.cpu().numpy()
-            self.l1_bias = model.l1.bias.cpu().numpy()
-            self.l2_weight = model.l2.weight.cpu().numpy()
-            self.l2_bias = model.l2.bias.cpu().numpy()
-            self.l3_weight = model.l3.weight.cpu().numpy()
-            self.l3_bias = model.l3.bias.cpu().numpy()
-            self.l4_weight = model.l4.weight.cpu().numpy()
-            self.l4_bias = model.l4.bias.cpu().numpy()
-
-        # For incremental evaluation (accumulator-based)
-        self.white_accumulator = None
-        self.black_accumulator = None
-
-    @staticmethod
-    def clipped_relu(x):
-        """Clipped ReLU activation [0, 1]"""
-        return np.clip(x, 0, 1)
-
-    def evaluate_full(self, features: List[int]) -> float:
-        """Full evaluation using matrix multiplication"""
-        feature_input = np.zeros(DNN_INPUT_SIZE, dtype=np.float32)
-
-        for f in features:
-            if 0 <= f < len(feature_input):
-                feature_input[f] = 1.0
-
-        # Forward pass - MATRIX MULTIPLICATION
-        x = self.clipped_relu(np.dot(feature_input, self.l1_weight.T) + self.l1_bias)
-        x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
-        x = self.clipped_relu(np.dot(x, self.l3_weight.T) + self.l3_bias)
-        output = np.dot(x, self.l4_weight.T) + self.l4_bias
-
-        return output[0]
-
-    def evaluate_incremental(self, features: List[int], perspective: bool) -> float:
-        """Incremental evaluation using accumulator"""
-        if perspective:
-            if self.white_accumulator is None:
-                raise RuntimeError("White accumulator not initialized")
-            accumulator = self.white_accumulator
-        else:
-            if self.black_accumulator is None:
-                raise RuntimeError("Black accumulator not initialized")
-            accumulator = self.black_accumulator
-
-        x = self.clipped_relu(accumulator)
-        x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
-        x = self.clipped_relu(np.dot(x, self.l3_weight.T) + self.l3_bias)
-        output = np.dot(x, self.l4_weight.T) + self.l4_bias
-
-        return output[0]
-
-    def _refresh_accumulator(self, features: List[int], perspective: bool):
-        """Refresh accumulator from features"""
-        accumulator = self.l1_bias.copy()
-
-        for f in features:
-            if 0 <= f < self.l1_weight.shape[1]:
-                accumulator += self.l1_weight[:, f]
-
-        if perspective:
-            self.white_accumulator = accumulator
-        else:
-            self.black_accumulator = accumulator
-
-    def update_accumulator(self, added_features: Set[int], removed_features: Set[int], perspective: bool):
-        """Update accumulator incrementally"""
-        if perspective:
-            if self.white_accumulator is None:
-                raise RuntimeError("White accumulator not initialized")
-            accumulator = self.white_accumulator
-        else:
-            if self.black_accumulator is None:
-                raise RuntimeError("Black accumulator not initialized")
-            accumulator = self.black_accumulator
-
-        for f in added_features:
-            if 0 <= f < self.l1_weight.shape[1]:
-                accumulator += self.l1_weight[:, f]
-        for f in removed_features:
-            if 0 <= f < self.l1_weight.shape[1]:
-                accumulator -= self.l1_weight[:, f]
-
-    def evaluate_board(self, board: chess.Board) -> float:
-        """Evaluate a chess board position (uses full evaluation)"""
-        feat = DNNFeatures.board_to_features(board)
-        return self.evaluate_full(feat)
 
 
 def load_model(model_path: str, nn_type: str):
@@ -853,7 +424,7 @@ def test_accumulator_correctness_dnn(inference: DNNInference):
         print("=" * 70)
 
 
-def test_eval_accuracy(inference, nn_type: str):
+def test_eval_accuracy(inference, nn_type: str, positions_size: int):
     """
     Test evaluation accuracy against ground truth from PGN file.
     Computes MSE of tanh(cp/400) between predicted and true scores.
@@ -879,10 +450,10 @@ def test_eval_accuracy(inference, nn_type: str):
     # Configuration (matching ProcessGameWithValidation logic)
     MAX_PLYS_PER_GAME = 200
     OPENING_PLYS = 0
-    TARGET_POSITIONS = 100_000
+    #TARGET_POSITIONS = 100_000
 
     # Import constants from training module
-    from nn_train import TANH_SCALE, MAX_SCORE, MATE_FACTOR, MAX_MATE_DEPTH, MAX_NON_MATE_SCORE
+    from nn_train import TANH_SCALE
 
     positions = []
     games_processed = 0
@@ -895,7 +466,7 @@ def test_eval_accuracy(inference, nn_type: str):
             with dctx.stream_reader(f) as reader:
                 text_stream = io.TextIOWrapper(reader, encoding='utf-8')
 
-                while len(positions) < TARGET_POSITIONS:
+                while len(positions) < positions_size:
                     game = chess.pgn.read_game(text_stream)
                     if game is None:
                         break  # End of file
@@ -973,14 +544,14 @@ def test_eval_accuracy(inference, nn_type: str):
                     # Add positions from this game to our collection
                     positions.extend(game_positions)
 
-                    if games_processed % int(TARGET_POSITIONS / 10 / 10) == 0:
+                    if games_processed % int(positions_size / 10 / 10) == 0:
                         print(f"  Processed {games_processed} games, collected {len(positions)} positions...")
 
-                    if len(positions) >= TARGET_POSITIONS:
+                    if len(positions) >= positions_size:
                         break
 
-        # Trim to exactly TARGET_POSITIONS
-        positions = positions[:TARGET_POSITIONS]
+        # Trim to exactly positions_size
+        positions = positions[:positions_size]
 
         if not positions:
             print("\n❌ ERROR: No valid positions found in PGN file")
@@ -1003,7 +574,7 @@ def test_eval_accuracy(inference, nn_type: str):
     errors = []
 
     for i, pos in enumerate(positions):
-        if (i + 1) % int(TARGET_POSITIONS / 10) == 0:
+        if (i + 1) % int(positions_size / 10) == 0:
             print(f"  Progress: {i + 1}/{len(positions)}")
 
         try:
@@ -1293,7 +864,7 @@ def interactive_loop(inference):
             traceback.print_exc()
 
 
-def main():
+def main(positions_size=0):
     """Main entry point"""
     if nn_type not in ["NNUE", "DNN"]:
         print(f"ERROR: Invalid NN_TYPE '{nn_type}'. Must be 'NNUE' or 'DNN'")
@@ -1318,7 +889,7 @@ def main():
 
     elif test_type == "Eval-Accuracy":
         print(f"\nRunning evaluation accuracy test for {nn_type}...")
-        test_eval_accuracy(inference, nn_type)
+        test_eval_accuracy(inference, nn_type, positions_size)
 
     elif test_type == "Incremental-vs-Full":
         print(f"\nRunning performance comparison for {nn_type}...")
@@ -1341,15 +912,20 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3:
+    positions_size = None
+    if len(sys.argv) == 3 or len(sys.argv) == 4:
         if sys.argv[1] == "DNN" or sys.argv[1] == "NNUE":
             nn_type = sys.argv[1]
         if sys.argv[2].isdigit() and 0 <= int(sys.argv[2]) < len(valid_test_types_dict):
             test_type = valid_test_types_dict[int(sys.argv[2])]
+            if test_type == 'Eval-Accuracy' and len(sys.argv) == 4 and sys.argv[3].isdigit():
+                positions_size = int(sys.argv[3])
 
-    if nn_type is None or test_type is None:
-        print(f"Usage: {os.path.basename(sys.argv[0])} NN-TYPE {'{DNN, NNUE}'}, Test-Types {valid_test_types_dict}")
+    if nn_type is None or test_type is None or (test_type == 'Eval-Accuracy' and positions_size is None):
+        print(f"Usage: {os.path.basename(sys.argv[0])} NN-TYPE {'{DNN, NNUE}'}, Test-Types {valid_test_types_dict} "
+              f"[positions-size]")
         print(f"Example: {os.path.basename(sys.argv[0])} DNN 0")
+        print(f"Example: {os.path.basename(sys.argv[0])} DNN 3 1000")
         exit()
 
-    main()
+    main(positions_size)
