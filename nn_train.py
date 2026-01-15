@@ -20,8 +20,9 @@ import ctypes
 import chess
 from typing import List, Tuple, Dict, Optional
 
-from nn_inference import NNUEFeatures, DNNFeatures, NNUEIncrementalUpdater, NNUENetwork, DNNNetwork, INPUT_SIZE, \
-    MODEL_PATH, TANH_SCALE, MAX_SCORE, MATE_FACTOR, MAX_MATE_DEPTH, MAX_NON_MATE_SCORE
+from nn_inference import NNUENetwork, DNNNetwork, \
+    ProcessGameWithValidation, MAX_PLYS_PER_GAME, OPENING_PLYS, NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, \
+    DNN_HIDDEN_LAYERS
 
 """
 Chess Neural Network Training Script
@@ -54,6 +55,9 @@ Output range: approximately [-1, 1] for both architectures.
 # Configuration
 # Network type selection: "NNUE" or "DNN"
 NN_TYPE = "NNUE"
+INPUT_SIZE = NNUE_INPUT_SIZE if NN_TYPE == "NNUE" else DNN_INPUT_SIZE
+FIRST_HIDDEN_SIZE = NNUE_HIDDEN_SIZE if NN_TYPE == "NNUE" else DNN_HIDDEN_LAYERS[0]
+MODEL_PATH = "model/nnue.pt" if NN_TYPE == "NNUE" else "model/dnn.pt"
 
 # NNUE Configuration
 
@@ -85,8 +89,6 @@ EARLY_STOPPING_PATIENCE = 10
 LR_PATIENCE = 3
 
 # PGN
-MAX_PLYS_PER_GAME = 200
-OPENING_PLYS = 0
 
 
 class SharedStats:
@@ -185,144 +187,6 @@ class SharedStats:
             print("  ✓ Balanced: workers and main process have similar wait times")
 
         print("=" * 80)
-
-
-class ProcessGameWithValidation:
-    """
-    Callable class that processes games with periodic validation of incremental features.
-    Each instance maintains its own position counter (no global state).
-    """
-
-    VALIDATION_INTERVAL = 10000
-
-    def __init__(self):
-        self.position_count = 0
-
-    def is_matching_full_vs_incremental(self, board, white_feat, black_feat):
-        # Full extraction for comparison
-        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
-
-        # Compare as sets (order doesn't matter)
-        white_match = set(white_feat) == set(white_feat_full)
-        black_match = set(black_feat) == set(black_feat_full)
-
-        if not white_match or not black_match:
-            print(f"\n⚠️  WARNING: Incremental feature mismatch at position {self.position_count}!")
-            print(f"    FEN: {board.fen()}")
-            if not white_match:
-                incremental_only = set(white_feat) - set(white_feat_full)
-                full_only = set(white_feat_full) - set(white_feat)
-                print(f"    White features - Incremental only: {incremental_only}")
-                print(f"    White features - Full only: {full_only}")
-            if not black_match:
-                incremental_only = set(black_feat) - set(black_feat_full)
-                full_only = set(black_feat_full) - set(black_feat)
-                print(f"    Black features - Incremental only: {incremental_only}")
-                print(f"    Black features - Full only: {full_only}")
-
-            return False
-        else:
-            return True
-
-    def __call__(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME, opening_plys: int = OPENING_PLYS) -> List[
-        Tuple]:
-        """
-        Process a single game and return positions with evaluations.
-        Uses incremental feature updates for efficiency.
-        Periodically validates incremental updates against full extraction.
-        """
-        if game is None:
-            return []
-
-        # Skip variant games
-        if any("Variant" in key for key in game.headers.keys()):
-            return []
-
-        positions = []
-        board = game.board()
-
-        # Initialize incremental updater after skipping early moves
-        feature_updater = None
-        move_count = 0
-
-        for node in game.mainline():
-            move_count += 1
-            current_move = node.move
-
-            # Check if this move is a capture BEFORE pushing it
-            was_last_move_capture = board.is_capture(current_move)
-
-            if len(positions) >= max_plys_per_game:
-                break
-
-            if move_count <= opening_plys:
-                board.push(current_move)
-                continue
-
-            # Initialize feature updater on first position we might use
-            if feature_updater is None:
-                feature_updater = NNUEIncrementalUpdater(board)
-
-            # Update features incrementally (this also updates the updater's internal board)
-            feature_updater.push(node.move)
-            # Keep main board in sync
-            board.push(node.move)
-
-            if board.is_game_over():
-                continue
-
-            # Skip if side to move is in check
-            if board.is_check():
-                continue
-
-            # Skip if this move was a capture (position after capture is tactically unstable)
-            if was_last_move_capture:
-                continue
-
-            ev = node.eval()
-            if ev is None:
-                score = None
-            else:
-                if ev.is_mate():
-                    mate_in = ev.white().mate()
-                    if mate_in < 0:  # -ve when black is winning
-                        mate_in = max(-MAX_MATE_DEPTH, mate_in)
-                        score = -MAX_SCORE - mate_in * MATE_FACTOR
-                    else:
-                        mate_in = min(MAX_MATE_DEPTH, mate_in)
-                        score = MAX_SCORE - mate_in * MATE_FACTOR
-                else:
-                    score = ev.white().score()
-                    score = min(score, MAX_NON_MATE_SCORE)
-                    score = max(score, -MAX_NON_MATE_SCORE)
-
-                # Lichess eval is always from White's perspective.
-                if board.turn == chess.BLACK:
-                    score = -score
-
-                score = np.tanh(score / TANH_SCALE)
-
-            if score is not None:
-                if NN_TYPE == "NNUE":
-                    # Get features from incremental updater (faster than full recompute)
-                    white_feat, black_feat = feature_updater.get_features_unsorted()
-
-                    # Periodic validation: compare incremental vs full extraction
-                    self.position_count += 1
-                    if self.position_count % self.VALIDATION_INTERVAL == 0:
-                        if not self.is_matching_full_vs_incremental(board, white_feat, black_feat):
-                            # Use full-extraction as fallback
-                            white_feat, black_feat = NNUEFeatures.board_to_features(board)
-
-                    stm = 1.0 if board.turn == chess.WHITE else 0.0
-                    positions.append((white_feat, black_feat, stm, score))
-
-                else:  # DNN
-                    # Extract features from perspective of side to move
-                    feat = DNNFeatures.board_to_features(board)
-                    positions.append((feat, score))
-
-        return positions
 
 
 def encode_sparse_batch(positions: List[Tuple]) -> Dict[str, Any]:
@@ -431,7 +295,7 @@ def worker_process(
     gc_counter = 0
 
     # Create local game processor with validation (no shared state)
-    game_processor = ProcessGameWithValidation()
+    game_processor = ProcessGameWithValidation(NN_TYPE)
 
     while not stop_event.is_set():
         try:

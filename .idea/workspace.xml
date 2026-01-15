@@ -4,10 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Code clean up">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Moved common code to nn_inference.py">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference..py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
     </list>
@@ -118,14 +117,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00064" summary="Three-fold repetition fix.">
-      <option name="closed" value="true" />
-      <created>1767453415482</created>
-      <option name="number" value="00064" />
-      <option name="presentableId" value="LOCAL-00064" />
-      <option name="project" value="LOCAL" />
-      <updated>1767453415482</updated>
     </task>
     <task id="LOCAL-00065" summary="Relative file path">
       <option name="closed" value="true" />
@@ -489,7 +480,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768403852660</updated>
     </task>
-    <option name="localTasksCounter" value="113" />
+    <task id="LOCAL-00113" summary="Moved common code to nn_inference.py">
+      <option name="closed" value="true" />
+      <created>1768436880412</created>
+      <option name="number" value="00113" />
+      <option name="presentableId" value="LOCAL-00113" />
+      <option name="project" value="LOCAL" />
+      <updated>1768436880415</updated>
+    </task>
+    <option name="localTasksCounter" value="114" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -504,7 +503,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL: passed=227 success-rate=75.67%" />
     <MESSAGE value="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%" />
     <MESSAGE value="uci resign, node, nps" />
     <MESSAGE value="halfkp.py" />
@@ -529,7 +527,8 @@
     <MESSAGE value="Minor edits" />
     <MESSAGE value="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207" />
     <MESSAGE value="Code clean up" />
-    <option name="LAST_COMMIT_MESSAGE" value="Code clean up" />
+    <MESSAGE value="Moved common code to nn_inference.py" />
+    <option name="LAST_COMMIT_MESSAGE" value="Moved common code to nn_inference.py" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

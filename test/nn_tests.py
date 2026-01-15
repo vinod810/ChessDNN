@@ -11,7 +11,6 @@ Test Modes:
 """
 
 import numpy as np
-import torch
 import sys
 import time
 import chess
@@ -26,14 +25,15 @@ import os
 # TODO Can you rewrite nn_tests.py to reuse as much as code from nn_evaluator.py?  This way any bug in nn_evaluator.py will be caught.
 
 # Import configuration and classes from train_nn
-try:
-    from nn_inference import NNUEFeatures, DNNFeatures, NNUEIncrementalUpdater, NNUENetwork, DNNNetwork, \
-    DNNIncrementalUpdater, NNUEInference, DNNInference, NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE, DNN_INPUT_SIZE, \
-    DNN_HIDDEN_LAYERS, MODEL_PATH, TANH_SCALE, MAX_SCORE, MATE_FACTOR, MAX_MATE_DEPTH, MAX_NON_MATE_SCORE
-except ImportError:
-    print("ERROR: Could not import from nn_train.py")
-    print("Make sure nn_train.py (or train_nn_fixed.py) is in the same directory")
-    sys.exit(1)
+#try:
+from nn_inference import (NNUEFeatures, DNNFeatures, NNUEIncrementalUpdater, DNNIncrementalUpdater, NNUEInference,
+                          DNNInference, TANH_SCALE, ProcessGameWithValidation, MAX_PLYS_PER_GAME, OPENING_PLYS,
+                          load_model)
+
+#except ImportError:
+#    print("ERROR: Could not import from nn_train.py")
+#    print("Make sure nn_train.py is in the same directory")
+#    sys.exit(1)
 
 # Configuration
 valid_test_types_dict = {0: "Interactive-FEN", 1: "Incremental-vs-Full", 2: "Accumulator-Correctness",
@@ -41,54 +41,6 @@ valid_test_types_dict = {0: "Interactive-FEN", 1: "Incremental-vs-Full", 2: "Acc
 valid_test_types = list(valid_test_types_dict.values())
 test_type = None
 nn_type = None
-
-
-def load_model(model_path: str, nn_type: str):
-    """Load trained model from checkpoint file"""
-    print(f"Loading {nn_type} model from {model_path}...")
-
-    try:
-        checkpoint = torch.load(model_path, map_location='cpu')
-
-        if nn_type == "NNUE":
-            model = NNUENetwork()
-        elif nn_type == "DNN":
-            model = DNNNetwork()
-        else:
-            raise ValueError(f"Unknown NN_TYPE: {nn_type}. Must be 'NNUE' or 'DNN'")
-
-        # Handle different checkpoint formats
-        if isinstance(checkpoint, dict):
-            if 'model_state_dict' in checkpoint:
-                state_dict = checkpoint['model_state_dict']
-                print(f"  Checkpoint info: Epoch {checkpoint.get('epoch', 'unknown')}, "
-                      f"Val loss: {checkpoint.get('val_loss', 'unknown'):.6f}")
-            elif 'state_dict' in checkpoint:
-                state_dict = checkpoint['state_dict']
-            else:
-                state_dict = checkpoint
-        else:
-            state_dict = checkpoint
-
-        model.load_state_dict(state_dict)
-        model.eval()
-
-        if nn_type == "NNUE":
-            inference = NNUEInference(model)
-        else:
-            inference = DNNInference(model)
-
-        print(f"✓ Model loaded successfully")
-        return inference
-
-    except FileNotFoundError:
-        print(f"ERROR: Model file not found: {model_path}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"ERROR loading model: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
 
 
 def output_to_centipawns(output: float) -> float:
@@ -428,7 +380,9 @@ def test_eval_accuracy(inference, nn_type: str, positions_size: int):
     """
     Test evaluation accuracy against ground truth from PGN file.
     Computes MSE of tanh(cp/400) between predicted and true scores.
-    Extracts 1000 positions from annotated PGN games (matching ProcessGameWithValidation logic).
+
+    Uses ProcessGameWithValidation.process_game_positions() for consistent
+    position filtering logic with training.
     """
     print("\n" + "=" * 70)
     print(f"{nn_type} Evaluation Accuracy Test")
@@ -448,12 +402,11 @@ def test_eval_accuracy(inference, nn_type: str, positions_size: int):
     print(f"\nReading positions from: {pgn_file}")
 
     # Configuration (matching ProcessGameWithValidation logic)
-    MAX_PLYS_PER_GAME = 200
-    OPENING_PLYS = 0
-    #TARGET_POSITIONS = 100_000
+    # MAX_PLYS_PER_GAME = 200
+    # OPENING_PLYS = 0
 
-    # Import constants from training module
-    from nn_train import TANH_SCALE
+    # Create game processor (reuses logic from training)
+    game_processor = ProcessGameWithValidation(nn_type)
 
     positions = []
     games_processed = 0
@@ -473,78 +426,23 @@ def test_eval_accuracy(inference, nn_type: str, positions_size: int):
 
                     games_processed += 1
 
-                    # Skip variant games
-                    if any("Variant" in key for key in game.headers.keys()):
-                        continue
+                    # Use shared position extraction logic from ProcessGameWithValidation
+                    game_positions = game_processor.process_game_positions(
+                        game,
+                        max_plys_per_game=MAX_PLYS_PER_GAME,
+                        opening_plys=OPENING_PLYS
+                    )
 
-                    board = game.board()
-                    move_count = 0
-                    game_positions = []
-
-                    # Process game mainline
-                    for node in game.mainline():
-                        move_count += 1
-                        current_move = node.move
-
-                        # Check if this move is a capture BEFORE pushing it
-                        was_last_move_capture = board.is_capture(current_move)
-
-                        if len(game_positions) >= MAX_PLYS_PER_GAME:
-                            break
-
-                        # Skip opening moves
-                        if move_count <= OPENING_PLYS:
-                            board.push(current_move)
-                            continue
-
-                        # Push the move
-                        board.push(current_move)
-
-                        # Skip game-over positions
-                        if board.is_game_over():
-                            continue
-
-                        # Skip if side to move is in check
-                        if board.is_check():
-                            continue
-
-                        # Skip if this move was a capture (position after capture is tactically unstable)
-                        if was_last_move_capture:
-                            continue
-
-                        # Get evaluation
-                        ev = node.eval()
-                        if ev is None:
-                            continue
-
-                        # Convert evaluation to score (matching ProcessGameWithValidation logic)
-                        if ev.is_mate():
-                            mate_in = ev.white().mate()
-                            if mate_in < 0:  # -ve when black is winning
-                                mate_in = max(-MAX_MATE_DEPTH, mate_in)
-                                score_cp = -MAX_SCORE - mate_in * MATE_FACTOR
-                            else:
-                                mate_in = min(MAX_MATE_DEPTH, mate_in)
-                                score_cp = MAX_SCORE - mate_in * MATE_FACTOR
-                        else:
-                            score_cp = ev.white().score()
-                            score_cp = min(score_cp, MAX_NON_MATE_SCORE)
-                            score_cp = max(score_cp, -MAX_NON_MATE_SCORE)
-
-                        # Store position data
-                        # Score is from white's perspective, adjust for side to move
-                        fen = board.fen()
-                        true_cp = score_cp if board.turn == chess.WHITE else -score_cp
-
-                        game_positions.append({
-                            'fen': fen,
+                    # Convert (board, score_cp) to (fen, true_cp) format for testing
+                    for board, true_cp in game_positions:
+                        positions.append({
+                            'fen': board.fen(),
                             'true_cp': true_cp
                         })
+                        if len(positions) >= positions_size:
+                            break
 
-                    # Add positions from this game to our collection
-                    positions.extend(game_positions)
-
-                    if games_processed % int(positions_size / 10 / 10) == 0:
+                    if games_processed % max(1, int(positions_size / 100)) == 0:
                         print(f"  Processed {games_processed} games, collected {len(positions)} positions...")
 
                     if len(positions) >= positions_size:
@@ -574,7 +472,7 @@ def test_eval_accuracy(inference, nn_type: str, positions_size: int):
     errors = []
 
     for i, pos in enumerate(positions):
-        if (i + 1) % int(positions_size / 10) == 0:
+        if (i + 1) % max(1, int(positions_size / 10)) == 0:
             print(f"  Progress: {i + 1}/{len(positions)}")
 
         try:
@@ -655,9 +553,6 @@ def test_eval_accuracy(inference, nn_type: str, positions_size: int):
     print("\n" + "=" * 70)
     print("Evaluation accuracy test complete!")
     print("=" * 70)
-
-    # Evaluate all positions
-    print("\nEvaluating positions...")
 
 
 def performance_test_nnue(inference: NNUEInference):
@@ -823,7 +718,7 @@ def interactive_loop(inference):
     print("Chess Position Evaluator")
     print("=" * 60)
     print(f"Network type: {nn_type}")
-    print(f"Model: {MODEL_PATH}")
+    #print(f"Model: {MODEL_PATH}")
     print("\nEnter FEN strings to evaluate positions.")
     print("Type 'help' for instructions, 'exit' or 'quit' to quit.")
     print("=" * 60 + "\n")
@@ -877,7 +772,8 @@ def main(positions_size=0):
         print(f"Must be one of: {', '.join(valid_test_types)}")
         sys.exit(1)
 
-    inference = load_model(MODEL_PATH, nn_type)
+    model_path = "model/nnue.pt" if nn_type == "NNUE" else "model/dnn.pt"
+    inference = load_model(model_path, nn_type)
 
     if test_type == "Accumulator-Correctness":
         print(f"\nRunning accumulator correctness test for {nn_type}...")

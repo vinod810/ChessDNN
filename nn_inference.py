@@ -1,3 +1,4 @@
+import sys
 from typing import List, Tuple, Set, Dict, Optional
 
 import chess
@@ -5,7 +6,8 @@ import numpy as np
 import torch
 from torch import nn as nn
 
-NN_TYPE = "NNUE"
+
+#NN_TYPE = "NNUE"
 
 KING_SQUARES = 64
 PIECE_SQUARES = 64
@@ -15,15 +17,15 @@ NNUE_INPUT_SIZE = KING_SQUARES * PIECE_SQUARES * PIECE_TYPES * COLORS
 NNUE_HIDDEN_SIZE = 256
 DNN_INPUT_SIZE = 768  # 64 squares * 6 piece types * 2 colors
 DNN_HIDDEN_LAYERS = [1024, 256, 32]
-INPUT_SIZE = NNUE_INPUT_SIZE if NN_TYPE == "NNUE" else DNN_INPUT_SIZE
-FIRST_HIDDEN_SIZE = NNUE_HIDDEN_SIZE if NN_TYPE == "NNUE" else DNN_HIDDEN_LAYERS[0]
 OUTPUT_SIZE = 1
-MODEL_PATH = "model/nnue.pt" if NN_TYPE == "NNUE" else "model/dnn.pt"
 TANH_SCALE = 400
 MAX_SCORE = 10_000
 MATE_FACTOR = 100
 MAX_MATE_DEPTH = 10
 MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
+
+MAX_PLYS_PER_GAME = 200
+OPENING_PLYS = 10
 
 class NNUEFeatures:
     """Handles feature extraction for NNUE network"""
@@ -441,7 +443,7 @@ class NNUEIncrementalUpdater:
 class NNUENetwork(nn.Module):
     """PyTorch NNUE Network"""
 
-    def __init__(self, input_size=INPUT_SIZE, hidden_size=FIRST_HIDDEN_SIZE):
+    def __init__(self, input_size, hidden_size):
         super(NNUENetwork, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -960,3 +962,269 @@ class DNNInference:
         return self.evaluate_full(feat)
 
 
+class ProcessGameWithValidation:
+    """
+    Callable class that processes games with periodic validation of incremental features.
+    Each instance maintains its own position counter (no global state).
+    """
+
+    VALIDATION_INTERVAL = 10000
+
+    def __init__(self, nn_type):
+        self.position_count = 0
+        self.nn_type = nn_type
+
+    def is_matching_full_vs_incremental(self, board, white_feat, black_feat):
+        # Full extraction for comparison
+        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
+
+        # Compare as sets (order doesn't matter)
+        white_match = set(white_feat) == set(white_feat_full)
+        black_match = set(black_feat) == set(black_feat_full)
+
+        if not white_match or not black_match:
+            print(f"\n⚠️  WARNING: Incremental feature mismatch at position {self.position_count}!")
+            print(f"    FEN: {board.fen()}")
+            if not white_match:
+                incremental_only = set(white_feat) - set(white_feat_full)
+                full_only = set(white_feat_full) - set(white_feat)
+                print(f"    White features - Incremental only: {incremental_only}")
+                print(f"    White features - Full only: {full_only}")
+            if not black_match:
+                incremental_only = set(black_feat) - set(black_feat_full)
+                full_only = set(black_feat_full) - set(black_feat)
+                print(f"    Black features - Incremental only: {incremental_only}")
+                print(f"    Black features - Full only: {full_only}")
+
+            return False
+        else:
+            return True
+
+    @staticmethod
+    def eval_to_cp_stm(ev, board_turn: bool) -> Optional[int]:
+        """
+        Convert a chess.engine evaluation to centipawns from side-to-move perspective.
+
+        Args:
+            ev: The evaluation from node.eval() (can be None)
+            board_turn: True if white to move, False if black to move
+
+        Returns:
+            Centipawn score from STM perspective, or None if ev is None
+        """
+        if ev is None:
+            return None
+
+        if ev.is_mate():
+            mate_in = ev.white().mate()
+            if mate_in < 0:  # -ve when black is winning
+                mate_in = max(-MAX_MATE_DEPTH, mate_in)
+                score_cp = -MAX_SCORE - mate_in * MATE_FACTOR
+            else:
+                mate_in = min(MAX_MATE_DEPTH, mate_in)
+                score_cp = MAX_SCORE - mate_in * MATE_FACTOR
+        else:
+            score_cp = ev.white().score()
+            score_cp = min(score_cp, MAX_NON_MATE_SCORE)
+            score_cp = max(score_cp, -MAX_NON_MATE_SCORE)
+
+        # Lichess eval is always from White's perspective - convert to STM
+        if not board_turn:  # Black to move
+            score_cp = -score_cp
+
+        return score_cp
+
+    def process_game_positions(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME,
+                               opening_plys: int = OPENING_PLYS) -> List[Tuple[chess.Board, int]]:
+        """
+        Process a single game and return valid positions with centipawn scores.
+
+        This method contains the shared filtering logic used by both training and testing:
+        - Skip variant games
+        - Skip opening moves
+        - Skip game-over positions
+        - Skip positions where side-to-move is in check
+        - Skip positions after captures (tactically unstable)
+
+        Args:
+            game: A chess.pgn game object
+            max_plys_per_game: Maximum positions to extract per game
+            opening_plys: Number of opening moves to skip
+
+        Returns:
+            List of (board_copy, score_cp_stm) tuples where score_cp_stm is the
+            centipawn score from side-to-move perspective
+        """
+        if game is None:
+            return []
+
+        # Skip variant games
+        if any("Variant" in key for key in game.headers.keys()):
+            return []
+
+        positions = []
+        board = game.board()
+        move_count = 0
+
+        for node in game.mainline():
+            move_count += 1
+            current_move = node.move
+
+            # Check if this move is a capture BEFORE pushing it
+            was_last_move_capture = board.is_capture(current_move)
+
+            if len(positions) >= max_plys_per_game:
+                break
+
+            if move_count <= opening_plys:
+                board.push(current_move)
+                continue
+
+            board.push(current_move)
+
+            if board.is_game_over():
+                continue
+
+            # Skip if side to move is in check
+            if board.is_check():
+                continue
+
+            # Skip if this move was a capture (position after capture is tactically unstable)
+            if was_last_move_capture:
+                continue
+
+            score_cp = self.eval_to_cp_stm(node.eval(), board.turn == chess.WHITE)
+            if score_cp is not None:
+                positions.append((board.copy(), score_cp))
+
+        return positions
+
+    def __call__(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME, opening_plys: int = OPENING_PLYS) -> List[
+        Tuple]:
+        """
+        Process a single game and return positions with evaluations.
+        Uses incremental feature updates for efficiency.
+        Periodically validates incremental updates against full extraction.
+        """
+        if game is None:
+            return []
+
+        # Skip variant games
+        if any("Variant" in key for key in game.headers.keys()):
+            return []
+
+        positions = []
+        board = game.board()
+
+        # Initialize incremental updater after skipping early moves
+        feature_updater = None
+        move_count = 0
+
+        for node in game.mainline():
+            move_count += 1
+            current_move = node.move
+
+            # Check if this move is a capture BEFORE pushing it
+            was_last_move_capture = board.is_capture(current_move)
+
+            if len(positions) >= max_plys_per_game:
+                break
+
+            if move_count <= opening_plys:
+                board.push(current_move)
+                continue
+
+            # Initialize feature updater on first position we might use
+            if feature_updater is None:
+                feature_updater = NNUEIncrementalUpdater(board)
+
+            # Update features incrementally (this also updates the updater's internal board)
+            feature_updater.push(node.move)
+            # Keep main board in sync
+            board.push(node.move)
+
+            if board.is_game_over():
+                continue
+
+            # Skip if side to move is in check
+            if board.is_check():
+                continue
+
+            # Skip if this move was a capture (position after capture is tactically unstable)
+            if was_last_move_capture:
+                continue
+
+            score_cp = self.eval_to_cp_stm(node.eval(), board.turn == chess.WHITE)
+            if score_cp is not None:
+                score_tanh = np.tanh(score_cp / TANH_SCALE)
+
+                if self.nn_type == "NNUE":
+                    # Get features from incremental updater (faster than full recompute)
+                    white_feat, black_feat = feature_updater.get_features_unsorted()
+
+                    # Periodic validation: compare incremental vs full extraction
+                    self.position_count += 1
+                    if self.position_count % self.VALIDATION_INTERVAL == 0:
+                        if not self.is_matching_full_vs_incremental(board, white_feat, black_feat):
+                            # Use full-extraction as fallback
+                            white_feat, black_feat = NNUEFeatures.board_to_features(board)
+
+                    stm = 1.0 if board.turn == chess.WHITE else 0.0
+                    positions.append((white_feat, black_feat, stm, score_tanh))
+
+                else:  # DNN
+                    # Extract features from perspective of side to move
+                    feat = DNNFeatures.board_to_features(board)
+                    positions.append((feat, score_tanh))
+
+        return positions
+
+
+def load_model(model_path: str, nn_type: str):
+    """Load trained model from checkpoint file"""
+    print(f"Loading {nn_type} model from {model_path}...")
+
+    try:
+        checkpoint = torch.load(model_path, map_location='cpu')
+
+        if nn_type == "NNUE":
+            input_size = NNUE_INPUT_SIZE if nn_type == "NNUE" else DNN_INPUT_SIZE
+            hidden_size = NNUE_HIDDEN_SIZE if nn_type == "NNUE" else DNN_HIDDEN_LAYERS[0]
+            model = NNUENetwork(input_size, hidden_size)
+        elif nn_type == "DNN":
+            model = DNNNetwork()
+        else:
+            raise ValueError(f"Unknown NN_TYPE: {nn_type}. Must be 'NNUE' or 'DNN'")
+
+        # Handle different checkpoint formats
+        if isinstance(checkpoint, dict):
+            if 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+                print(f"  Checkpoint info: Epoch {checkpoint.get('epoch', 'unknown')}, "
+                      f"Val loss: {checkpoint.get('val_loss', 'unknown'):.6f}")
+            elif 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
+            else:
+                state_dict = checkpoint
+        else:
+            state_dict = checkpoint
+
+        model.load_state_dict(state_dict)
+        model.eval()
+
+        if nn_type == "NNUE":
+            inference = NNUEInference(model)
+        else:
+            inference = DNNInference(model)
+
+        print(f"✓ Model loaded successfully")
+        return inference
+
+    except FileNotFoundError:
+        print(f"ERROR: Model file not found: {model_path}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR loading model: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
