@@ -74,7 +74,7 @@ MODEL_PATH = "model/nnue.pt" if NN_TYPE == "NNUE" else "model/dnn.pt"
 # Main configuration
 BATCH_SIZE = 8192 * 2
 if platform.system() == "Windows":
-    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512) * 5  # Windows file reading is slow
+    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512) * 2  # Windows file reading is slow
 else:
     QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512)
 
@@ -88,14 +88,15 @@ GC_INTERVAL = 1000  # Run garbage collection every N batches
 # Training
 LEARNING_RATE = 0.001
 VALIDATION_SPLIT = 0.05
-STEPS_PER_EPOCH = int(1000 / 2)
+STEPS_PER_EPOCH = int(8 * 1024 * 1024 / BATCH_SIZE)
 POSITIONS_PER_EPOCH = BATCH_SIZE * STEPS_PER_EPOCH
 EPOCHS = 500
 EARLY_STOPPING_PATIENCE = 10
 LR_PATIENCE = 3
 
-
 # PGN
+MAX_PLYS_PER_GAME = 200
+OPENING_PLYS = 10
 
 
 class SharedStats:
@@ -198,90 +199,100 @@ class SharedStats:
 
 def encode_sparse_batch(positions: List[Tuple]) -> Dict[str, Any]:
     """
-    Encode a batch of positions into sparse format for efficient IPC.
-    Instead of sending dense tensors, we send indices of non-zero elements.
+    OPTIMIZED: Encode with flattened numpy arrays for faster IPC.
 
-    For NNUE: Returns dict with white_indices, black_indices, stm, scores, batch_size
-    For DNN: Returns dict with features, scores, batch_size (no stm needed as features are from perspective)
+    Uses offset arrays to reconstruct per-sample indices, which pickles
+    much faster than lists of lists.
     """
     if NN_TYPE == "NNUE":
-        white_indices = []
-        black_indices = []
+        all_white_indices = []
+        all_black_indices = []
+        white_offsets = [0]
+        black_offsets = [0]
         stms = []
         scores = []
 
         for white_feat, black_feat, stm, score in positions:
-            white_indices.append(white_feat)
-            black_indices.append(black_feat)
+            all_white_indices.extend(white_feat)
+            all_black_indices.extend(black_feat)
+            white_offsets.append(len(all_white_indices))
+            black_offsets.append(len(all_black_indices))
             stms.append(stm)
             scores.append(score)
 
         return {
-            'white_indices': white_indices,
-            'black_indices': black_indices,
+            'white_indices_flat': np.array(all_white_indices, dtype=np.int32),
+            'white_offsets': np.array(white_offsets, dtype=np.int32),
+            'black_indices_flat': np.array(all_black_indices, dtype=np.int32),
+            'black_offsets': np.array(black_offsets, dtype=np.int32),
             'stm': np.array(stms, dtype=np.float32),
             'scores': np.array(scores, dtype=np.float32),
-            'batch_size': len(positions)
+            'batch_size': len(positions),
+            'format': 'flattened'  # Flag to identify format
         }
     else:  # DNN
-        features = []
+        all_features = []
+        offsets = [0]
         scores = []
 
         for feat, score in positions:
-            features.append(feat)
+            all_features.extend(feat)
+            offsets.append(len(all_features))
             scores.append(score)
 
         return {
-            'features': features,
+            'features_flat': np.array(all_features, dtype=np.int32),
+            'offsets': np.array(offsets, dtype=np.int32),
             'scores': np.array(scores, dtype=np.float32),
-            'batch_size': len(positions)
+            'batch_size': len(positions),
+            'format': 'flattened'
         }
 
 
 def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu') -> Tuple[torch.Tensor, ...]:
     """
-    Decode sparse batch data back to dense tensors.
-    Called in main process after receiving from queue.
+    OPTIMIZED: Decode flattened numpy format using vectorized operations.
 
-    For NNUE: Returns (white_input, black_input, stm, scores)
-    For DNN: Returns (features, scores) - note different return signature!
+    Uses np.repeat to build batch indices from offsets - fully vectorized,
+    no Python loops over batch_size.
     """
     batch_size = batch_data['batch_size']
     scores = torch.tensor(batch_data['scores'], dtype=torch.float32, device=device).unsqueeze(1)
 
     if NN_TYPE == "NNUE":
-        white_indices = batch_data['white_indices']
-        black_indices = batch_data['black_indices']
-
-        # Note: Training does matrix multiplication at the first layer.  It is okay as the data pipeline is the
-        #       bottleneck. In contrast, the Inference class uses accumulators for more efficient operation where it
-        #       actually matters.
         white_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
         black_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
 
-        for i in range(batch_size):
-            if white_indices[i]:
-                white_input[i, white_indices[i]] = 1.0
-            if black_indices[i]:
-                black_input[i, black_indices[i]] = 1.0
+        # Get flattened arrays and offsets
+        white_flat = batch_data['white_indices_flat']
+        white_offsets = batch_data['white_offsets']
+        black_flat = batch_data['black_indices_flat']
+        black_offsets = batch_data['black_offsets']
+
+        # Build batch indices from offsets using np.repeat (fully vectorized)
+        # np.diff gives counts per sample, np.repeat expands to batch indices
+        if len(white_flat) > 0:
+            white_batch_idx = np.repeat(np.arange(batch_size, dtype=np.int64), np.diff(white_offsets))
+            white_input[white_batch_idx, white_flat] = 1.0
+
+        if len(black_flat) > 0:
+            black_batch_idx = np.repeat(np.arange(batch_size, dtype=np.int64), np.diff(black_offsets))
+            black_input[black_batch_idx, black_flat] = 1.0
 
         stm = torch.tensor(batch_data['stm'], dtype=torch.float32, device=device).unsqueeze(1)
         return white_input, black_input, stm, scores
-    else:  # DNN
-        feature_indices = batch_data['features']
 
-        # Create dense tensor
+    else:  # DNN
         features = torch.zeros(batch_size, INPUT_SIZE, device=device)
 
-        for i in range(batch_size):
-            if feature_indices[i]:
-                features[i, feature_indices[i]] = 1.0
+        feat_flat = batch_data['features_flat']
+        offsets = batch_data['offsets']
+
+        if len(feat_flat) > 0:
+            batch_idx = np.repeat(np.arange(batch_size, dtype=np.int64), np.diff(offsets))
+            features[batch_idx, feat_flat] = 1.0
 
         return features, scores
-
-
-MAX_PLYS_PER_GAME = 200
-OPENING_PLYS = 10
 
 
 def worker_process(
@@ -920,290 +931,6 @@ class ParallelTrainer:
         return history
 
 
-# class NNUEInference:
-#     """Numpy-based inference engine"""
-#
-#     def __init__(self, model: NNUENetwork):
-#         model.eval()
-#         self.ft_weight = model.ft.weight.detach().cpu().numpy()
-#         self.ft_bias = model.ft.bias.detach().cpu().numpy()
-#         self.l1_weight = model.l1.weight.detach().cpu().numpy()
-#         self.l1_bias = model.l1.bias.detach().cpu().numpy()
-#         self.l2_weight = model.l2.weight.detach().cpu().numpy()
-#         self.l2_bias = model.l2.bias.detach().cpu().numpy()
-#         self.l3_weight = model.l3.weight.detach().cpu().numpy()
-#         self.l3_bias = model.l3.bias.detach().cpu().numpy()
-#
-#     def clipped_relu(self, x):
-#         return np.clip(x, 0, 1)
-#
-#     def evaluate(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
-#         white_input = np.zeros(INPUT_SIZE)
-#         black_input = np.zeros(INPUT_SIZE)
-#
-#         for f in white_features:
-#             white_input[f] = 1.0
-#         for f in black_features:
-#             black_input[f] = 1.0
-#
-#         white_hidden = self.clipped_relu(np.dot(white_input, self.ft_weight.T) + self.ft_bias)
-#         black_hidden = self.clipped_relu(np.dot(black_input, self.ft_weight.T) + self.ft_bias)
-#
-#         if stm:
-#             hidden = np.concatenate([white_hidden, black_hidden])
-#         else:
-#             hidden = np.concatenate([black_hidden, white_hidden])
-#
-#         x = self.clipped_relu(np.dot(hidden, self.l1_weight.T) + self.l1_bias)
-#         x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
-#         output = np.dot(x, self.l3_weight.T) + self.l3_bias
-#
-#         return output[0]  # Linear output (no activation)
-#
-#     def evaluate_board(self, board: chess.Board) -> float:
-#         white_feat, black_feat = NNUEFeatures.board_to_features(board)
-#         return self.evaluate(white_feat, black_feat, board.turn == chess.WHITE)
-#
-#     def save_weights(self, filename: str):
-#         with open(filename, 'wb') as f:
-#             f.write(struct.pack('III', INPUT_SIZE, FIRST_HIDDEN_SIZE, 32))
-#             self.ft_weight.tofile(f)
-#             self.ft_bias.tofile(f)
-#             self.l1_weight.tofile(f)
-#             self.l1_bias.tofile(f)
-#             self.l2_weight.tofile(f)
-#             self.l2_bias.tofile(f)
-#             self.l3_weight.tofile(f)
-#             self.l3_bias.tofile(f)
-#
-#     @classmethod
-#     def load_weights(cls, filename: str):
-#         with open(filename, 'rb') as f:
-#             input_size, hidden_size, l1_size = struct.unpack('III', f.read(12))
-#             model = NNUENetwork(input_size, hidden_size)
-#             inference = cls(model)
-#
-#             inference.ft_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=hidden_size * input_size).reshape(hidden_size, input_size)
-#             inference.ft_bias = np.fromfile(f, dtype=np.float32, count=hidden_size)
-#             inference.l1_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=l1_size * hidden_size * 2).reshape(l1_size, hidden_size * 2)
-#             inference.l1_bias = np.fromfile(f, dtype=np.float32, count=l1_size)
-#             inference.l2_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=l1_size * l1_size).reshape(l1_size, l1_size)
-#             inference.l2_bias = np.fromfile(f, dtype=np.float32, count=l1_size)
-#             inference.l3_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=l1_size).reshape(1, l1_size)
-#             inference.l3_bias = np.fromfile(f, dtype=np.float32, count=1)
-#
-#             return inference
-#
-#
-# class DNNInference:
-#     """Numpy-based inference engine for DNN"""
-#
-#     def __init__(self, model: DNNNetwork):
-#         model.eval()
-#         self.l1_weight = model.l1.weight.detach().cpu().numpy()
-#         self.l1_bias = model.l1.bias.detach().cpu().numpy()
-#         self.l2_weight = model.l2.weight.detach().cpu().numpy()
-#         self.l2_bias = model.l2.bias.detach().cpu().numpy()
-#         self.l3_weight = model.l3.weight.detach().cpu().numpy()
-#         self.l3_bias = model.l3.bias.detach().cpu().numpy()
-#         self.l4_weight = model.l4.weight.detach().cpu().numpy()
-#         self.l4_bias = model.l4.bias.detach().cpu().numpy()
-#
-#     def clipped_relu(self, x):
-#         return np.clip(x, 0, 1)
-#
-#     def evaluate(self, features: List[int]) -> float:
-#         feature_input = np.zeros(DNN_INPUT_SIZE)
-#
-#         for f in features:
-#             feature_input[f] = 1.0
-#
-#         x = self.clipped_relu(np.dot(feature_input, self.l1_weight.T) + self.l1_bias)
-#         x = self.clipped_relu(np.dot(x, self.l2_weight.T) + self.l2_bias)
-#         x = self.clipped_relu(np.dot(x, self.l3_weight.T) + self.l3_bias)
-#         output = np.dot(x, self.l4_weight.T) + self.l4_bias
-#
-#         return output[0]  # Linear output (no activation)
-#
-#     def evaluate_board(self, board: chess.Board) -> float:
-#         feat = DNNFeatures.board_to_features(board)
-#         return self.evaluate(feat)
-#
-#     def save_weights(self, filename: str):
-#         with open(filename, 'wb') as f:
-#             # Write header: input_size, hidden_layer_sizes
-#             f.write(struct.pack('IIII', DNN_INPUT_SIZE, DNN_HIDDEN_LAYERS[0],
-#                                 DNN_HIDDEN_LAYERS[1], DNN_HIDDEN_LAYERS[2]))
-#             self.l1_weight.tofile(f)
-#             self.l1_bias.tofile(f)
-#             self.l2_weight.tofile(f)
-#             self.l2_bias.tofile(f)
-#             self.l3_weight.tofile(f)
-#             self.l3_bias.tofile(f)
-#             self.l4_weight.tofile(f)
-#             self.l4_bias.tofile(f)
-#
-#     @classmethod
-#     def load_weights(cls, filename: str):
-#         with open(filename, 'rb') as f:
-#             input_size, h1, h2, h3 = struct.unpack('IIII', f.read(16))
-#             model = DNNNetwork(input_size, [h1, h2, h3])
-#             inference = cls(model)
-#
-#             inference.l1_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=h1 * input_size).reshape(h1, input_size)
-#             inference.l1_bias = np.fromfile(f, dtype=np.float32, count=h1)
-#             inference.l2_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=h2 * h1).reshape(h2, h1)
-#             inference.l2_bias = np.fromfile(f, dtype=np.float32, count=h2)
-#             inference.l3_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=h3 * h2).reshape(h3, h2)
-#             inference.l3_bias = np.fromfile(f, dtype=np.float32, count=h3)
-#             inference.l4_weight = np.fromfile(f, dtype=np.float32,
-#                                               count=h3).reshape(1, h3)
-#             inference.l4_bias = np.fromfile(f, dtype=np.float32, count=1)
-#
-#             return inference
-
-
-if __name__ == "__main__":
-    # Required for multiprocessing on some platforms
-    mp.set_start_method('spawn', force=True)
-
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description=f'{NN_TYPE} Training with Parallel Data Loading')
-    parser.add_argument('--resume', type=str, default=None, metavar='PATH',
-                        help='Path to checkpoint .pt file to resume training from')
-    parser.add_argument('--skip-games', type=int, default=0, metavar='N',
-                        help='When resuming, skip the first N games from each pgn.zst file (default: 0)')
-    parser.add_argument('--pgn-dir', type=str, default='./pgn',
-                        help='Directory containing .pgn.zst files (default: ./pgn)')
-    parser.add_argument('--epochs', type=int, default=EPOCHS,
-                        help=f'Total number of epochs to train (default: {EPOCHS})')
-    parser.add_argument('--lr', type=float, default=LEARNING_RATE,
-                        help=f'Learning rate (default: {LEARNING_RATE})')
-    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
-                        help=f'Batch size (default: {BATCH_SIZE})')
-    parser.add_argument('--checkpoint', type=str, default=MODEL_PATH,
-                        help=f'Path to save checkpoints (default: {MODEL_PATH})')
-    args = parser.parse_args()
-
-    pgn_dir = args.pgn_dir
-    resume_checkpoint = None
-
-    print("=" * 60)
-    print(f"{NN_TYPE} Training with Parallel Data Loading")
-    print("=" * 60)
-
-    # Detect device
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {device}")
-    print(f"Network type: {NN_TYPE}")
-
-    # Create model based on nn_type
-    if NN_TYPE == "NNUE":
-        model = NNUENetwork(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
-    else:  # DNN
-        model = DNNNetwork(DNN_INPUT_SIZE)
-
-    # Load checkpoint if resuming
-    if args.resume:
-        if not os.path.exists(args.resume):
-            print(f"Error: Checkpoint file not found: {args.resume}")
-            exit(1)
-
-        print(f"\nLoading checkpoint from: {args.resume}")
-        resume_checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
-
-        # Verify network type matches
-        checkpoint_nn_type = resume_checkpoint.get('nn_type', NN_TYPE)
-        if checkpoint_nn_type != NN_TYPE:
-            print(f"Error: Checkpoint network type ({checkpoint_nn_type}) does not match "
-                  f"current configuration ({NN_TYPE})")
-            exit(1)
-
-        # Load model weights
-        model.load_state_dict(resume_checkpoint['model_state_dict'])
-        print(f"Loaded model from epoch {resume_checkpoint['epoch']} "
-              f"with validation loss: {resume_checkpoint['val_loss']:.6f}")
-
-        if 'best_loss' in resume_checkpoint:
-            print(f"Best validation loss so far: {resume_checkpoint['best_loss']:.6f}")
-
-    print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
-
-    # Determine skip_games_count (only used when resuming)
-    skip_games_count = args.skip_games if args.resume else 0
-    if skip_games_count > 0 and not args.resume:
-        print("Warning: --skip-games has no effect without --resume")
-        skip_games_count = 0
-
-    # Create trainer
-    trainer = ParallelTrainer(
-        pgn_dir=pgn_dir,
-        model=model,
-        batch_size=args.batch_size,
-        validation_split=VALIDATION_SPLIT,
-        queue_size=QUEUE_MAX_SIZE,
-        device=device,
-        seed=42,
-        skip_games_count=skip_games_count
-    )
-
-    # Train with improved parameters
-    # - Higher positions_per_epoch for better convergence
-    # - Learning rate scheduler to reduce LR when plateauing
-    # - Longer patience since LR will be reduced
-    # - Gradient clipping for stability
-    history = trainer.train(
-        epochs=args.epochs,
-        lr=args.lr,
-        positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
-        early_stopping_patience=EARLY_STOPPING_PATIENCE,  # More patience since LR scheduler helps
-        checkpoint_path=args.checkpoint,
-        lr_scheduler="plateau",  # Reduce LR on plateau
-        grad_clip=1.0,  # Gradient clipping
-        resume_checkpoint=resume_checkpoint
-    )
-
-    # Summary
-    print("\n" + "=" * 60)
-    print("TRAINING COMPLETE")
-    print("=" * 60)
-    print(f"Final train loss: {history['train_loss'][-1]:.6f}")
-    print(f"Best validation loss: {min(history['val_loss']):.6f}")
-    print(f"Epochs trained: {len(history['train_loss'])}")
-
-    # # Create inference engine and test based on nn_type
-    # print("\nCreating inference engine...")
-    # if nn_type == "NNUE":
-    #     inference = NNUEInference(model)
-    #     weights_file = WEIGHTS_FILE_PATH"nnue_weights.bin"
-    # else:  # DNN
-    #     inference = DNNInference(model)
-    #     weights_file = "dnn_weights.bin"
-    #
-    # test_board = chess.Board()
-    # eval_score = inference.evaluate_board(test_board)
-    # print(f"Starting position evaluation: {eval_score:.4f}")
-    # print(f"Centipawn equivalent: {np.arctanh(np.clip(eval_score, -0.99, 0.99)) * TANH_SCALE:.1f}")
-    #
-    # # Save weights
-    # inference.save_weights(weights_file)
-    # print(f"Weights saved to {weights_file}")
-
-    # # Save history
-    # import json
-    #
-    # with open("training_history.json", "w") as f:
-    #     json.dump(history, f, indent=2)
-    # print("Training history saved to training_history.json")
-
-
 class ProcessGameWithValidation:
     """
     Callable class that processes games with periodic validation of incremental features.
@@ -1420,3 +1147,112 @@ class ProcessGameWithValidation:
                     positions.append((feat, score_tanh))
 
         return positions
+
+
+if __name__ == "__main__":
+    # Required for multiprocessing on some platforms
+    mp.set_start_method('spawn', force=True)
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description=f'{NN_TYPE} Training with Parallel Data Loading')
+    parser.add_argument('--resume', type=str, default=None, metavar='PATH',
+                        help='Path to checkpoint .pt file to resume training from')
+    parser.add_argument('--skip-games', type=int, default=0, metavar='N',
+                        help='When resuming, skip the first N games from each pgn.zst file (default: 0)')
+    parser.add_argument('--pgn-dir', type=str, default='./pgn',
+                        help='Directory containing .pgn.zst files (default: ./pgn)')
+    parser.add_argument('--epochs', type=int, default=EPOCHS,
+                        help=f'Total number of epochs to train (default: {EPOCHS})')
+    parser.add_argument('--lr', type=float, default=LEARNING_RATE,
+                        help=f'Learning rate (default: {LEARNING_RATE})')
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
+                        help=f'Batch size (default: {BATCH_SIZE})')
+    parser.add_argument('--checkpoint', type=str, default=MODEL_PATH,
+                        help=f'Path to save checkpoints (default: {MODEL_PATH})')
+    args = parser.parse_args()
+
+    pgn_dir = args.pgn_dir
+    resume_checkpoint = None
+
+    print("=" * 60)
+    print(f"{NN_TYPE} Training with Parallel Data Loading")
+    print("=" * 60)
+
+    # Detect device
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
+    print(f"Network type: {NN_TYPE}")
+
+    # Create model based on nn_type
+    if NN_TYPE == "NNUE":
+        model = NNUENetwork(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
+    else:  # DNN
+        model = DNNNetwork(DNN_INPUT_SIZE)
+
+    # Load checkpoint if resuming
+    if args.resume:
+        if not os.path.exists(args.resume):
+            print(f"Error: Checkpoint file not found: {args.resume}")
+            exit(1)
+
+        print(f"\nLoading checkpoint from: {args.resume}")
+        resume_checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
+
+        # Verify network type matches
+        checkpoint_nn_type = resume_checkpoint.get('nn_type', NN_TYPE)
+        if checkpoint_nn_type != NN_TYPE:
+            print(f"Error: Checkpoint network type ({checkpoint_nn_type}) does not match "
+                  f"current configuration ({NN_TYPE})")
+            exit(1)
+
+        # Load model weights
+        model.load_state_dict(resume_checkpoint['model_state_dict'])
+        print(f"Loaded model from epoch {resume_checkpoint['epoch']} "
+              f"with validation loss: {resume_checkpoint['val_loss']:.6f}")
+
+        if 'best_loss' in resume_checkpoint:
+            print(f"Best validation loss so far: {resume_checkpoint['best_loss']:.6f}")
+
+    print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
+
+    # Determine skip_games_count (only used when resuming)
+    skip_games_count = args.skip_games if args.resume else 0
+    if skip_games_count > 0 and not args.resume:
+        print("Warning: --skip-games has no effect without --resume")
+        skip_games_count = 0
+
+    # Create trainer
+    trainer = ParallelTrainer(
+        pgn_dir=pgn_dir,
+        model=model,
+        batch_size=args.batch_size,
+        validation_split=VALIDATION_SPLIT,
+        queue_size=QUEUE_MAX_SIZE,
+        device=device,
+        seed=42,
+        skip_games_count=skip_games_count
+    )
+
+    # Train with improved parameters
+    # - Higher positions_per_epoch for better convergence
+    # - Learning rate scheduler to reduce LR when plateauing
+    # - Longer patience since LR will be reduced
+    # - Gradient clipping for stability
+    history = trainer.train(
+        epochs=args.epochs,
+        lr=args.lr,
+        positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
+        early_stopping_patience=EARLY_STOPPING_PATIENCE,  # More patience since LR scheduler helps
+        checkpoint_path=args.checkpoint,
+        lr_scheduler="plateau",  # Reduce LR on plateau
+        grad_clip=1.0,  # Gradient clipping
+        resume_checkpoint=resume_checkpoint
+    )
+
+    # Summary
+    print("\n" + "=" * 60)
+    print("TRAINING COMPLETE")
+    print("=" * 60)
+    print(f"Final train loss: {history['train_loss'][-1]:.6f}")
+    print(f"Best validation loss: {min(history['val_loss']):.6f}")
+    print(f"Epochs trained: {len(history['train_loss'])}")

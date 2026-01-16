@@ -4,13 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Made chess.Board RO in Inference">
-      <change afterPath="$PROJECT_DIR$/nn_quantize.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/train.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Stockfish data for training">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model/dnn_notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/model/testing.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -125,14 +120,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00068" summary="total=300, passed=220, success-rate=73.33%">
-      <option name="closed" value="true" />
-      <created>1767504626395</created>
-      <option name="number" value="00068" />
-      <option name="presentableId" value="LOCAL-00068" />
-      <option name="project" value="LOCAL" />
-      <updated>1767504626395</updated>
     </task>
     <task id="LOCAL-00069" summary="cond env neurofish">
       <option name="closed" value="true" />
@@ -496,7 +483,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768496957290</updated>
     </task>
-    <option name="localTasksCounter" value="117" />
+    <task id="LOCAL-00117" summary="Stockfish data for training">
+      <option name="closed" value="true" />
+      <created>1768537374254</created>
+      <option name="number" value="00117" />
+      <option name="presentableId" value="LOCAL-00117" />
+      <option name="project" value="LOCAL" />
+      <updated>1768537374254</updated>
+    </task>
+    <option name="localTasksCounter" value="118" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -511,7 +506,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="halfkp.py streaming pgn" />
     <MESSAGE value="HalfKP loss 0.02" />
     <MESSAGE value="Early stopping" />
     <MESSAGE value="multiple workers" />
@@ -536,7 +530,8 @@
     <MESSAGE value="More refactoring" />
     <MESSAGE value="Moved ProcessGameWithValidation back to nn_train.py" />
     <MESSAGE value="Made chess.Board RO in Inference" />
-    <option name="LAST_COMMIT_MESSAGE" value="Made chess.Board RO in Inference" />
+    <MESSAGE value="Stockfish data for training" />
+    <option name="LAST_COMMIT_MESSAGE" value="Stockfish data for training" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
