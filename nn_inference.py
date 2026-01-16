@@ -822,7 +822,7 @@ class NNUEInference:
 
         return output[0]
 
-    def _refresh_accumulator(self, white_features: List[int], black_features: List[int]):
+    def refresh_accumulator(self, white_features: List[int], black_features: List[int]):
         """Refresh accumulators from features"""
         self.white_accumulator = self.ft_bias.copy()
         self.black_accumulator = self.ft_bias.copy()
@@ -920,7 +920,7 @@ class DNNInference:
 
         return output[0]
 
-    def _refresh_accumulator(self, features: List[int], perspective: bool):
+    def refresh_accumulator(self, features: List[int], perspective: bool):
         """Refresh accumulator from features"""
         accumulator = self.l1_bias.copy()
 

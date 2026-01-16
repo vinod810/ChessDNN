@@ -4,9 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Stockfish data for training">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="nn_train.py optimized for speed">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_quantize.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/train.py" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -120,14 +125,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00069" summary="cond env neurofish">
-      <option name="closed" value="true" />
-      <created>1767505646386</created>
-      <option name="number" value="00069" />
-      <option name="presentableId" value="LOCAL-00069" />
-      <option name="project" value="LOCAL" />
-      <updated>1767505646387</updated>
     </task>
     <task id="LOCAL-00070" summary="environment.yml">
       <option name="closed" value="true" />
@@ -491,7 +488,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768537374254</updated>
     </task>
-    <option name="localTasksCounter" value="118" />
+    <task id="LOCAL-00118" summary="nn_train.py optimized for speed">
+      <option name="closed" value="true" />
+      <created>1768573524649</created>
+      <option name="number" value="00118" />
+      <option name="presentableId" value="LOCAL-00118" />
+      <option name="project" value="LOCAL" />
+      <updated>1768573524649</updated>
+    </task>
+    <option name="localTasksCounter" value="119" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -506,7 +511,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="HalfKP loss 0.02" />
     <MESSAGE value="Early stopping" />
     <MESSAGE value="multiple workers" />
     <MESSAGE value="multiple workers and increment feature evaluation" />
@@ -531,7 +535,8 @@
     <MESSAGE value="Moved ProcessGameWithValidation back to nn_train.py" />
     <MESSAGE value="Made chess.Board RO in Inference" />
     <MESSAGE value="Stockfish data for training" />
-    <option name="LAST_COMMIT_MESSAGE" value="Stockfish data for training" />
+    <MESSAGE value="nn_train.py optimized for speed" />
+    <option name="LAST_COMMIT_MESSAGE" value="nn_train.py optimized for speed" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

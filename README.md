@@ -58,6 +58,7 @@ Multiprocessing (6 cores)
 ## Future work
 768 input parameters. Stockfish NNE style overparmterization of input and use accumelators instead of matrix multiple at the first hidden layer.
 Cython for improving performance
+Quantization to NNUE
 
 ## Authors
 Eapen Kuruvilla 
