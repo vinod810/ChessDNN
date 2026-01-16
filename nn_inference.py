@@ -14,7 +14,7 @@ NNUE_HIDDEN_SIZE = 256
 DNN_INPUT_SIZE = 768  # 64 squares * 6 piece types * 2 colors
 DNN_HIDDEN_LAYERS = [1024, 256, 32]
 OUTPUT_SIZE = 1
-TANH_SCALE = 400
+TANH_SCALE = 400 # Stockfish uses 410
 MAX_SCORE = 10_000
 
 class NNUEFeatures:
@@ -166,10 +166,10 @@ class NNUEIncrementalUpdater:
 
     def __init__(self, board: chess.Board):
         """Initialize with a board position"""
-        #self.board = board.copy()
         # Store features as sets for O(1) add/remove
         self.white_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.WHITE))
         self.black_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.BLACK))
+
         # Cache king squares
         self.white_king_sq = board.king(chess.WHITE)
         self.black_king_sq = board.king(chess.BLACK)
@@ -318,9 +318,6 @@ class NNUEIncrementalUpdater:
         if not is_white_king_move and not is_black_king_move:
             self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
 
-        # Make the move on internal board
-        # self.board.push(move)
-
         # Update king square cache if king moved
         if is_white_king_move:
             self.white_king_sq = to_sq
@@ -373,9 +370,6 @@ class NNUEIncrementalUpdater:
         """
         if not self.history_stack:
             raise ValueError("No moves to pop - history stack is empty")
-
-        # Undo the board move
-        # self.board.pop()
 
         # Retrieve and remove the last change record
         change_record = self.history_stack.pop()
@@ -554,7 +548,8 @@ class DNNIncrementalUpdater:
         # Store the last change for easy accumulator updates
         self.last_change: Optional[Dict[str, Set[int]]] = None
 
-    def _get_feature_for_perspective(self, perspective: bool, square: int,
+    @staticmethod
+    def _get_feature_for_perspective(perspective: bool, square: int,
                                      piece_type: int, piece_color: bool) -> int:
         """Get feature index for a piece from a given perspective"""
         if not perspective:
@@ -647,9 +642,6 @@ class DNNIncrementalUpdater:
         # Remove moving piece from old square
         self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
 
-        # Make the move
-        #self.board.push(move)
-
         # Handle promotion
         if move.promotion:
             moving_piece_type = move.promotion
@@ -679,9 +671,6 @@ class DNNIncrementalUpdater:
         """
         if not self.history_stack:
             raise ValueError("No moves to pop - history stack is empty")
-
-        # Undo the board move
-        #self.board.pop()
 
         # Retrieve and remove the last change record
         change_record = self.history_stack.pop()
@@ -797,7 +786,7 @@ class NNUEInference:
 
         return output[0]
 
-    def evaluate_incremental(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
+    def evaluate_incremental(self, stm: bool) -> float:
         """
         Incremental evaluation using accumulators (add/subtract instead of matrix multiply).
         Must call _refresh_accumulator() before first use!
@@ -902,7 +891,7 @@ class DNNInference:
 
         return output[0]
 
-    def evaluate_incremental(self, features: List[int], perspective: bool) -> float:
+    def evaluate_incremental(self, perspective: bool) -> float:
         """Incremental evaluation using accumulator"""
         if perspective:
             if self.white_accumulator is None:

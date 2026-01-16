@@ -23,7 +23,7 @@ from typing import List, Tuple, Dict, Optional
 
 from nn_inference import NNUENetwork, DNNNetwork, \
     NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, \
-    DNN_HIDDEN_LAYERS, NNUEFeatures, MAX_SCORE, NNUEIncrementalUpdater, \
+    NNUEFeatures, MAX_SCORE, NNUEIncrementalUpdater, \
     TANH_SCALE, DNNFeatures
 
 MATE_FACTOR = 100
@@ -57,19 +57,6 @@ Both networks are trained on tanh-normalized targets: tanh(centipawns / 400).
 Both networks output linearly and learn to produce values in approximately [-1, 1].
 Output range: approximately [-1, 1] for both architectures.
 """
-
-# Configuration
-# Network type selection: "NNUE" or "DNN"
-NN_TYPE = "NNUE"
-INPUT_SIZE = NNUE_INPUT_SIZE if NN_TYPE == "NNUE" else DNN_INPUT_SIZE
-FIRST_HIDDEN_SIZE = NNUE_HIDDEN_SIZE if NN_TYPE == "NNUE" else DNN_HIDDEN_LAYERS[0]
-MODEL_PATH = "model/nnue.pt" if NN_TYPE == "NNUE" else "model/dnn.pt"
-
-# NNUE Configuration
-
-# DNN Configuration
-
-# Dynamic configuration based on nn_type
 
 # Main configuration
 BATCH_SIZE = 8192 * 2
@@ -197,14 +184,14 @@ class SharedStats:
         print("=" * 80)
 
 
-def encode_sparse_batch(positions: List[Tuple]) -> Dict[str, Any]:
+def encode_sparse_batch(positions: List[Tuple], nn_type: str) -> Dict[str, Any]:
     """
     OPTIMIZED: Encode with flattened numpy arrays for faster IPC.
 
     Uses offset arrays to reconstruct per-sample indices, which pickles
     much faster than lists of lists.
     """
-    if NN_TYPE == "NNUE":
+    if nn_type == "NNUE":
         all_white_indices = []
         all_black_indices = []
         white_offsets = [0]
@@ -249,7 +236,8 @@ def encode_sparse_batch(positions: List[Tuple]) -> Dict[str, Any]:
         }
 
 
-def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu') -> Tuple[torch.Tensor, ...]:
+def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu', nn_type: str = "NNUE") -> Tuple[
+    torch.Tensor, ...]:
     """
     OPTIMIZED: Decode flattened numpy format using vectorized operations.
 
@@ -259,9 +247,12 @@ def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu') -> Tupl
     batch_size = batch_data['batch_size']
     scores = torch.tensor(batch_data['scores'], dtype=torch.float32, device=device).unsqueeze(1)
 
-    if NN_TYPE == "NNUE":
-        white_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
-        black_input = torch.zeros(batch_size, INPUT_SIZE, device=device)
+    # Compute INPUT_SIZE based on nn_type
+    input_size = NNUE_INPUT_SIZE if nn_type == "NNUE" else DNN_INPUT_SIZE
+
+    if nn_type == "NNUE":
+        white_input = torch.zeros(batch_size, input_size, device=device)
+        black_input = torch.zeros(batch_size, input_size, device=device)
 
         # Get flattened arrays and offsets
         white_flat = batch_data['white_indices_flat']
@@ -283,7 +274,7 @@ def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu') -> Tupl
         return white_input, black_input, stm, scores
 
     else:  # DNN
-        features = torch.zeros(batch_size, INPUT_SIZE, device=device)
+        features = torch.zeros(batch_size, input_size, device=device)
 
         feat_flat = batch_data['features_flat']
         offsets = batch_data['offsets']
@@ -301,6 +292,7 @@ def worker_process(
         output_queue: Queue,
         stop_event: Event,
         stats: SharedStats,
+        nn_type: str,
         batch_size: int = BATCH_SIZE,
         max_positions_per_game: int = MAX_PLYS_PER_GAME,
         opening_plys: int = OPENING_PLYS,
@@ -315,6 +307,16 @@ def worker_process(
     Args:
         skip_games_count: Number of games to skip at the start of the first file loop.
                           Used when resuming training to avoid reprocessing games.
+                          :param skip_games_count:
+                          :param shuffle_buffer_size:
+                          :param opening_plys:
+                          :param max_positions_per_game:
+                          :param batch_size:
+                          :param stats:
+                          :param stop_event:
+                          :param output_queue:
+                          :param pgn_file:
+                          :param worker_id:
     """
     print(f"Worker {worker_id} starting: {os.path.basename(pgn_file)}" +
           (f" (skipping first {skip_games_count} games)" if skip_games_count > 0 else ""))
@@ -325,7 +327,7 @@ def worker_process(
     games_skipped = 0  # Counter for skipped games
 
     # Create local game processor with validation (no shared state)
-    game_processor = ProcessGameWithValidation(NN_TYPE)
+    game_processor = ProcessGameWithValidation(nn_type)
 
     while not stop_event.is_set():
         try:
@@ -379,7 +381,7 @@ def worker_process(
                                 position_buffer = position_buffer[batch_size:]
 
                                 # Encode to sparse format
-                                sparse_batch = encode_sparse_batch(batch_positions)
+                                sparse_batch = encode_sparse_batch(batch_positions, nn_type)
 
                                 # Try to put in queue, track wait time
                                 wait_start = time.time()
@@ -390,8 +392,6 @@ def worker_process(
                                         stats.worker_batches[worker_id].value += 1
                                         break
                                     except:
-                                        # Queue full
-                                        # with stats.queue_full_count.get_lock():
                                         stats.queue_full_count.value += 1
 
                                 wait_time = time.time() - wait_start
@@ -426,14 +426,14 @@ def worker_process(
         while len(position_buffer) >= batch_size:
             batch_positions = position_buffer[:batch_size]
             position_buffer = position_buffer[batch_size:]
-            sparse_batch = encode_sparse_batch(batch_positions)
+            sparse_batch = encode_sparse_batch(batch_positions, nn_type)
             try:
                 output_queue.put(sparse_batch, timeout=1.0)
             except:
                 break
         # Send any remaining as partial batch
         if position_buffer:
-            sparse_batch = encode_sparse_batch(position_buffer)
+            sparse_batch = encode_sparse_batch(position_buffer, nn_type)
             try:
                 output_queue.put(sparse_batch, timeout=1.0)
             except:
@@ -450,11 +450,13 @@ class EarlyStopping:
     """Early stopping to stop training when validation loss doesn't improve"""
 
     def __init__(self, patience: int = EARLY_STOPPING_PATIENCE, min_delta: float = 0.0, verbose: bool = True,
-                 checkpoint_path: str = MODEL_PATH, initial_best_loss: float = None, initial_best_epoch: int = 0):
+                 checkpoint_path: str = "model/nnue.pt", nn_type: str = "NNUE", initial_best_loss: float = None,
+                 initial_best_epoch: int = 0):
         self.patience = patience
         self.min_delta = min_delta
         self.verbose = verbose
         self.checkpoint_path = checkpoint_path
+        self.nn_type = nn_type
         self.counter = 0
         self.best_loss = initial_best_loss
         self.early_stop = False
@@ -508,7 +510,7 @@ class EarlyStopping:
             'model_state_dict': model.state_dict(),
             'val_loss': val_loss,
             'best_loss': self.best_loss,
-            'nn_type': NN_TYPE,
+            'nn_type': self.nn_type,
         }
         # Save optimizer state if available
         if self.optimizer is not None:
@@ -533,6 +535,7 @@ class ParallelTrainer:
             self,
             pgn_dir: str,
             model: nn.Module,
+            nn_type: str = "NNUE",
             batch_size: int = BATCH_SIZE,
             validation_split: float = VALIDATION_SPLIT,
             queue_size: int = QUEUE_MAX_SIZE,
@@ -540,8 +543,10 @@ class ParallelTrainer:
             seed: int = 42,
             skip_games_count: int = 0  # Games to skip per file when resuming
     ):
+        self.grad_clip = None
         self.pgn_dir = pgn_dir
         self.model = model.to(device)
+        self.nn_type = nn_type
         self.batch_size = batch_size
         self.validation_split = validation_split
         self.queue_size = queue_size
@@ -585,7 +590,7 @@ class ParallelTrainer:
             p = Process(
                 target=worker_process,
                 args=(i, pgn_file, self.data_queue, self.stop_event, self.stats,
-                      self.batch_size),
+                      self.nn_type, self.batch_size),
                 kwargs={'skip_games_count': self.skip_games_count}
             )
             p.daemon = True
@@ -671,23 +676,20 @@ class ParallelTrainer:
             process_start = time.time()
 
             # Train/validation split (main process decides)
-            # is_validation = self.rng.random() < self.validation_split
             is_validation = self.stats.main_val_batches.value < positions_per_epoch / BATCH_SIZE * self.validation_split
 
-            # with self.stats.main_batches.get_lock():
             self.stats.main_batches.value += 1
 
             if is_validation:
                 # Store for validation (with size limit via deque maxlen)
                 with self.val_buffer_lock:
                     self.val_buffer.append(batch_data)
-                # with self.stats.main_val_batches.get_lock():
                 self.stats.main_val_batches.value += 1
             else:
                 # Training step
-                if NN_TYPE == "NNUE":
+                if self.nn_type == "NNUE":
                     white_input, black_input, stm, target = decode_sparse_batch(
-                        batch_data, self.device
+                        batch_data, self.device, self.nn_type
                     )
                     self.optimizer.zero_grad()
                     output = self.model(white_input, black_input, stm)
@@ -704,7 +706,6 @@ class ParallelTrainer:
                     train_batch_count += 1
                     positions_processed += batch_data['batch_size']
 
-                    # with self.stats.main_train_batches.get_lock():
                     self.stats.main_train_batches.value += 1
 
                     # Clean up tensors
@@ -712,7 +713,7 @@ class ParallelTrainer:
 
                 else:  # DNN
                     features, target = decode_sparse_batch(
-                        batch_data, self.device
+                        batch_data, self.device, self.nn_type
                     )
                     self.optimizer.zero_grad()
                     output = self.model(features)
@@ -729,7 +730,6 @@ class ParallelTrainer:
                     train_batch_count += 1
                     positions_processed += batch_data['batch_size']
 
-                    # with self.stats.main_train_batches.get_lock():
                     self.stats.main_train_batches.value += 1
 
                     # Clean up tensors
@@ -739,7 +739,6 @@ class ParallelTrainer:
             del batch_data
 
             process_time = time.time() - process_start
-            # with self.stats.main_process_ms.get_lock():
             self.stats.main_process_ms.value += int(process_time * 1000)
 
             # Progress update
@@ -765,7 +764,6 @@ class ParallelTrainer:
         # Clear validation buffer after computing loss
         with self.val_buffer_lock:
             self.val_buffer.clear()
-        # with self.stats.main_val_batches.get_lock():
         self.stats.main_val_batches.value = 0
 
         gc.collect()
@@ -784,9 +782,9 @@ class ParallelTrainer:
 
         with torch.no_grad():
             for batch_data in val_batches:
-                if NN_TYPE == "NNUE":
+                if self.nn_type == "NNUE":
                     white_input, black_input, stm, target = decode_sparse_batch(
-                        batch_data, self.device
+                        batch_data, self.device, self.nn_type
                     )
                     output = self.model(white_input, black_input, stm)
                     loss = self.criterion(output, target)
@@ -796,7 +794,7 @@ class ParallelTrainer:
                     del white_input, black_input, stm, target, output, loss
                 else:  # DNN
                     features, target = decode_sparse_batch(
-                        batch_data, self.device
+                        batch_data, self.device, self.nn_type
                     )
                     output = self.model(features)
                     loss = self.criterion(output, target)
@@ -817,7 +815,7 @@ class ParallelTrainer:
             lr: float = LEARNING_RATE,
             positions_per_epoch: int = POSITIONS_PER_EPOCH,
             early_stopping_patience: int = EARLY_STOPPING_PATIENCE,
-            checkpoint_path: str = MODEL_PATH,
+            checkpoint_path: str = "model/nnue.pt",
             lr_scheduler: str = "plateau",  # "plateau", "step", or "none"
             grad_clip: float = 1.0,  # Gradient clipping max norm
             resume_checkpoint: dict = None  # Checkpoint dict for resuming
@@ -876,6 +874,7 @@ class ParallelTrainer:
         early_stopping = EarlyStopping(
             patience=early_stopping_patience,
             checkpoint_path=checkpoint_path,
+            nn_type=self.nn_type,
             initial_best_loss=initial_best_loss,
             initial_best_epoch=initial_best_epoch
         )
@@ -1149,12 +1148,14 @@ class ProcessGameWithValidation:
         return positions
 
 
-if __name__ == "__main__":
+def main():
     # Required for multiprocessing on some platforms
     mp.set_start_method('spawn', force=True)
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description=f'{NN_TYPE} Training with Parallel Data Loading')
+    parser = argparse.ArgumentParser(description='Neural Network Training with Parallel Data Loading')
+    parser.add_argument('--nn-type', type=str, default='NNUE', choices=['NNUE', 'DNN'],
+                        help='Neural network architecture type (default: NNUE)')
     parser.add_argument('--resume', type=str, default=None, metavar='PATH',
                         help='Path to checkpoint .pt file to resume training from')
     parser.add_argument('--skip-games', type=int, default=0, metavar='N',
@@ -1167,24 +1168,28 @@ if __name__ == "__main__":
                         help=f'Learning rate (default: {LEARNING_RATE})')
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
                         help=f'Batch size (default: {BATCH_SIZE})')
-    parser.add_argument('--checkpoint', type=str, default=MODEL_PATH,
-                        help=f'Path to save checkpoints (default: {MODEL_PATH})')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='Path to save checkpoints (default: model/nnue.pt or model/dnn.pt based on --nn-type)')
     args = parser.parse_args()
+
+    # Use nn_type from args
+    nn_type = args.nn_type
+    model_path = args.checkpoint if args.checkpoint else ("model/nnue.pt" if nn_type == "NNUE" else "model/dnn.pt")
 
     pgn_dir = args.pgn_dir
     resume_checkpoint = None
 
     print("=" * 60)
-    print(f"{NN_TYPE} Training with Parallel Data Loading")
+    print(f"{nn_type} Training with Parallel Data Loading")
     print("=" * 60)
 
     # Detect device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
-    print(f"Network type: {NN_TYPE}")
+    print(f"Network type: {nn_type}")
 
     # Create model based on nn_type
-    if NN_TYPE == "NNUE":
+    if nn_type == "NNUE":
         model = NNUENetwork(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
     else:  # DNN
         model = DNNNetwork(DNN_INPUT_SIZE)
@@ -1199,10 +1204,10 @@ if __name__ == "__main__":
         resume_checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
 
         # Verify network type matches
-        checkpoint_nn_type = resume_checkpoint.get('nn_type', NN_TYPE)
-        if checkpoint_nn_type != NN_TYPE:
+        checkpoint_nn_type = resume_checkpoint.get('nn_type', nn_type)
+        if checkpoint_nn_type != nn_type:
             print(f"Error: Checkpoint network type ({checkpoint_nn_type}) does not match "
-                  f"current configuration ({NN_TYPE})")
+                  f"current configuration ({nn_type})")
             exit(1)
 
         # Load model weights
@@ -1225,6 +1230,7 @@ if __name__ == "__main__":
     trainer = ParallelTrainer(
         pgn_dir=pgn_dir,
         model=model,
+        nn_type=nn_type,
         batch_size=args.batch_size,
         validation_split=VALIDATION_SPLIT,
         queue_size=QUEUE_MAX_SIZE,
@@ -1243,7 +1249,7 @@ if __name__ == "__main__":
         lr=args.lr,
         positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
         early_stopping_patience=EARLY_STOPPING_PATIENCE,  # More patience since LR scheduler helps
-        checkpoint_path=args.checkpoint,
+        checkpoint_path=model_path,
         lr_scheduler="plateau",  # Reduce LR on plateau
         grad_clip=1.0,  # Gradient clipping
         resume_checkpoint=resume_checkpoint
@@ -1256,3 +1262,7 @@ if __name__ == "__main__":
     print(f"Final train loss: {history['train_loss'][-1]:.6f}")
     print(f"Best validation loss: {min(history['val_loss']):.6f}")
     print(f"Epochs trained: {len(history['train_loss'])}")
+
+
+if __name__ == "__main__":
+    main()

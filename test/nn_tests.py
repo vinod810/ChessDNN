@@ -27,12 +27,11 @@ import glob
 import zstandard as zstd
 import io
 import chess.pgn
-import os
 import random
 
 # Import from our modules - this ensures we test the actual production code
 from nn_inference import (
-    TANH_SCALE, load_model, NNUEFeatures, DNNFeatures,
+    TANH_SCALE, NNUEFeatures, DNNFeatures,
     NNUE_INPUT_SIZE, DNN_INPUT_SIZE
 )
 from nn_evaluator import NNEvaluator, DNNEvaluator, NNUEEvaluator
@@ -543,7 +542,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
 # Feature Extraction Test
 # =============================================================================
 
-def test_feature_extraction(nn_type: str, model_path: str):
+def test_feature_extraction(nn_type: str):
     """
     Test that feature extraction produces correct and consistent results.
 
@@ -584,7 +583,6 @@ def test_feature_extraction(nn_type: str, model_path: str):
 
         if nn_type == "NNUE":
             white_feat, black_feat = feature_extractor.board_to_features(board)
-            all_features = white_feat + black_feat
 
             # Check white features
             white_in_range = all(0 <= f < max_features for f in white_feat)
@@ -926,19 +924,19 @@ def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 6,
         if depth_remaining == 0 or board.is_game_over():
             return 1
 
-        nodes = 0
+        nodes1 = 0
         legal_moves = list(board.legal_moves)[:5]  # Limit branching
 
         for move in legal_moves:
             evaluator_push(evaluator, board, move)
             path.append(move)
 
-            nodes += search_recursive(depth_remaining - 1, path)
+            nodes1 += search_recursive(depth_remaining - 1, path)
 
             path.pop()
             evaluator_pop(evaluator, board)
 
-        return nodes
+        return nodes1
 
     print(f"\nRunning {num_iterations} search iterations...")
 
@@ -1068,7 +1066,7 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
 # Run All Tests
 # =============================================================================
 
-def run_all_tests(nn_type: str, model_path: str, positions_size: int = 100):
+def run_all_tests(nn_type: str, model_path: str):
     """Run all non-interactive tests and report results."""
     print("\n" + "=" * 70)
     print(f"RUNNING ALL {nn_type} TESTS")
@@ -1079,7 +1077,7 @@ def run_all_tests(nn_type: str, model_path: str, positions_size: int = 100):
     # Run each test
     tests = [
         ("Accumulator Correctness", lambda: test_accumulator_correctness(nn_type, model_path)),
-        ("Feature Extraction", lambda: test_feature_extraction(nn_type, model_path)),
+        ("Feature Extraction", lambda: test_feature_extraction(nn_type)),
         ("Edge Cases", lambda: test_edge_cases(nn_type, model_path)),
         ("Reset Consistency", lambda: test_reset_consistency(nn_type, model_path)),
         ("Deep Search Simulation", lambda: test_deep_search_simulation(nn_type, model_path, depth=4, num_iterations=20, tolerance=1e-3)),
@@ -1256,7 +1254,7 @@ Examples:
         test_eval_accuracy(nn_type, model_path, args.positions)
 
     elif test_type == "Feature-Extraction":
-        test_feature_extraction(nn_type, model_path)
+        test_feature_extraction(nn_type)
 
     elif test_type == "Symmetry":
         test_symmetry(nn_type, model_path)
@@ -1274,7 +1272,7 @@ Examples:
         test_random_games(nn_type, model_path, args.num_games, args.max_moves)
 
     elif test_type == "All":
-        success = run_all_tests(nn_type, model_path, args.positions)
+        success = run_all_tests(nn_type, model_path)
         sys.exit(0 if success else 1)
 
 

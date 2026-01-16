@@ -189,9 +189,8 @@ class DNNEvaluator(NNEvaluator):
                 return -MAX_SCORE + board.ply()
             return 0.0
 
-        features = self.updater.get_features(board)
         perspective = board.turn == chess.WHITE
-        return self.inference.evaluate_incremental(features, perspective)
+        return self.inference.evaluate_incremental(perspective)
 
     def evaluate_full(self, board: chess.Board) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
@@ -233,37 +232,6 @@ class NNUEEvaluator(NNEvaluator):
             "Use update_pre_push() before board.push() and "
             "update_post_push() after board.push() instead."
         )
-
-    # def push_with_board_after(self, board_before_push: chess.Board, move: chess.Move,
-    #                           board_after_push: chess.Board):
-    #     """
-    #     Update internal state for a move when caller already has both board states.
-    #     More efficient than push() as it avoids temporary push/pop.
-    #
-    #     Args:
-    #         board_before_push: Board state BEFORE the move
-    #         move: Move being made
-    #         board_after_push: Board state AFTER the move
-    #     """
-    #     # Pre-push phase
-    #     is_white_king_move, is_black_king_move, change_record = \
-    #         self.updater.update_pre_push(board_before_push, move)
-    #
-    #     # Post-push phase
-    #     self.updater.update_post_push(board_after_push, is_white_king_move,
-    #                                   is_black_king_move, change_record)
-    #
-    #     # Update accumulators
-    #     if is_white_king_move or is_black_king_move:
-    #         white_feat, black_feat = self.updater.get_features_unsorted()
-    #         self.inference.refresh_accumulator(white_feat, black_feat)
-    #     else:
-    #         self.inference.update_accumulator(
-    #             change_record['white_added'],
-    #             change_record['white_removed'],
-    #             change_record['black_added'],
-    #             change_record['black_removed']
-    #         )
 
     def update_pre_push(self, board_before_push: chess.Board, move: chess.Move) -> Tuple:
         """
@@ -328,9 +296,8 @@ class NNUEEvaluator(NNEvaluator):
                 return -MAX_SCORE + board.ply()
             return 0.0
 
-        white_feat, black_feat = self.updater.get_features_unsorted()
         stm = board.turn == chess.WHITE
-        return self.inference.evaluate_incremental(white_feat, black_feat, stm)
+        return self.inference.evaluate_incremental(stm)
 
     def evaluate_full(self, board: chess.Board) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
