@@ -1,3 +1,4 @@
+import argparse
 import numpy as np
 import chess.pgn
 import zstandard as zstd
@@ -71,7 +72,7 @@ MODEL_PATH = "model/nnue.pt" if NN_TYPE == "NNUE" else "model/dnn.pt"
 # Dynamic configuration based on nn_type
 
 # Main configuration
-BATCH_SIZE = 8192
+BATCH_SIZE = 8192 * 2
 if platform.system() == "Windows":
     QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512) * 5  # Windows file reading is slow
 else:
@@ -87,11 +88,12 @@ GC_INTERVAL = 1000  # Run garbage collection every N batches
 # Training
 LEARNING_RATE = 0.001
 VALIDATION_SPLIT = 0.05
-STEPS_PER_EPOCH = 1000
+STEPS_PER_EPOCH = int(1000 / 2)
 POSITIONS_PER_EPOCH = BATCH_SIZE * STEPS_PER_EPOCH
 EPOCHS = 500
 EARLY_STOPPING_PATIENCE = 10
 LR_PATIENCE = 3
+
 
 # PGN
 
@@ -291,17 +293,25 @@ def worker_process(
         batch_size: int = BATCH_SIZE,
         max_positions_per_game: int = MAX_PLYS_PER_GAME,
         opening_plys: int = OPENING_PLYS,
-        shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE  # 2000  # Reduced from 10000 for faster startup
+        shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE,  # 2000  # Reduced from 10000 for faster startup
+        skip_games_count: int = 0  # Number of games to skip on first file loop (for resume)
 ):
     """
     Worker process that streams positions from a PGN file.
     Loops through the file repeatedly until stop_event is set.
     Uses a shuffle buffer to randomize position order.
+
+    Args:
+        skip_games_count: Number of games to skip at the start of the first file loop.
+                          Used when resuming training to avoid reprocessing games.
     """
-    print(f"Worker {worker_id} starting: {os.path.basename(pgn_file)}")
+    print(f"Worker {worker_id} starting: {os.path.basename(pgn_file)}" +
+          (f" (skipping first {skip_games_count} games)" if skip_games_count > 0 else ""))
 
     position_buffer = []
     gc_counter = 0
+    is_first_file_loop = True  # Track if this is the first pass through the file
+    games_skipped = 0  # Counter for skipped games
 
     # Create local game processor with validation (no shared state)
     game_processor = ProcessGameWithValidation(NN_TYPE)
@@ -322,7 +332,15 @@ def worker_process(
                             # EOF reached, increment loop counter and break to restart
                             # with stats.worker_file_loops[worker_id].get_lock(): # Rare event so lock is fine
                             stats.worker_file_loops[worker_id].value += 1
+                            is_first_file_loop = False  # No longer first loop after completing file
                             break
+
+                        # Skip games on the first file loop if resuming
+                        if is_first_file_loop and games_skipped < skip_games_count:
+                            games_skipped += 1
+                            if games_skipped % 10000 == 0:
+                                print(f"Worker {worker_id}: Skipped {games_skipped}/{skip_games_count} games...")
+                            continue
 
                         # Process game with periodic validation (using local counter)
                         positions = game_processor(game, max_positions_per_game, opening_plys)
@@ -421,15 +439,23 @@ class EarlyStopping:
     """Early stopping to stop training when validation loss doesn't improve"""
 
     def __init__(self, patience: int = EARLY_STOPPING_PATIENCE, min_delta: float = 0.0, verbose: bool = True,
-                 checkpoint_path: str = MODEL_PATH):
+                 checkpoint_path: str = MODEL_PATH, initial_best_loss: float = None, initial_best_epoch: int = 0):
         self.patience = patience
         self.min_delta = min_delta
         self.verbose = verbose
         self.checkpoint_path = checkpoint_path
         self.counter = 0
-        self.best_loss = None
+        self.best_loss = initial_best_loss
         self.early_stop = False
-        self.best_epoch = 0
+        self.best_epoch = initial_best_epoch
+        # Store references for checkpoint saving
+        self.optimizer = None
+        self.scheduler = None
+
+    def set_optimizer_scheduler(self, optimizer, scheduler):
+        """Set optimizer and scheduler references for checkpoint saving"""
+        self.optimizer = optimizer
+        self.scheduler = scheduler
 
     def __call__(self, val_loss: float, model: nn.Module, epoch: int) -> bool:
         if self.best_loss is None:
@@ -470,7 +496,15 @@ class EarlyStopping:
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'val_loss': val_loss,
+            'best_loss': self.best_loss,
+            'nn_type': NN_TYPE,
         }
+        # Save optimizer state if available
+        if self.optimizer is not None:
+            checkpoint['optimizer_state_dict'] = self.optimizer.state_dict()
+        # Save scheduler state if available
+        if self.scheduler is not None:
+            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
         torch.save(checkpoint, self.checkpoint_path)
 
     def restore_best_model(self, model: nn.Module):
@@ -492,7 +526,8 @@ class ParallelTrainer:
             validation_split: float = VALIDATION_SPLIT,
             queue_size: int = QUEUE_MAX_SIZE,
             device: str = 'cpu',
-            seed: int = 42
+            seed: int = 42,
+            skip_games_count: int = 0  # Games to skip per file when resuming
     ):
         self.pgn_dir = pgn_dir
         self.model = model.to(device)
@@ -501,6 +536,7 @@ class ParallelTrainer:
         self.queue_size = queue_size
         self.device = device
         self.seed = seed
+        self.skip_games_count = skip_games_count
 
         # Find all PGN files
         self.pgn_files = sorted(glob.glob(os.path.join(pgn_dir, "*.pgn.zst")))
@@ -538,13 +574,16 @@ class ParallelTrainer:
             p = Process(
                 target=worker_process,
                 args=(i, pgn_file, self.data_queue, self.stop_event, self.stats,
-                      self.batch_size)
+                      self.batch_size),
+                kwargs={'skip_games_count': self.skip_games_count}
             )
             p.daemon = True
             p.start()
             self.workers.append(p)
 
-        print(f"Started {len(self.workers)} worker processes")
+        print(f"Started {len(self.workers)} worker processes" +
+              (f" (skipping first {self.skip_games_count} games per file)"
+               if self.skip_games_count > 0 else ""))
 
     def stop_workers(self):
         """Stop all worker processes and clean up"""
@@ -769,13 +808,36 @@ class ParallelTrainer:
             early_stopping_patience: int = EARLY_STOPPING_PATIENCE,
             checkpoint_path: str = MODEL_PATH,
             lr_scheduler: str = "plateau",  # "plateau", "step", or "none"
-            grad_clip: float = 1.0  # Gradient clipping max norm
+            grad_clip: float = 1.0,  # Gradient clipping max norm
+            resume_checkpoint: dict = None  # Checkpoint dict for resuming
     ) -> Dict[str, List[float]]:
-        """Main training loop with LR scheduling and gradient clipping"""
+        """Main training loop with LR scheduling and gradient clipping
 
-        # Update learning rate
-        for param_group in self.optimizer.param_groups:
-            param_group['lr'] = lr
+        Args:
+            epochs: Total number of epochs to train
+            lr: Learning rate (ignored if resuming with saved optimizer state)
+            positions_per_epoch: Number of positions per epoch
+            early_stopping_patience: Patience for early stopping
+            checkpoint_path: Path to save checkpoints
+            lr_scheduler: Type of learning rate scheduler
+            grad_clip: Gradient clipping max norm
+            resume_checkpoint: Optional checkpoint dict to resume from
+        """
+        start_epoch = 0
+        initial_best_loss = None
+        initial_best_epoch = 0
+
+        # Handle resuming from checkpoint
+        if resume_checkpoint is not None:
+            start_epoch = resume_checkpoint.get('epoch', 0)
+            initial_best_loss = resume_checkpoint.get('best_loss', resume_checkpoint.get('val_loss'))
+            initial_best_epoch = resume_checkpoint.get('epoch', 0)
+            print(f"Resuming from epoch {start_epoch} with best loss {initial_best_loss:.6f}")
+
+        # Update learning rate (only if not resuming with optimizer state)
+        if resume_checkpoint is None or 'optimizer_state_dict' not in resume_checkpoint:
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = lr
 
         # Setup learning rate scheduler
         scheduler = None
@@ -789,19 +851,32 @@ class ParallelTrainer:
                 self.optimizer, step_size=100, gamma=0.5
             )
 
+        # Load optimizer and scheduler state if resuming
+        if resume_checkpoint is not None:
+            if 'optimizer_state_dict' in resume_checkpoint:
+                self.optimizer.load_state_dict(resume_checkpoint['optimizer_state_dict'])
+                print("Restored optimizer state from checkpoint")
+            if 'scheduler_state_dict' in resume_checkpoint and scheduler is not None:
+                scheduler.load_state_dict(resume_checkpoint['scheduler_state_dict'])
+                print("Restored scheduler state from checkpoint")
+
         self.grad_clip = grad_clip
 
         early_stopping = EarlyStopping(
             patience=early_stopping_patience,
-            checkpoint_path=checkpoint_path
+            checkpoint_path=checkpoint_path,
+            initial_best_loss=initial_best_loss,
+            initial_best_epoch=initial_best_epoch
         )
+        # Provide optimizer and scheduler to early stopping for checkpoint saving
+        early_stopping.set_optimizer_scheduler(self.optimizer, scheduler)
 
         history = {'train_loss': [], 'val_loss': [], 'lr': []}
 
         self.start_workers()
 
         try:
-            for epoch in range(epochs):
+            for epoch in range(start_epoch, epochs):
                 current_lr = self.optimizer.param_groups[0]['lr']
                 print(f"\n{'=' * 60}")
                 print(f"Epoch {epoch + 1}/{epochs} (LR: {current_lr:.6f})")
@@ -999,7 +1074,26 @@ if __name__ == "__main__":
     # Required for multiprocessing on some platforms
     mp.set_start_method('spawn', force=True)
 
-    pgn_dir = "./pgn"
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description=f'{NN_TYPE} Training with Parallel Data Loading')
+    parser.add_argument('--resume', type=str, default=None, metavar='PATH',
+                        help='Path to checkpoint .pt file to resume training from')
+    parser.add_argument('--skip-games', type=int, default=0, metavar='N',
+                        help='When resuming, skip the first N games from each pgn.zst file (default: 0)')
+    parser.add_argument('--pgn-dir', type=str, default='./pgn',
+                        help='Directory containing .pgn.zst files (default: ./pgn)')
+    parser.add_argument('--epochs', type=int, default=EPOCHS,
+                        help=f'Total number of epochs to train (default: {EPOCHS})')
+    parser.add_argument('--lr', type=float, default=LEARNING_RATE,
+                        help=f'Learning rate (default: {LEARNING_RATE})')
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
+                        help=f'Batch size (default: {BATCH_SIZE})')
+    parser.add_argument('--checkpoint', type=str, default=MODEL_PATH,
+                        help=f'Path to save checkpoints (default: {MODEL_PATH})')
+    args = parser.parse_args()
+
+    pgn_dir = args.pgn_dir
+    resume_checkpoint = None
 
     print("=" * 60)
     print(f"{NN_TYPE} Training with Parallel Data Loading")
@@ -1016,17 +1110,48 @@ if __name__ == "__main__":
     else:  # DNN
         model = DNNNetwork(DNN_INPUT_SIZE)
 
+    # Load checkpoint if resuming
+    if args.resume:
+        if not os.path.exists(args.resume):
+            print(f"Error: Checkpoint file not found: {args.resume}")
+            exit(1)
+
+        print(f"\nLoading checkpoint from: {args.resume}")
+        resume_checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
+
+        # Verify network type matches
+        checkpoint_nn_type = resume_checkpoint.get('nn_type', NN_TYPE)
+        if checkpoint_nn_type != NN_TYPE:
+            print(f"Error: Checkpoint network type ({checkpoint_nn_type}) does not match "
+                  f"current configuration ({NN_TYPE})")
+            exit(1)
+
+        # Load model weights
+        model.load_state_dict(resume_checkpoint['model_state_dict'])
+        print(f"Loaded model from epoch {resume_checkpoint['epoch']} "
+              f"with validation loss: {resume_checkpoint['val_loss']:.6f}")
+
+        if 'best_loss' in resume_checkpoint:
+            print(f"Best validation loss so far: {resume_checkpoint['best_loss']:.6f}")
+
     print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
+
+    # Determine skip_games_count (only used when resuming)
+    skip_games_count = args.skip_games if args.resume else 0
+    if skip_games_count > 0 and not args.resume:
+        print("Warning: --skip-games has no effect without --resume")
+        skip_games_count = 0
 
     # Create trainer
     trainer = ParallelTrainer(
         pgn_dir=pgn_dir,
         model=model,
-        batch_size=BATCH_SIZE,
+        batch_size=args.batch_size,
         validation_split=VALIDATION_SPLIT,
         queue_size=QUEUE_MAX_SIZE,
         device=device,
-        seed=42
+        seed=42,
+        skip_games_count=skip_games_count
     )
 
     # Train with improved parameters
@@ -1035,13 +1160,14 @@ if __name__ == "__main__":
     # - Longer patience since LR will be reduced
     # - Gradient clipping for stability
     history = trainer.train(
-        epochs=EPOCHS,
-        lr=LEARNING_RATE,
+        epochs=args.epochs,
+        lr=args.lr,
         positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
         early_stopping_patience=EARLY_STOPPING_PATIENCE,  # More patience since LR scheduler helps
-        checkpoint_path=MODEL_PATH,
+        checkpoint_path=args.checkpoint,
         lr_scheduler="plateau",  # Reduce LR on plateau
-        grad_clip=1.0  # Gradient clipping
+        grad_clip=1.0,  # Gradient clipping
+        resume_checkpoint=resume_checkpoint
     )
 
     # Summary
@@ -1294,6 +1420,3 @@ class ProcessGameWithValidation:
                     positions.append((feat, score_tanh))
 
         return positions
-
-
-

@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
 
 import chess
-from nn_inference import NNUEInference
 from nn_inference import NNUEIncrementalUpdater
-from nn_inference import DNNInference, DNNIncrementalUpdater
+from nn_inference import DNNIncrementalUpdater
 from nn_inference import load_model, MAX_SCORE
 
 class NNEvaluator(ABC):

@@ -42,6 +42,19 @@ Larger DNN netwrok Archtectures are better in positional play than smaller archi
 ## Project Description
 nn_train.py - Trains the NNUE or DNN network.
 
+## ELO Evolution
+Python code, material based position evaluation - 1811
+DNN (768-1024-256-64-1) based position evaluation - 1882
+DNN, accumulator to enable incremental evaluation - 
+NNUE (2x40960-2x256-32-32-1) - 
+Parameter turning -
+SEE and Futility pruning and Razoring to frontier nodes -
+Replacing Python chess.Baord with C++ -
+Cython for critical methods -
+Parameter turning -
+Pondering during opponent's turn -
+Multiprocessing (6 cores)
+
 ## Future work
 768 input parameters. Stockfish NNE style overparmterization of input and use accumelators instead of matrix multiple at the first hidden layer.
 Cython for improving performance

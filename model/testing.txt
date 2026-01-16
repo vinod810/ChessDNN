@@ -23,13 +23,8 @@ DNN1024 - +181.7 +/-113.2
 DNN1024 vs. DNN512
 DNN512 +6.9 ELO / 50 games
 
-NNUE Training
-All positions - Epoch 37 - Validation Loss: 0.049032
-Quiet positions only, 20-10 plys epoch 10 - val loss 5.5
-Quiet positions only, 200-10 plys epoch ??  - val loss ??
-
 NN Training
-DNN - Val , Test - (mse), (mae)
+DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 91-epochs
 NNUE -
 
 
