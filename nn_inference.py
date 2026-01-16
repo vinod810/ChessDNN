@@ -529,7 +529,6 @@ class DNNNetwork(nn.Module):
 
 
 class DNNIncrementalUpdater:
-    # TODO remove board from class. Pass before/after_push/pop_board
     """
     Incrementally maintains DNN features for both perspectives with efficient undo support.
     Uses a history stack to track changes, enabling O(k) pop() operations where k = pieces affected.
