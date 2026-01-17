@@ -9,7 +9,7 @@ dependencies:
   # Core dependencies
   - numpy
   - torch
-  - tensorflow>=2.10
+  - pybind11
 
   # Chess library
   - python-chess

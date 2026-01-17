@@ -28,4 +28,8 @@ NN Training
 DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 91-epochs
 NNUE -
 
+Version, WAC, ELO (stockfish), nps
+python-chess, 217/300, 1954
+C++ chess library, 218/300
+
 
