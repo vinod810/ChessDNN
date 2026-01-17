@@ -849,6 +849,16 @@ class NNUEInference:
         return self.evaluate_full(white_feat, black_feat, board.turn == chess.WHITE)
 
 
+# OPTIMIZATION 1: Replace np.clip with in-place operation
+@staticmethod
+def clipped_relu(x):
+    # Current: return np.clip(x, 0, 1)  # Creates new array
+    # Better:
+    np.maximum(x, 0, out=x)
+    np.minimum(x, 1, out=x)
+    return x
+
+
 class DNNInference:
     """Numpy-based inference engine for DNN with incremental evaluation support"""
 

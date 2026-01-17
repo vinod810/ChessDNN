@@ -10,7 +10,7 @@ from typing import List, Tuple, Optional
 import chess
 import chess.polyglot
 
-from cached_board import CachedBoard
+from cached_board import CachedBoard, move_to_int
 from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
 from nn_inference import MAX_SCORE
 
@@ -310,9 +310,8 @@ def move_score(board: CachedBoard, move: chess.Move, depth: int) -> int:
         if victim_type and attacker_type:
             score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
 
-    score += history_heuristic.get(
-        (move.from_square, move.to_square), 0
-    )
+    # OPTIMIZATION: Use integer key instead of tuple for faster hashing
+    score += history_heuristic.get(move_to_int(move), 0)
 
     # Use cached gives_check
     if board.gives_check_cached(move):
@@ -702,7 +701,8 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
                 if killer_moves[depth][0] != move:
                     killer_moves[depth][1] = killer_moves[depth][0]
                     killer_moves[depth][0] = move
-                key_hist = (move.from_square, move.to_square)
+                # OPTIMIZATION: Use integer key for faster hashing
+                key_hist = move_to_int(move)
                 history_heuristic[key_hist] = min(
                     history_heuristic.get(key_hist, 0) + depth * depth, 10_000
                 )
