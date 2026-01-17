@@ -9,7 +9,7 @@ from typing import List, Tuple, Optional
 import chess
 import chess.polyglot
 
-from cached_board import CachedBoard, PIECE_VALUES
+from cached_board import CachedBoard
 from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
 from nn_inference import MAX_SCORE
 
@@ -130,6 +130,15 @@ kpi = {
 game_position_history: dict[int, int] = {}  # zobrist_hash -> count
 
 nn_evaluator: DNNEvaluator | NNUEEvaluator | None = None
+
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0
+}
 
 def clear_game_history():
     """Clear game position history (call on ucinewgame)."""
