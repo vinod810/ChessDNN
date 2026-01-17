@@ -5,9 +5,13 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Integrate with engine.py">
+      <change afterPath="$PROJECT_DIR$/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/oldfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/oldfish.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -61,13 +65,14 @@
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;SHELLCHECK.PATH&quot;: &quot;/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/eapen/Documents/Projects/ChessDNN/nn_train.py&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/eapen/Documents/Projects/ChessDNN&quot;,
     &quot;run.code.analysis.last.selected.profile&quot;: &quot;pProject Default&quot;,
     &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/test" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
@@ -121,14 +126,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00075" summary="print vars">
-      <option name="closed" value="true" />
-      <created>1767550373255</created>
-      <option name="number" value="00075" />
-      <option name="presentableId" value="LOCAL-00075" />
-      <option name="project" value="LOCAL" />
-      <updated>1767550373255</updated>
     </task>
     <task id="LOCAL-00076" summary="Before NNUE">
       <option name="closed" value="true" />
@@ -492,7 +489,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768617337632</updated>
     </task>
-    <option name="localTasksCounter" value="124" />
+    <task id="LOCAL-00124" summary="Integrate with engine.py">
+      <option name="closed" value="true" />
+      <created>1768619532406</created>
+      <option name="number" value="00124" />
+      <option name="presentableId" value="LOCAL-00124" />
+      <option name="project" value="LOCAL" />
+      <updated>1768619532407</updated>
+    </task>
+    <option name="localTasksCounter" value="125" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -539,7 +544,7 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/cached_board.py</url>
-          <line>144</line>
+          <line>146</line>
           <option name="timeStamp" value="2" />
         </line-breakpoint>
       </breakpoints>

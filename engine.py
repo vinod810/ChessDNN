@@ -3,6 +3,7 @@ import os
 import random
 import re
 import time
+import traceback
 from collections import namedtuple
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -15,7 +16,25 @@ from nn_inference import MAX_SCORE
 
 CURR_DIR = Path(__file__).resolve().parent
 
-# # TODO Also support
+# TODO
+# Phase 1: C++ Board Library (Biggest Win)
+# ├── Create Python bindings for C++ chess library (pybind11)
+# ├── Replace chess.Board internals in CachedBoard
+# ├── Keep all caching logic in Python
+# └── Expected: 3-5x speedup in NPS
+#
+# Phase 2: Cython Search Core (Medium Win)
+# ├── Convert negamax() + quiescence() to Cython
+# ├── Use typed memoryviews and C-level loops
+# ├── Direct C++ board calls (no Python boundary)
+# └── Expected: Additional 2-3x speedup
+#
+# Phase 3: Optional - C++ NN Inference
+# ├── Only if doing Lazy SMP (GIL issues)
+# ├── Or if you want SIMD vectorization
+# └── Expected: 10-30% additional speedup
+#
+# TODO Also support
 # # SEE pruning+20-4
 # # Futility pruning+15-30 Skip hopeless nodes
 # # ## 6. Razoring to frontier nodes, if static eval is way below alpha, drop into quiescence.
@@ -50,14 +69,12 @@ CURR_DIR = Path(__file__).resolve().parent
 # remaining ~20 Elo. This splits the complexity into two manageable steps.
 
 
-
 HOME_DIR = "ChessDNN"
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_DEFAULT_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
-IS_NUMPY_EVAL = True
 IS_BLAS_ENABLED = False
 
 IS_NN_ENABLED = True
@@ -91,13 +108,13 @@ SINGULAR_EXTENSION = 1  # Extra depth
 ESTIMATED_BRANCHING_FACTOR = 2.5  # Typical branching factor after pruning
 TIME_SAFETY_MARGIN = 0.7  # Only start new depth if we estimate having 70%+ of needed time
 
-
 if not IS_BLAS_ENABLED:
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
     os.environ["OMP_NUM_THREADS"] = "1"
 
 MODEL_PATH = str(DNN_MODEL_FILEPATH if NN_TYPE == "DNN" else NNUE_MODEL_FILEPATH)
+
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -783,7 +800,7 @@ def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
             san_moves.append(f"{move_num}...")
 
         san_moves.append(temp_board.san(move))
-        push_move(temp_board, move, nn_evaluator)
+        temp_board.push(move)  # Only push to board, don't modify nn_evaluator
 
     return " ".join(san_moves)
 
@@ -1046,7 +1063,7 @@ def pv_from_san_string(fen: str, san_string: str) -> list[chess.Move]:
     for ply, san in enumerate(tokenize_san_string(san_string)):
         move = board.parse_san(san)
         pv.append(move)
-        push_move(board, move, nn_evaluator)
+        board.push(move)  # Only push to board, don't modify nn_evaluator
     return pv
 
 
@@ -1081,13 +1098,14 @@ def print_vars(var_names, module_name, local_scope=None):
 
 def dump_parameters():
     print_vars([
-        "IS_NUMPY_EVAL",
-        "DNN_MODEL_FILEPATH",
-        "IS_DNN_ENABLED",
-        "QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL",
-        "QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL",
-        "DELTA_MAX_DNN_EVAL",
-        "STAND_PAT_MAX_DNN_EVAL",
+        "IS_NN_ENABLED",
+        "NN_TYPE",
+        "MODEL_PATH",
+        "IS_BLAS_ENABLED",
+        "QS_DEPTH_MAX_NN_EVAL_UNCONDITIONAL",
+        "QS_DEPTH_MAX_NN_EVAL_CONDITIONAL",
+        "DELTA_MAX_NN_EVAL",
+        "STAND_PAT_MAX_NN_EVAL",
         "QS_TT_SUPPORTED",
         "DELTA_PRUNING_QS_MIN_DEPTH",
         "DELTA_PRUNING_MARGIN",
@@ -1163,6 +1181,7 @@ def main():
             print("Resuming...\n")
         except Exception as e:
             print("Error:", e)
+            traceback.print_exc()
             continue
 
 

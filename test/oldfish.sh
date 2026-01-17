@@ -13,7 +13,7 @@ CMD_DIR="$(dirname "$0")"
 OUTFILE_TEMPLATE="/tmp/fileXXXXXX.pgn"
 OUTFILE=$(mktemp --dry-run "$OUTFILE_TEMPLATE")
 echo "PGN File: $OUTFILE"
-python -m test.print_config
+python -c 'from engine import dump_parameters; dump_parameters()'
 
 ~/Temp/cutechess/build/cutechess-cli \
 -engine cmd="$CMD_DIR"/../uci_engine.sh name="$1"  \
