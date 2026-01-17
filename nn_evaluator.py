@@ -82,10 +82,22 @@ class NNEvaluator(ABC):
 
     def evaluate_centipawns(self, board: chess.Board) -> int:
         """Evaluate using incremental method and convert to centipawns."""
+        # Handle game over positions - mate scores are already in centipawn scale
+        if board.is_game_over():
+            if board.is_checkmate():
+                return int(-MAX_SCORE + board.ply())
+            return 0
+        # Normal positions: convert raw NN output to centipawns
         return int(self.evaluate(board) * 400)
 
     def evaluate_full_centipawns(self, board: chess.Board) -> int:
         """Evaluate using full method and convert to centipawns."""
+        # Handle game over positions - mate scores are already in centipawn scale
+        if board.is_game_over():
+            if board.is_checkmate():
+                return int(-MAX_SCORE + board.ply())
+            return 0
+        # Normal positions: convert raw NN output to centipawns
         return int(self.evaluate_full(board) * 400)
 
     def validate_incremental(self, board: chess.Board, tolerance: float = 1e-5) -> bool:

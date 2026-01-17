@@ -232,6 +232,8 @@ def evaluate_dnn(board: CachedBoard) -> int:
     kpi['dnn_evals'] += 1
     score = dnn_eval(board, DNN_MODEL_FILEPATH)
 
+    # TODO Occasionally do a full evaluation.
+
     dnn_eval_cache[key] = score
     return score
 

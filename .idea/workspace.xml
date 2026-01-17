@@ -4,12 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="nn_train.py added 7 more tests">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="code clean up">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -123,22 +121,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00071" summary="prepare-data.py all moves">
-      <option name="closed" value="true" />
-      <created>1767539972054</created>
-      <option name="number" value="00071" />
-      <option name="presentableId" value="LOCAL-00071" />
-      <option name="project" value="LOCAL" />
-      <updated>1767539972054</updated>
-    </task>
-    <task id="LOCAL-00072" summary="total=300, passed=187, success-rate=62.33%">
-      <option name="closed" value="true" />
-      <created>1767544500718</created>
-      <option name="number" value="00072" />
-      <option name="presentableId" value="LOCAL-00072" />
-      <option name="project" value="LOCAL" />
-      <updated>1767544500718</updated>
     </task>
     <task id="LOCAL-00073" summary="More caching total=300, passed=189, success-rate=63.0%">
       <option name="closed" value="true" />
@@ -494,7 +476,23 @@
       <option name="project" value="LOCAL" />
       <updated>1768582078730</updated>
     </task>
-    <option name="localTasksCounter" value="120" />
+    <task id="LOCAL-00120" summary="code clean up">
+      <option name="closed" value="true" />
+      <created>1768607331067</created>
+      <option name="number" value="00120" />
+      <option name="presentableId" value="LOCAL-00120" />
+      <option name="project" value="LOCAL" />
+      <updated>1768607331068</updated>
+    </task>
+    <task id="LOCAL-00121" summary="code clean up">
+      <option name="closed" value="true" />
+      <created>1768607390763</created>
+      <option name="number" value="00121" />
+      <option name="presentableId" value="LOCAL-00121" />
+      <option name="project" value="LOCAL" />
+      <updated>1768607390763</updated>
+    </task>
+    <option name="localTasksCounter" value="122" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -509,7 +507,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="multiple workers" />
     <MESSAGE value="multiple workers and increment feature evaluation" />
     <MESSAGE value="Training 40 epochs loss 0.5" />
     <MESSAGE value=" 10 epochs val loss 0.56, max_games=20" />
@@ -534,7 +531,8 @@
     <MESSAGE value="Stockfish data for training" />
     <MESSAGE value="nn_train.py optimized for speed" />
     <MESSAGE value="nn_train.py added 7 more tests" />
-    <option name="LAST_COMMIT_MESSAGE" value="nn_train.py added 7 more tests" />
+    <MESSAGE value="code clean up" />
+    <option name="LAST_COMMIT_MESSAGE" value="code clean up" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
