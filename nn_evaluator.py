@@ -20,9 +20,15 @@ class NNEvaluator(ABC):
     - Incremental: Efficient for search (push/pop updates accumulators)
     - Full: Standalone evaluation without incremental state
 
-    Usage pattern:
-        evaluator.push(board, move)  # Update evaluator state
-        board.push(move)             # Caller updates board
+    Recommended usage pattern (unified interface):
+        evaluator.push_with_board(board, move)  # Updates both evaluator AND board
+        score = evaluator.evaluate(board)
+        board.pop()                             # Caller restores board
+        evaluator.pop()                         # Restore evaluator state
+
+    Alternative usage pattern (separate updates):
+        evaluator.push(board, move)  # Update evaluator state only
+        board.push(move)             # Caller updates board separately
         score = evaluator.evaluate(board)
         board.pop()                  # Caller restores board
         evaluator.pop()              # Restore evaluator state
@@ -47,6 +53,32 @@ class NNEvaluator(ABC):
         Restore internal state to before the last push. Does NOT modify the board.
 
         Note: Caller must call board.pop() separately (typically before this).
+        """
+        pass
+
+    def push_with_board(self, board: chess.Board, move: chess.Move):
+        """
+        Update both evaluator state and board for a move.
+        This is the preferred method for making moves during search.
+
+        Subclasses may override this for more efficient implementations
+        (e.g., NNUE's two-phase update).
+
+        Args:
+            board: Board state BEFORE the move (will be modified)
+            move: Move being made
+        """
+        self.push(board, move)
+        board.push(move)
+
+    @abstractmethod
+    def reset(self, board: chess.Board):
+        """
+        Reset incremental state to match a new board position.
+        Use when jumping to a position not reachable via push/pop.
+
+        Args:
+            board: New board position to sync evaluator state with
         """
         pass
 
@@ -237,13 +269,62 @@ class NNUEEvaluator(NNEvaluator):
 
     def push(self, board_before_push: chess.Board, move: chess.Move):
         """
-        Not supported for NNUE. Use update_pre_push() and update_post_push() instead.
+        Update internal state for a move. Does NOT modify the board.
+
+        Note: For NNUE, this is less efficient than push_with_board() because
+        it requires creating a temporary board copy. Use push_with_board() when possible.
         """
-        raise NotImplementedError(
-            "NNUEEvaluator.push() is not supported. "
-            "Use update_pre_push() before board.push() and "
-            "update_post_push() after board.push() instead."
-        )
+        # Get pre-push data
+        is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board_before_push, move)
+
+        # Create temporary board to get post-push state
+        temp_board = board_before_push.copy()
+        temp_board.push(move)
+
+        # Complete the update
+        self.updater.update_post_push(temp_board, is_white_king_move, is_black_king_move, change_record)
+
+        # Update accumulators
+        if is_white_king_move or is_black_king_move:
+            white_feat, black_feat = self.updater.get_features_unsorted()
+            self.inference.refresh_accumulator(white_feat, black_feat)
+        else:
+            self.inference.update_accumulator(
+                change_record['white_added'],
+                change_record['white_removed'],
+                change_record['black_added'],
+                change_record['black_removed']
+            )
+
+    def push_with_board(self, board: chess.Board, move: chess.Move):
+        """
+        Efficiently update both evaluator state and board for a move.
+        Uses NNUE's two-phase update for optimal performance.
+
+        Args:
+            board: Board state BEFORE the move (will be modified)
+            move: Move being made
+        """
+        # Phase 1: Before board.push()
+        is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board, move)
+
+        # Push the board
+        board.push(move)
+
+        # Phase 2: After board.push()
+        self.updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
+
+        # Update accumulators
+        if is_white_king_move or is_black_king_move:
+            white_feat, black_feat = self.updater.get_features_unsorted()
+            self.inference.refresh_accumulator(white_feat, black_feat)
+        else:
+            self.inference.update_accumulator(
+                change_record['white_added'],
+                change_record['white_removed'],
+                change_record['black_added'],
+                change_record['black_removed']
+            )
 
     def update_pre_push(self, board_before_push: chess.Board, move: chess.Move) -> Tuple:
         """
@@ -334,7 +415,7 @@ class NNUEEvaluator(NNEvaluator):
 # Example Usage
 # =============================================================================
 """
-# Basic usage with incremental evaluation (board managed by caller):
+# Recommended: Use push_with_board() for unified interface (works for both DNN and NNUE):
 
 board = chess.Board()
 evaluator = NNEvaluator.create(board, "NNUE", "model/nnue.pt")
@@ -343,10 +424,9 @@ evaluator = NNEvaluator.create(board, "NNUE", "model/nnue.pt")
 score = evaluator.evaluate_centipawns(board)
 print(f"Initial: {score} cp")
 
-# Make moves - evaluator and board updated separately
+# Make moves using unified interface (updates both evaluator and board)
 move = chess.Move.from_uci("e2e4")
-evaluator.push(board, move)  # Update evaluator state (board unchanged)
-board.push(move)             # Update board state
+evaluator.push_with_board(board, move)  # Updates evaluator AND board
 score = evaluator.evaluate_centipawns(board)
 print(f"After e4: {score} cp")
 
@@ -357,22 +437,13 @@ score = evaluator.evaluate_centipawns(board)
 print(f"After undo: {score} cp")
 
 
-# Two-phase push for NNUE (most efficient when caller manages board):
+# Alternative: Separate push() and board.push() (if you need to do something between):
 
-evaluator = NNUEEvaluator(board, "model/nnue.pt")
-move = chess.Move.from_uci("e2e4")
-
-# Phase 1: Before board.push()
-pre_push_data = evaluator.update_pre_push(board, move)
-
-# Caller pushes the board
-board.push(move)
-
-# Phase 2: After board.push()
-evaluator.update_post_push(board, *pre_push_data)
-
-# Now evaluate
+move = chess.Move.from_uci("d2d4")
+evaluator.push(board, move)  # Update evaluator state only
+board.push(move)             # Update board state separately
 score = evaluator.evaluate_centipawns(board)
+print(f"After d4: {score} cp")
 
 
 # Full evaluation (standalone, no incremental state needed):
@@ -406,9 +477,8 @@ class ChessEngine:
         best_pv = []
 
         for move in board.legal_moves:
-            # Update evaluator state, then board
-            self.evaluator.push(board, move)
-            board.push(move)
+            # Unified push - updates both evaluator and board
+            self.evaluator.push_with_board(board, move)
 
             score, pv = self._negamax(board, depth - 1, -beta, -alpha)
             score = -score

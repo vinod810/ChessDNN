@@ -9,9 +9,9 @@ from typing import List, Tuple, Optional
 import chess
 import chess.polyglot
 
-from cached_board import CachedBoard
-from defunc_dnn_eval import INF  # Returns  evaluation using a DNN model.
-from defunc_prepare_data import PIECE_VALUES
+from cached_board import CachedBoard, PIECE_VALUES
+from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
+from nn_inference import MAX_SCORE
 
 CURR_DIR = Path(__file__).resolve().parent
 
@@ -60,12 +60,15 @@ MAX_TABLE_SIZE = 200_000
 IS_NUMPY_EVAL = True
 IS_BLAS_ENABLED = False
 
-DNN_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'large.keras'
-IS_DNN_ENABLED = True
-QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL = 1
-QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL = 10
-DELTA_MAX_DNN_EVAL = 50  # Score difference, below which will trigger a DNN evaluation
-STAND_PAT_MAX_DNN_EVAL = 200
+IS_NN_ENABLED = True
+NN_TYPE = "DNN"
+DNN_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'dnn.pt'
+NNUE_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'nnue.pt'
+
+QS_DEPTH_MAX_NN_EVAL_UNCONDITIONAL = 1
+QS_DEPTH_MAX_NN_EVAL_CONDITIONAL = 10
+DELTA_MAX_NN_EVAL = 50  # Score difference, below which will trigger a NN evaluation
+STAND_PAT_MAX_NN_EVAL = 200
 
 QS_TT_SUPPORTED = True
 DELTA_PRUNING_QS_MIN_DEPTH = 6
@@ -88,16 +91,13 @@ SINGULAR_EXTENSION = 1  # Extra depth
 ESTIMATED_BRANCHING_FACTOR = 2.5  # Typical branching factor after pruning
 TIME_SAFETY_MARGIN = 0.7  # Only start new depth if we estimate having 70%+ of needed time
 
-if IS_NUMPY_EVAL:
-    from defunc_dnn_eval_numpy import dnn_eval  # Returns positional evaluation using a DNN model.
-else:
-    from defunc_dnn_eval import dnn_eval
 
 if not IS_BLAS_ENABLED:
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
     os.environ["OMP_NUM_THREADS"] = "1"
 
+MODEL_PATH = str(DNN_MODEL_FILEPATH if NN_TYPE == "DNN" else NNUE_MODEL_FILEPATH)
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -129,6 +129,7 @@ kpi = {
 # Track positions seen in the current game (cleared on ucinewgame)
 game_position_history: dict[int, int] = {}  # zobrist_hash -> count
 
+nn_evaluator: DNNEvaluator | NNUEEvaluator | None = None
 
 def clear_game_history():
     """Clear game position history (call on ucinewgame)."""
@@ -206,7 +207,7 @@ def evaluate_material(board: CachedBoard) -> int:
     if board.is_game_over():
         if board.is_checkmate():
             # Side to move is checkmated - worst possible score
-            return -INF + board.ply()
+            return -MAX_SCORE + board.ply()
         else:
             return 0  # Stalemate or other draw
 
@@ -219,7 +220,7 @@ def evaluate_dnn(board: CachedBoard) -> int:
     if board.is_game_over():
         if board.is_checkmate():
             # Side to move is checkmated - worst possible score
-            return -INF + board.ply()
+            return -MAX_SCORE + board.ply()
         else:
             return 0  # Stalemate or other draw
 
@@ -230,11 +231,15 @@ def evaluate_dnn(board: CachedBoard) -> int:
 
     # assert (board.is_quiet_position())
     kpi['dnn_evals'] += 1
-    score = dnn_eval(board, DNN_MODEL_FILEPATH)
-
-    # TODO Occasionally do a full evaluation.
-
+    score = nn_evaluator.evaluate_centipawns(board)
     dnn_eval_cache[key] = score
+
+    # Occasionally do a full evaluation to rule out any drift errors.
+    if kpi['dnn_evals'] % 10_000 == 0:
+        full_score = nn_evaluator.evaluate_full_centipawns(board)
+        if abs(full_score - score) > 10:
+            print(f"Warning: incremental({score}))and full({full_score}) evaluation differ, {board.fen()}!")
+
     return score
 
 
@@ -371,25 +376,25 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     # -------- Check for game over --------
     if board.is_game_over():
         if board.is_checkmate():
-            return -INF + board.ply(), []
+            return -MAX_SCORE + board.ply(), []
         return 0, []  # Stalemate or draw
 
     is_check = board.is_check()
     best_pv = []
-    best_score = -INF  # ✅ Track best score separately
+    best_score = -MAX_SCORE  # ✅ Track best score separately
 
     # -------- Stand pat (not valid when in check) --------
     if not is_check:
         is_dnn_eval = False
-        if IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL_UNCONDITIONAL:
+        if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL_UNCONDITIONAL:
             stand_pat = evaluate_dnn(board)
             is_dnn_eval = True
         else:
             stand_pat = evaluate_material(board)
 
-        if (not is_dnn_eval and IS_DNN_ENABLED and q_depth <= QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL
-                and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
-                and abs(stand_pat - beta) < DELTA_MAX_DNN_EVAL):
+        if (not is_dnn_eval and IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
+                and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
+                and abs(stand_pat - beta) < DELTA_MAX_NN_EVAL):
             stand_pat = evaluate_dnn(board)
             is_dnn_eval = True
 
@@ -401,10 +406,10 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
             return stand_pat, []  # ✅ Return stand_pat (it's the best we can do)
 
-        if (not is_dnn_eval and IS_DNN_ENABLED
-                and q_depth <= QS_DEPTH_MAX_DNN_EVAL_CONDITIONAL
-                and abs(stand_pat) < STAND_PAT_MAX_DNN_EVAL
-                and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_DNN_EVAL)):
+        if (not is_dnn_eval and IS_NN_ENABLED
+                and q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
+                and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
+                and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_NN_EVAL)):
             stand_pat = evaluate_dnn(board)
 
         best_score = stand_pat  # ✅ Initialize best_score with stand_pat
@@ -438,10 +443,11 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
                     if best_score + gain + DELTA_PRUNING_MARGIN < alpha:  # ✅ Use best_score
                         continue
 
-        board.push(move)
+        push_move(board, move, nn_evaluator)
         score, child_pv = quiescence(board, -beta, -alpha, q_depth + 1)
         score = -score
         board.pop()
+        nn_evaluator.pop()
         moves_searched += 1
 
         if score > best_score:  # ✅ Track best_score
@@ -459,7 +465,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
     # -------- No moves searched when in check = checkmate --------
     if is_check and moves_searched == 0:
-        return -INF + board.ply(), []
+        return -MAX_SCORE + board.ply(), []
 
     if QS_TT_SUPPORTED:
         qs_transposition_table[key] = best_score  # ✅ Store best_score
@@ -511,7 +517,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
     best_move = None
     best_pv = []
-    max_eval = -INF
+    max_eval = -MAX_SCORE
 
     # -------- TT Lookup --------
     entry = transposition_table.get(key)
@@ -542,10 +548,11 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
             # and not on_expected_pv  # Don't null-move on PV
             and board.has_non_pawn_material()
             and board.occupied.bit_count() > 6):
-        board.push(chess.Move.null())
+        push_move(board, chess.Move.null(), nn_evaluator)
         score, _ = negamax(board, depth - 1 - NULL_MOVE_REDUCTION, -beta, -beta + 1, allow_singular=False)
         score = -score
         board.pop()
+        nn_evaluator.pop()
         if score >= beta:
             return beta, []
 
@@ -566,7 +573,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
         # Only search a few top moves, not all
         move_count = 0
-        highest_score = -INF
+        highest_score = -MAX_SCORE
 
         for move in ordered_moves(board, depth, tt_move=tt_move):
             if move == tt_move:
@@ -574,10 +581,11 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
             if move_count >= 3:  # Limit moves checked
                 break
 
-            board.push(move)
+            push_move(board, move, nn_evaluator)
             score, _ = negamax(board, reduced_depth, -reduced_beta - 1, -reduced_beta, allow_singular=False)
             score = -score
             board.pop()
+            nn_evaluator.pop()
             move_count += 1
 
             highest_score = max(highest_score, score)
@@ -592,7 +600,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     moves = ordered_moves(board, depth, tt_move=tt_move)
     if not moves:
         if in_check:
-            return -INF + board.ply(), []
+            return -MAX_SCORE + board.ply(), []
         return 0, []
 
     for move_index, move in enumerate(moves):
@@ -600,7 +608,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
         is_capture = board.is_capture_cached(move)
         gives_check = board.gives_check_cached(move)
 
-        board.push(move)
+        push_move(board, move, nn_evaluator)
         child_in_check = board.is_check()
 
         # -------- Extensions --------
@@ -652,6 +660,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
                 score = -score
 
         board.pop()
+        nn_evaluator.pop()
 
         if score > max_eval:
             max_eval = score
@@ -720,11 +729,12 @@ def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
             break
 
         pv.append(move)
-        board.push(move)
+        push_move(board, move, nn_evaluator)
 
     # Restore board state
     for _ in range(len(pv)):
         board.pop()
+        nn_evaluator.pop()
 
     return pv
 
@@ -764,7 +774,7 @@ def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
             san_moves.append(f"{move_num}...")
 
         san_moves.append(temp_board.san(move))
-        temp_board.push(move)
+        push_move(temp_board, move, nn_evaluator)
 
     return " ".join(san_moves)
 
@@ -795,6 +805,12 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
     board = CachedBoard(fen)
+    global  nn_evaluator
+    if NN_TYPE == "DNN":
+        nn_evaluator = DNNEvaluator.create(board, NN_TYPE, MODEL_PATH)
+    else:
+        nn_evaluator = NNUEEvaluator.create(board, NN_TYPE, MODEL_PATH)
+
     best_move = None
     best_score = 0
     best_pv = []
@@ -837,14 +853,14 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
             while not search_aborted:
                 # First iteration should use full window
                 if depth == 1:
-                    alpha = -INF
-                    beta = INF
+                    alpha = -MAX_SCORE
+                    beta = MAX_SCORE
                 else:
                     alpha = best_score - window
                     beta = best_score + window
                 alpha_orig = alpha
 
-                current_best_score = -INF
+                current_best_score = -MAX_SCORE
                 current_best_move = None
                 current_best_pv = []
 
@@ -859,7 +875,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                         search_aborted = True
                         break
 
-                    board.push(move)
+                    push_move(board, move, nn_evaluator)
 
                     if is_draw_by_repetition(board):
                         score = get_draw_score(board)
@@ -877,6 +893,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                                 score = -score
 
                     board.pop()
+                    nn_evaluator.pop()
 
                     if score > current_best_score:
                         current_best_score = score
@@ -918,9 +935,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
 
                 # -------- FALLBACK: full window search --------
                 if retries >= MAX_AW_RETRIES:
-                    alpha = -INF
-                    beta = INF
-                    current_best_score = -INF
+                    alpha = -MAX_SCORE
+                    beta = MAX_SCORE
+                    current_best_score = -MAX_SCORE
 
                     for move in ordered_moves(board, depth, pv_move, tt_move):
                         check_time()
@@ -933,10 +950,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
                             search_aborted = True
                             break
 
-                        board.push(move)
+                        push_move(board, move, nn_evaluator)
                         score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
                         score = -score
                         board.pop()
+                        nn_evaluator.pop()
 
                         if score > current_best_score:
                             current_best_score = score
@@ -996,6 +1014,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     return best_move, best_score, best_pv
 
 
+def push_move(board: CachedBoard, move, evaluator: NNEvaluator):
+    """Push move on both evaluator and board using the unified interface."""
+    evaluator.push_with_board(board, move)
+
+
 def tokenize_san_string(san_string: str) -> list[str]:
     tokens = san_string.strip().split()
     san_moves = []
@@ -1014,7 +1037,7 @@ def pv_from_san_string(fen: str, san_string: str) -> list[chess.Move]:
     for ply, san in enumerate(tokenize_san_string(san_string)):
         move = board.parse_san(san)
         pv.append(move)
-        board.push(move)
+        push_move(board, move, nn_evaluator)
     return pv
 
 
@@ -1136,6 +1159,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
