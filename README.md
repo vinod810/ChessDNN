@@ -48,7 +48,6 @@ DNN (768-1024-256-64-1) based position evaluation - 1882
 DNN, accumulator to enable incremental evaluation - 1954
 Replacing Python chess.Baord with C++ - 2070
 Cython for critical methods - 2251
-SEE and Futility pruning and Razoring -
 NNUE (2x40960-2x256-32-32-1) - 
 Parameter turning -
 Pondering during opponent's turn -

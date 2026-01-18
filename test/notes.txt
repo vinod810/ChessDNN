@@ -37,5 +37,5 @@ Support SEE pruning, Futility pruning, and Razoring, , ,
 SEE pruning, Futility pruning, and Razoring
 True, True, True - 213
 True, False, False - 225
-False, True, False - 232
+False, True, False - 238
 False, False, True - 206

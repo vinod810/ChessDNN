@@ -86,7 +86,7 @@ SEE_PRUNING_MAX_DEPTH = 6  # Only apply SEE pruning at shallow depths
 
 # Futility Pruning - skip quiet moves when position is hopeless
 FUTILITY_PRUNING_ENABLED = True
-FUTILITY_MARGIN = [0, 100, 200, 300]  # Margins by depth (depth 1, 2, 3)
+FUTILITY_MARGIN = [0, 150, 300, 450]  # Margins by depth (depth 1, 2, 3)
 FUTILITY_MAX_DEPTH = 3  # Only apply at depth <= 3
 
 # Razoring - drop into quiescence when far below alpha
