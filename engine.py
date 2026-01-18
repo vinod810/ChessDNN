@@ -242,7 +242,7 @@ def evaluate_material(board: CachedBoard) -> int:
     return score
 
 
-def evaluate_dnn(board: CachedBoard) -> int:
+def evaluate_nn(board: CachedBoard) -> int:
     if board.is_game_over():
         if board.is_checkmate():
             # Side to move is checkmated - worst possible score
@@ -412,7 +412,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     if not is_check:
         is_dnn_eval = False
         if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL_UNCONDITIONAL:
-            stand_pat = evaluate_dnn(board)
+            stand_pat = evaluate_nn(board)
             is_dnn_eval = True
         else:
             stand_pat = evaluate_material(board)
@@ -420,7 +420,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         if (not is_dnn_eval and IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
                 and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
                 and abs(stand_pat - beta) < DELTA_MAX_NN_EVAL):
-            stand_pat = evaluate_dnn(board)
+            stand_pat = evaluate_nn(board)
             is_dnn_eval = True
 
         if stand_pat >= beta:
@@ -435,7 +435,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
                 and q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
                 and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
                 and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_NN_EVAL)):
-            stand_pat = evaluate_dnn(board)
+            stand_pat = evaluate_nn(board)
 
         best_score = stand_pat  # ✅ Initialize best_score with stand_pat
         if stand_pat > alpha:
@@ -468,11 +468,19 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
                     if best_score + gain + DELTA_PRUNING_MARGIN < alpha:  # ✅ Use best_score
                         continue
 
-        push_move(board, move, nn_evaluator)
+        should_update_nn = q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
+        if should_update_nn:
+            push_move(board, move, nn_evaluator)
+        else:
+            board.push(move)  # Only push board, not evaluator
+
         score, child_pv = quiescence(board, -beta, -alpha, q_depth + 1)
         score = -score
         board.pop()
-        nn_evaluator.pop()
+
+        if should_update_nn:
+            nn_evaluator.pop()
+
         moves_searched += 1
 
         if score > best_score:  # ✅ Track best_score

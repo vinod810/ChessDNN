@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 
 import chess
+
+from cached_board import CachedBoard
 from nn_inference import NNUEIncrementalUpdater
 from nn_inference import DNNIncrementalUpdater
 from nn_inference import load_model, MAX_SCORE
@@ -56,7 +58,7 @@ class NNEvaluator(ABC):
         """
         pass
 
-    def push_with_board(self, board: chess.Board, move: chess.Move):
+    def push_with_board(self, board: CachedBoard, move: chess.Move):
         """
         Update both evaluator state and board for a move.
         This is the preferred method for making moves during search.
@@ -67,6 +69,8 @@ class NNEvaluator(ABC):
         Args:
             board: Board state BEFORE the move (will be modified)
             move: Move being made
+            :param move:
+            :param board:
         """
         self.push(board, move)
         board.push(move)
@@ -296,7 +300,7 @@ class NNUEEvaluator(NNEvaluator):
                 change_record['black_removed']
             )
 
-    def push_with_board(self, board: chess.Board, move: chess.Move):
+    def push_with_board(self, board: CachedBoard, move: chess.Move):
         """
         Efficiently update both evaluator state and board for a move.
         Uses NNUE's two-phase update for optimal performance.
@@ -304,6 +308,8 @@ class NNUEEvaluator(NNEvaluator):
         Args:
             board: Board state BEFORE the move (will be modified)
             move: Move being made
+            :param move:
+            :param board:
         """
         # Phase 1: Before board.push()
         is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board, move)

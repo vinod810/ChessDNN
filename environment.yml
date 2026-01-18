@@ -5,6 +5,7 @@ channels:
 dependencies:
   # Python version
   - python>=3.10
+  - cython
 
   # Core dependencies
   - numpy
