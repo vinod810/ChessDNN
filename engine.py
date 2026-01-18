@@ -15,12 +15,6 @@ from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
 from nn_inference import MAX_SCORE
 
 CURR_DIR = Path(__file__).resolve().parent
-#
-# TODO Also support
-# # SEE pruning+20-4
-# # Futility pruning+15-30 Skip hopeless nodes
-# # ## 6. Razoring to frontier nodes, if static eval is way below alpha, drop into quiescence.
-# This could be +50-100 Elo but requires more experimentation.
 
 # TODO Try NNE style accumulators of HalfKP
 
@@ -64,8 +58,8 @@ NN_TYPE = "DNN"
 DNN_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'dnn.pt'
 NNUE_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'nnue.pt'
 
-QS_DEPTH_MAX_NN_EVAL_UNCONDITIONAL = 1
-QS_DEPTH_MAX_NN_EVAL_CONDITIONAL = 10
+QS_DEPTH_MIN_NN_EVAL = 1
+QS_DEPTH_MAX_NN_EVAL = 10
 DELTA_MAX_NN_EVAL = 50  # Score difference, below which will trigger a NN evaluation
 STAND_PAT_MAX_NN_EVAL = 200
 
@@ -85,6 +79,20 @@ NULL_MOVE_MIN_DEPTH = 4
 
 SINGULAR_MARGIN = 130  # Score difference in centipawns to trigger singular extension
 SINGULAR_EXTENSION = 1  # Extra depth
+
+# SEE Pruning - prune losing captures at low depths
+SEE_PRUNING_ENABLED = False
+SEE_PRUNING_MAX_DEPTH = 6  # Only apply SEE pruning at shallow depths
+
+# Futility Pruning - skip quiet moves when position is hopeless
+FUTILITY_PRUNING_ENABLED = True
+FUTILITY_MARGIN = [0, 100, 200, 300]  # Margins by depth (depth 1, 2, 3)
+FUTILITY_MAX_DEPTH = 3  # Only apply at depth <= 3
+
+# Razoring - drop into quiescence when far below alpha
+RAZORING_ENABLED = False
+RAZORING_MARGIN = [0, 125, 250]  # Margins by depth (depth 1, 2)
+RAZORING_MAX_DEPTH = 2  # Only apply at depth <= 2
 
 # Time management
 ESTIMATED_BRANCHING_FACTOR = 2.5  # Typical branching factor after pruning
@@ -123,6 +131,9 @@ kpi = {
     "qs_tt_hits": 0,
     "dec_hits": 0,  # DNN evaluation cache hits
     "q_depth": 0,
+    "see_prunes": 0,  # SEE pruning
+    "futility_prunes": 0,  # Futility pruning
+    "razoring_prunes": 0,  # Razoring
 }
 
 # Track positions seen in the current game (cleared on ucinewgame)
@@ -138,6 +149,7 @@ PIECE_VALUES = {
     chess.QUEEN: 900,
     chess.KING: 0
 }
+
 
 def clear_game_history():
     """Clear game position history (call on ucinewgame)."""
@@ -302,6 +314,65 @@ def move_score(board: CachedBoard, move: chess.Move, depth: int) -> int:
     return score
 
 
+def see(board: CachedBoard, move: chess.Move) -> int:
+    """
+    Simplified Static Exchange Evaluation (SEE).
+
+    Returns the estimated material gain/loss in centipawns from the capture.
+    Positive = likely winning exchange, Negative = likely losing exchange.
+
+    This is a simplified SEE based on MVV-LVA (Most Valuable Victim - Least Valuable Attacker).
+    For a full SEE, we would need to simulate the entire exchange sequence.
+    """
+    # Get victim and attacker types from cache
+    victim_type = board.get_victim_type(move)
+    attacker_type = board.get_attacker_type(move)
+
+    if victim_type is None:
+        # Not a capture - check for promotion gain
+        if move.promotion:
+            return PIECE_VALUES.get(move.promotion, 0) - PIECE_VALUES[chess.PAWN]
+        return 0
+
+    victim_value = PIECE_VALUES.get(victim_type, 0)
+    attacker_value = PIECE_VALUES.get(attacker_type, 0)
+
+    # Handle promotions - add the promotion piece value minus pawn value
+    promotion_gain = 0
+    if move.promotion:
+        promotion_gain = PIECE_VALUES.get(move.promotion, 0) - PIECE_VALUES[chess.PAWN]
+
+    # Simple MVV-LVA approximation:
+    # If we capture something worth more than our piece, it's likely good.
+    # If we capture something worth less with a valuable piece, it might be bad
+    # unless we're protected (which we don't check in this simplified version).
+
+    # Basic heuristic: assume the opponent can recapture with a pawn if our piece
+    # lands on a square that could be defended. This is conservative.
+
+    # Simple approximation:
+    # - If victim >= attacker: good trade (we win at least the difference)
+    # - If victim < attacker: potentially bad (we might lose our piece)
+
+    if victim_value >= attacker_value:
+        # Winning or equal trade
+        return victim_value - attacker_value + promotion_gain
+    else:
+        # We're capturing with a more valuable piece
+        # Pessimistic assumption: we might lose our attacker
+        # But we do win the victim first
+        # Net: victim - attacker (likely negative)
+        return victim_value - attacker_value + promotion_gain
+
+
+def see_ge(board: CachedBoard, move: chess.Move, threshold: int = 0) -> bool:
+    """
+    Check if SEE value of move is >= threshold.
+    Used for SEE pruning - returns True if the capture is at least break-even.
+    """
+    return see(board, move) >= threshold
+
+
 def ordered_moves(board: CachedBoard, depth: int, pv_move=None, tt_move=None):
     """
     Return legal moves ordered by expected quality.
@@ -393,13 +464,13 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     # -------- Stand pat (not valid when in check) --------
     if not is_check:
         is_dnn_eval = False
-        if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL_UNCONDITIONAL:
+        if IS_NN_ENABLED and q_depth <= QS_DEPTH_MIN_NN_EVAL:
             stand_pat = evaluate_nn(board)
             is_dnn_eval = True
         else:
             stand_pat = evaluate_material(board)
 
-        if (not is_dnn_eval and IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
+        if (not is_dnn_eval and IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
                 and abs(stand_pat - beta) < DELTA_MAX_NN_EVAL):
             stand_pat = evaluate_nn(board)
@@ -414,7 +485,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             return stand_pat, []  # ✅ Return stand_pat (it's the best we can do)
 
         if (not is_dnn_eval and IS_NN_ENABLED
-                and q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
+                and q_depth <= QS_DEPTH_MAX_NN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
                 and (stand_pat > alpha or abs(stand_pat - alpha) < DELTA_MAX_NN_EVAL)):
             stand_pat = evaluate_nn(board)
@@ -450,7 +521,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
                     if best_score + gain + DELTA_PRUNING_MARGIN < alpha:  # ✅ Use best_score
                         continue
 
-        should_update_nn = q_depth <= QS_DEPTH_MAX_NN_EVAL_CONDITIONAL
+        should_update_nn = q_depth <= QS_DEPTH_MAX_NN_EVAL
         if should_update_nn:
             push_move(board, move, nn_evaluator)
         else:
@@ -557,6 +628,24 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
     in_check = board.is_check()
 
+    # -------- Razoring (drop into quiescence when far below alpha) --------
+    # At low depths, if we're way below alpha, just go to quiescence
+    if (RAZORING_ENABLED
+            and not in_check
+            and depth <= RAZORING_MAX_DEPTH
+            and depth >= 1):
+        # Get static eval (use material for speed)
+        static_eval = evaluate_material(board)
+        margin = RAZORING_MARGIN[depth] if depth < len(RAZORING_MARGIN) else RAZORING_MARGIN[-1]
+
+        if static_eval + margin <= alpha:
+            # Position is so bad that even with a margin, we're below alpha
+            # Drop into quiescence to see if tactics can save us
+            qs_score, qs_pv = quiescence(board, alpha, beta, 1)
+            if qs_score <= alpha:
+                kpi['razoring_prunes'] += 1
+                return qs_score, qs_pv
+
     # -------- Null Move Pruning (not when in check or in zugzwang-prone positions) --------
     if (depth >= NULL_MOVE_MIN_DEPTH
             and not in_check
@@ -618,10 +707,55 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
             return -MAX_SCORE + board.ply(), []
         return 0, []
 
+    # -------- Futility Pruning Setup --------
+    # Compute static eval once for futility pruning (only needed at low depths)
+    futility_pruning_applicable = False
+    static_eval = None
+    if (FUTILITY_PRUNING_ENABLED
+            and not in_check
+            and depth <= FUTILITY_MAX_DEPTH
+            and depth >= 1
+            and abs(alpha) < MAX_SCORE - 100):  # Not near mate scores
+        static_eval = evaluate_material(board)
+        futility_margin = FUTILITY_MARGIN[depth] if depth < len(FUTILITY_MARGIN) else FUTILITY_MARGIN[-1]
+        # If static eval + margin is still below alpha, futility pruning may apply
+        if static_eval + futility_margin <= alpha:
+            futility_pruning_applicable = True
+
     for move_index, move in enumerate(moves):
         # Use cached move info
         is_capture = board.is_capture_cached(move)
         gives_check = board.gives_check_cached(move)
+
+        # -------- SEE Pruning (prune losing captures at low depths) --------
+        if (SEE_PRUNING_ENABLED
+                and depth <= SEE_PRUNING_MAX_DEPTH
+                and is_capture
+                and not in_check
+                and move != tt_move
+                and move_index > 0):  # Don't prune the first move
+            # Prune captures with negative SEE at low depths
+            # Threshold increases with depth (more aggressive pruning at lower depths)
+            see_threshold = -20 * depth  # e.g., -20 at depth 1, -40 at depth 2, etc.
+            if not see_ge(board, move, see_threshold):
+                kpi['see_prunes'] += 1
+                continue  # Skip this losing capture
+
+        # -------- Futility Pruning (skip quiet moves when position is hopeless) --------
+        if (futility_pruning_applicable
+                and not is_capture
+                and not gives_check
+                and move != tt_move
+                and move_index > 0):  # Don't prune the first move or TT move
+            # Check if the move is not a killer move
+            is_killer = False
+            if depth is not None and 0 <= depth < len(killer_moves):
+                is_killer = (move == killer_moves[depth][0] or move == killer_moves[depth][1])
+
+            if not is_killer:
+                # This quiet move is unlikely to raise the score above alpha
+                kpi['futility_prunes'] += 1
+                continue
 
         push_move(board, move, nn_evaluator)
         child_in_check = board.is_check()
@@ -821,7 +955,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
     board = CachedBoard(fen)
-    global  nn_evaluator
+    global nn_evaluator
     if NN_TYPE == "DNN":
         nn_evaluator = DNNEvaluator.create(board, NN_TYPE, MODEL_PATH)
     else:
@@ -1004,7 +1138,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
             if depth_completed and best_pv:
                 elapsed = time.perf_counter() - TimeControl.start_time
                 nps = int(kpi['nodes'] / elapsed) if elapsed > 0 else 0
-                print(f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {' '.join(m.uci() for m in best_pv)}", flush=True)
+                print(
+                    f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {' '.join(m.uci() for m in best_pv)}",
+                    flush=True)
 
             # Early break to speed up testing
             if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
@@ -1092,8 +1228,8 @@ def dump_parameters():
         "NN_TYPE",
         "MODEL_PATH",
         "IS_BLAS_ENABLED",
-        "QS_DEPTH_MAX_NN_EVAL_UNCONDITIONAL",
-        "QS_DEPTH_MAX_NN_EVAL_CONDITIONAL",
+        "QS_DEPTH_MIN_NN_EVAL",
+        "QS_DEPTH_MAX_NN_EVAL",
         "DELTA_MAX_NN_EVAL",
         "STAND_PAT_MAX_NN_EVAL",
         "QS_TT_SUPPORTED",
@@ -1108,6 +1244,14 @@ def dump_parameters():
         "NULL_MOVE_MIN_DEPTH",
         "SINGULAR_MARGIN",
         "SINGULAR_EXTENSION",
+        "SEE_PRUNING_ENABLED",
+        "SEE_PRUNING_MAX_DEPTH",
+        "FUTILITY_PRUNING_ENABLED",
+        "FUTILITY_MARGIN",
+        "FUTILITY_MAX_DEPTH",
+        "RAZORING_ENABLED",
+        "RAZORING_MARGIN",
+        "RAZORING_MAX_DEPTH",
         "ESTIMATED_BRANCHING_FACTOR",
         "TIME_SAFETY_MARGIN"], "engine")
 

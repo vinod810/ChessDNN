@@ -32,5 +32,10 @@ Version, WAC, ELO (stockfish), nps
 python-chess, 217/300, 1954, NA
 C++ chess library, 218/300, 2070, 1077
 Cython, 231/300, 2251, 2595
+Support SEE pruning, Futility pruning, and Razoring, , ,
 
-
+SEE pruning, Futility pruning, and Razoring
+True, True, True - 213
+True, False, False - 225
+False, True, False - 232
+False, False, True - 206
