@@ -60,7 +60,7 @@ NNUE_HIDDEN_SIZE = 256
 DNN_INPUT_SIZE = 768  # 64 squares * 6 piece types * 2 colors
 DNN_HIDDEN_LAYERS = [1024, 256, 32]
 OUTPUT_SIZE = 1
-TANH_SCALE = 400
+TANH_SCALE = 410 # Stockfish value
 MAX_SCORE = 10_000
 
 # Pre-computed lookup tables

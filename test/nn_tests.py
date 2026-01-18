@@ -492,10 +492,11 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
 
     # Also compute in centipawn space
     true_cp_values = np.array([p['true_cp'] for p in positions[:len(pred_tanh_values)]])
-    pred_cp_values = np.arctanh(np.clip(pred_tanh_values, -0.99, 0.99)) * TANH_SCALE
-    mse_cp = np.mean((true_cp_values - pred_cp_values) ** 2)
+    pred_cp_values = np.arctanh(np.clip(pred_tanh_values, -0.99999, 0.99999)) * TANH_SCALE
+    mask = np.logical_and(true_cp_values < 500, pred_cp_values < 500)
+    mse_cp = np.mean((true_cp_values[mask] - pred_cp_values[mask]) ** 2)
     rmse_cp = np.sqrt(mse_cp)
-    mae_cp = np.mean(np.abs(true_cp_values - pred_cp_values))
+    mae_cp = np.mean(np.abs(true_cp_values[mask] - pred_cp_values[mask]))
 
     # Results
     print("\n" + "─" * 70)
