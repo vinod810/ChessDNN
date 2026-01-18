@@ -72,7 +72,7 @@ pip install pybind11
 ### Option 1: Using the Build Script (Recommended)
 
 ```bash
-cd chess_cpp_integration
+cd cpp_board
 ./build.sh
 ```
 

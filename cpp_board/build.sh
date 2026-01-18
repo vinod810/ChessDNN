@@ -115,10 +115,11 @@ if python3 -c "import chess_cpp; print(f'chess_cpp module loaded successfully')"
     echo -e "${GREEN}Build successful!${NC}"
     echo ""
     echo "The chess_cpp module has been built and is ready to use."
-    echo "To use it in your chess engine:"
-    echo "  1. Copy chess_cpp*.so to your engine directory"
-    echo "  2. Copy cached_board.py to your engine directory (replacing the old one)"
-    echo "  3. Run your engine - it will automatically use the C++ backend"
+    #echo "To use it in your chess engine:"
+    echo "Moving chess_cpp*.so to your engine directory"
+    mv chess_cpp*.so ../
+    # echo "  2. Copy cached_board.py to your engine directory (replacing the old one)"
+    #echo "  2. Run your engine - it will automatically use the C++ backend"
 else
     echo_error "Build verification failed"
     exit 1

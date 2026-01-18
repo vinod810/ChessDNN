@@ -4,11 +4,21 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Cython">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="nn_tests to support lates nn_inference">
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/bindings.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/bindings.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/chess_wrapper.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/chess_wrapper.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/chess_wrapper.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/chess_wrapper.hpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/polyglot_zobrist.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/polyglot_zobrist.hpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/setup.py" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/setup.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chess_cpp_integration/test_chess_cpp.py" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/test_cpp_board.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_ops_fast.c" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/test/testing.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/testing.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -126,14 +136,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00080" summary="uci resign, node, nps">
-      <option name="closed" value="true" />
-      <created>1767652554261</created>
-      <option name="number" value="00080" />
-      <option name="presentableId" value="LOCAL-00080" />
-      <option name="project" value="LOCAL" />
-      <updated>1767652554262</updated>
     </task>
     <task id="LOCAL-00081" summary="halfkp.py">
       <option name="closed" value="true" />
@@ -497,7 +499,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768698985776</updated>
     </task>
-    <option name="localTasksCounter" value="129" />
+    <task id="LOCAL-00129" summary="nn_tests to support lates nn_inference">
+      <option name="closed" value="true" />
+      <created>1768744314655</created>
+      <option name="number" value="00129" />
+      <option name="presentableId" value="LOCAL-00129" />
+      <option name="project" value="LOCAL" />
+      <updated>1768744314660</updated>
+    </task>
+    <option name="localTasksCounter" value="130" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -512,7 +522,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="DNN, 70M positions, val=0.063" />
     <MESSAGE value="nn_eval.py" />
     <MESSAGE value="nn_tests.py - Accumulator correctness" />
     <MESSAGE value="nn_tests.py - true vs predicated MSE" />
@@ -537,7 +546,8 @@
     <MESSAGE value="C++ chess library" />
     <MESSAGE value="Optimizing nn_inference" />
     <MESSAGE value="Cython" />
-    <option name="LAST_COMMIT_MESSAGE" value="Cython" />
+    <MESSAGE value="nn_tests to support lates nn_inference" />
+    <option name="LAST_COMMIT_MESSAGE" value="nn_tests to support lates nn_inference" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

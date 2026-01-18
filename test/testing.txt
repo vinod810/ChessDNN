@@ -31,6 +31,6 @@ NNUE -
 Version, WAC, ELO (stockfish), nps
 python-chess, 217/300, 1954, NA
 C++ chess library, 218/300, 2070, 1077
-Cython, 231/300, , 2595
+Cython, 231/300, 2251, 2595
 
 

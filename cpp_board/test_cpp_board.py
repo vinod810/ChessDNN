@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-test_chess_cpp.py - Test suite for chess_cpp C++ backend integration
+test_cpp_board.py - Test suite for chess_cpp C++ backend integration
 
-Run with: python3 test_chess_cpp.py
+Run with: python3 test_cpp_board.py
 """
 
 import sys

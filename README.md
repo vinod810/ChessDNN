@@ -46,14 +46,25 @@ nn_train.py - Trains the NNUE or DNN network.
 Python code, material based position evaluation - 1811
 DNN (768-1024-256-64-1) based position evaluation - 1882
 DNN, accumulator to enable incremental evaluation - 1954
+Replacing Python chess.Baord with C++ - 2070
+Cython for critical methods - 2251
+SEE and Futility pruning and Razoring to frontier nodes -
 NNUE (2x40960-2x256-32-32-1) - 
 Parameter turning -
-SEE and Futility pruning and Razoring to frontier nodes -
-Replacing Python chess.Baord with C++ -
-Cython for critical methods -
 Parameter turning -
 Pondering during opponent's turn -
 Multiprocessing (6 cores)
+
+## Files Included
+
+| File | Description |
+|------|-------------|
+| `nn_inference.py` | Phase 2 optimized NN inference (uses Cython when available) |
+| `cached_board.py` | Phase 2 optimized board wrapper (inlined cache access) |
+| `engine.py` | Engine with integer move keys for history heuristic |
+| `nn_ops_fast.pyx` | Cython source for accelerated NN operations |
+| `nn_ops_fallback.py` | Pure Python fallback (same interface as Cython) |
+| `setup.py` | Build script for Cython extension |
 
 ## Future work
 768 input parameters. Stockfish NNE style overparmterization of input and use accumelators instead of matrix multiple at the first hidden layer.
