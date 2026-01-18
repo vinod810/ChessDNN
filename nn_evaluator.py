@@ -37,7 +37,7 @@ class NNEvaluator(ABC):
     """
 
     @abstractmethod
-    def push(self, board_before_push: chess.Board, move: chess.Move):
+    def push(self, board_before_push: CachedBoard, move: chess.Move):
         """
         Update internal state for a move. Does NOT modify the board.
 
@@ -76,7 +76,7 @@ class NNEvaluator(ABC):
         board.push(move)
 
     @abstractmethod
-    def reset(self, board: chess.Board):
+    def reset(self, board: CachedBoard):
         """
         Reset incremental state to match a new board position.
         Use when jumping to a position not reachable via push/pop.
@@ -87,7 +87,7 @@ class NNEvaluator(ABC):
         pass
 
     @abstractmethod
-    def evaluate(self, board: chess.Board) -> float:
+    def evaluate(self, board: CachedBoard) -> float:
         """
         Evaluate current position using incremental evaluation.
         Requires proper push/pop state management.
@@ -101,7 +101,7 @@ class NNEvaluator(ABC):
         pass
 
     @abstractmethod
-    def evaluate_full(self, board: chess.Board) -> float:
+    def evaluate_full(self, board: CachedBoard) -> float:
         """
         Evaluate position using full matrix multiplication.
         Does not use or affect incremental state.
@@ -116,7 +116,7 @@ class NNEvaluator(ABC):
         """
         pass
 
-    def evaluate_centipawns(self, board: chess.Board) -> int:
+    def evaluate_centipawns(self, board: CachedBoard) -> int:
         """Evaluate using incremental method and convert to centipawns."""
         # Handle game over positions - mate scores are already in centipawn scale
         if board.is_game_over():
@@ -126,7 +126,7 @@ class NNEvaluator(ABC):
         # Normal positions: convert raw NN output to centipawns
         return int(self.evaluate(board) * 400)
 
-    def evaluate_full_centipawns(self, board: chess.Board) -> int:
+    def evaluate_full_centipawns(self, board: CachedBoard) -> int:
         """Evaluate using full method and convert to centipawns."""
         # Handle game over positions - mate scores are already in centipawn scale
         if board.is_game_over():
@@ -136,7 +136,7 @@ class NNEvaluator(ABC):
         # Normal positions: convert raw NN output to centipawns
         return int(self.evaluate_full(board) * 400)
 
-    def validate_incremental(self, board: chess.Board, tolerance: float = 1e-5) -> bool:
+    def validate_incremental(self, board: CachedBoard, tolerance: float = 1e-5) -> bool:
         """
         Validate that incremental and full evaluation match.
         Useful for debugging.
@@ -149,7 +149,7 @@ class NNEvaluator(ABC):
         return abs(inc_eval - full_eval) < tolerance
 
     @staticmethod
-    def create(board: chess.Board, nn_type: str, model_path: str) -> 'NNEvaluator':
+    def create(board: CachedBoard, nn_type: str, model_path: str) -> 'NNEvaluator':
         """Factory method to create appropriate evaluator."""
         if nn_type.upper() == "DNN":
             return DNNEvaluator(board, model_path)
@@ -159,7 +159,7 @@ class NNEvaluator(ABC):
             raise ValueError(f"Unknown NN type: {nn_type}")
 
     @staticmethod
-    def evaluate_position(board: chess.Board, nn_type: str, model_path: str) -> float:
+    def evaluate_position(board: CachedBoard, nn_type: str, model_path: str) -> float:
         """
         Convenience method for one-off position evaluation.
         Does not create incremental state - just evaluates and returns.
@@ -176,7 +176,7 @@ class NNEvaluator(ABC):
         return inference.evaluate_board(board)
 
     @staticmethod
-    def evaluate_position_centipawns(board: chess.Board, nn_type: str, model_path: str) -> int:
+    def evaluate_position_centipawns(board: CachedBoard, nn_type: str, model_path: str) -> int:
         """
         Convenience method for one-off position evaluation in centipawns.
         """
@@ -186,7 +186,7 @@ class NNEvaluator(ABC):
 class DNNEvaluator(NNEvaluator):
     """DNN-based evaluator with incremental updates."""
 
-    def __init__(self, board: chess.Board, model_path: str):
+    def __init__(self, board: CachedBoard, model_path: str):
         self.inference = load_model(model_path, "DNN")
         self.updater = DNNIncrementalUpdater(board)
 
@@ -195,7 +195,7 @@ class DNNEvaluator(NNEvaluator):
         self.inference.refresh_accumulator(white_feat, True)
         self.inference.refresh_accumulator(black_feat, False)
 
-    def push(self, board_before_push: chess.Board, move: chess.Move):
+    def push(self, board_before_push: CachedBoard, move: chess.Move):
         """Update internal state for a move. Does NOT modify the board."""
         old_white = set(self.updater.white_features)
         old_black = set(self.updater.black_features)
@@ -230,7 +230,7 @@ class DNNEvaluator(NNEvaluator):
             False
         )
 
-    def evaluate(self, board: chess.Board) -> float:
+    def evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators."""
         if board.is_game_over():
             if board.is_checkmate():
@@ -240,7 +240,7 @@ class DNNEvaluator(NNEvaluator):
         perspective = board.turn == chess.WHITE
         return self.inference.evaluate_incremental(perspective)
 
-    def evaluate_full(self, board: chess.Board) -> float:
+    def evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
         if board.is_game_over():
             if board.is_checkmate():
@@ -249,7 +249,7 @@ class DNNEvaluator(NNEvaluator):
 
         return self.inference.evaluate_board(board)
 
-    def reset(self, board: chess.Board):
+    def reset(self, board: CachedBoard):
         """
         Reset incremental state to match a new board position.
         Use when jumping to a position not reachable via push/pop.
@@ -263,7 +263,7 @@ class DNNEvaluator(NNEvaluator):
 class NNUEEvaluator(NNEvaluator):
     """NNUE-based evaluator with incremental updates."""
 
-    def __init__(self, board: chess.Board, model_path: str):
+    def __init__(self, board: CachedBoard, model_path: str):
         self.inference = load_model(model_path, "NNUE")
         self.updater = NNUEIncrementalUpdater(board)
 
@@ -271,7 +271,7 @@ class NNUEEvaluator(NNEvaluator):
         white_feat, black_feat = self.updater.get_features_unsorted()
         self.inference.refresh_accumulator(white_feat, black_feat)
 
-    def push(self, board_before_push: chess.Board, move: chess.Move):
+    def push(self, board_before_push: CachedBoard, move: chess.Move):
         """
         Update internal state for a move. Does NOT modify the board.
 
@@ -332,7 +332,7 @@ class NNUEEvaluator(NNEvaluator):
                 change_record['black_removed']
             )
 
-    def update_pre_push(self, board_before_push: chess.Board, move: chess.Move) -> Tuple:
+    def update_pre_push(self, board_before_push: CachedBoard, move: chess.Move) -> Tuple:
         """
         Phase 1 of two-phase push. Call BEFORE board.push(move).
 
@@ -342,7 +342,7 @@ class NNUEEvaluator(NNEvaluator):
         """
         return self.updater.update_pre_push(board_before_push, move)
 
-    def update_post_push(self, board_after_push: chess.Board,
+    def update_post_push(self, board_after_push: CachedBoard,
                          is_white_king_move: bool,
                          is_black_king_move: bool,
                          change_record: dict):
@@ -388,7 +388,7 @@ class NNUEEvaluator(NNEvaluator):
                 change_record['black_added']
             )
 
-    def evaluate(self, board: chess.Board) -> float:
+    def evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators."""
         if board.is_game_over():
             if board.is_checkmate():
@@ -398,7 +398,7 @@ class NNUEEvaluator(NNEvaluator):
         stm = board.turn == chess.WHITE
         return self.inference.evaluate_incremental(stm)
 
-    def evaluate_full(self, board: chess.Board) -> float:
+    def evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
         if board.is_game_over():
             if board.is_checkmate():
@@ -407,7 +407,7 @@ class NNUEEvaluator(NNEvaluator):
 
         return self.inference.evaluate_board(board)
 
-    def reset(self, board: chess.Board):
+    def reset(self, board: CachedBoard):
         """
         Reset incremental state to match a new board position.
         Use when jumping to a position not reachable via push/pop.
@@ -423,7 +423,7 @@ class NNUEEvaluator(NNEvaluator):
 """
 # Recommended: Use push_with_board() for unified interface (works for both DNN and NNUE):
 
-board = chess.Board()
+board = CachedBoard()
 evaluator = NNEvaluator.create(board, "NNUE", "model/nnue.pt")
 
 # Evaluate initial position
@@ -454,7 +454,7 @@ print(f"After d4: {score} cp")
 
 # Full evaluation (standalone, no incremental state needed):
 
-board = chess.Board("r1bqkbnr/pppppppp/2n5/4P3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2")
+board = CachedBoard("r1bqkbnr/pppppppp/2n5/4P3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2")
 score = NNEvaluator.evaluate_position_centipawns(board, "NNUE", "model/nnue.pt")
 print(f"Position score: {score} cp")
 
@@ -470,12 +470,12 @@ class ChessEngine:
         self.model_path = model_path
         self.evaluator = None
 
-    def search(self, board: chess.Board, depth: int):
+    def search(self, board: CachedBoard, depth: int):
         # Create evaluator for this search
         self.evaluator = NNEvaluator.create(board, self.nn_type, self.model_path)
         return self._negamax(board, depth, -float('inf'), float('inf'))
 
-    def _negamax(self, board: chess.Board, depth: int, alpha: float, beta: float):
+    def _negamax(self, board: CachedBoard, depth: int, alpha: float, beta: float):
         if depth == 0 or board.is_game_over():
             return self.evaluator.evaluate_centipawns(board), []
 

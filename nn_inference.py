@@ -13,6 +13,7 @@ Optimizations:
 import sys
 from typing import List, Tuple, Set, Dict, Optional
 import chess
+from cached_board import CachedBoard
 import numpy as np
 import torch
 from torch import nn as nn
@@ -96,7 +97,7 @@ class NNUEFeatures:
         return int(_FLIPPED_SQUARES[square])
 
     @staticmethod
-    def extract_features(board: chess.Board, perspective: bool) -> List[int]:
+    def extract_features(board: CachedBoard, perspective: bool) -> List[int]:
         features = []
         king_square = board.king(perspective)
         if king_square is None:
@@ -128,7 +129,7 @@ class NNUEFeatures:
         return features
 
     @staticmethod
-    def board_to_features(board: chess.Board) -> Tuple[List[int], List[int]]:
+    def board_to_features(board: CachedBoard) -> Tuple[List[int], List[int]]:
         white_features = NNUEFeatures.extract_features(board, chess.WHITE)
         black_features = NNUEFeatures.extract_features(board, chess.BLACK)
         return white_features, black_features
@@ -143,7 +144,7 @@ class DNNFeatures:
         return type_idx + (0 if is_friendly_piece else 6)
 
     @staticmethod
-    def extract_features(board: chess.Board, perspective: bool) -> List[int]:
+    def extract_features(board: CachedBoard, perspective: bool) -> List[int]:
         features = []
         for square in chess.SQUARES:
             piece = board.piece_at(square)
@@ -162,14 +163,14 @@ class DNNFeatures:
         return features
 
     @staticmethod
-    def board_to_features(board: chess.Board) -> List[int]:
+    def board_to_features(board: CachedBoard) -> List[int]:
         return DNNFeatures.extract_features(board, board.turn == chess.WHITE)
 
 
 class NNUEIncrementalUpdater:
     """Efficiently maintains NNUE features with incremental updates and undo support."""
 
-    def __init__(self, board: chess.Board):
+    def __init__(self, board: CachedBoard):
         self.white_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.WHITE))
         self.black_features: Set[int] = set(NNUEFeatures.extract_features(board, chess.BLACK))
         self.white_king_sq = board.king(chess.WHITE)
@@ -217,7 +218,7 @@ class NNUEIncrementalUpdater:
             self.black_features.add(black_feat)
             change_record['black_added'].add(black_feat)
 
-    def update_pre_push(self, board_before_push: chess.Board, move: chess.Move) -> Tuple[bool, bool, Dict]:
+    def update_pre_push(self, board_before_push: CachedBoard, move: chess.Move) -> Tuple[bool, bool, Dict]:
         """
         Phase 1 of two-phase push. Call BEFORE board.push(move).
 
@@ -306,7 +307,7 @@ class NNUEIncrementalUpdater:
 
         return is_white_king_move, is_black_king_move, change_record
 
-    def update_post_push(self, board_after_push: chess.Board,
+    def update_post_push(self, board_after_push: CachedBoard,
                          is_white_king_move: bool,
                          is_black_king_move: bool,
                          change_record: Dict):
@@ -342,7 +343,7 @@ class NNUEIncrementalUpdater:
         self.history_stack.append(change_record)
         self.last_change = change_record
 
-    def push(self, board_before_push: chess.Board, move: chess.Move):
+    def push(self, board_before_push: CachedBoard, move: chess.Move):
         """
         Single-phase push for backward compatibility.
         Combines update_pre_push and update_post_push.
@@ -386,7 +387,7 @@ class NNUEIncrementalUpdater:
     def get_features_unsorted(self) -> Tuple[Set[int], Set[int]]:
         return self.white_features, self.black_features
 
-    def get_features(self, board: chess.Board) -> List[int]:
+    def get_features(self, board: CachedBoard) -> List[int]:
         if board.turn == chess.WHITE:
             return list(self.white_features)
         return list(self.black_features)
@@ -404,7 +405,7 @@ class NNUEIncrementalUpdater:
 class DNNIncrementalUpdater:
     """Incrementally maintains DNN features for both perspectives with efficient undo support."""
 
-    def __init__(self, board: chess.Board):
+    def __init__(self, board: CachedBoard):
         self.white_features: Set[int] = set(DNNFeatures.extract_features(board, chess.WHITE))
         self.black_features: Set[int] = set(DNNFeatures.extract_features(board, chess.BLACK))
         self.history_stack: List[Dict[str, Set[int]]] = []
@@ -443,7 +444,7 @@ class DNNIncrementalUpdater:
             self.black_features.add(black_feat)
             change_record['black_added'].add(black_feat)
 
-    def push(self, board_before_push: chess.Board, move: chess.Move):
+    def push(self, board_before_push: CachedBoard, move: chess.Move):
         from_sq = move.from_square
         to_sq = move.to_square
 
@@ -672,7 +673,7 @@ class NNUEInference:
             self._max_feature_idx
         )
 
-    def evaluate_board(self, board: chess.Board) -> float:
+    def evaluate_board(self, board: CachedBoard) -> float:
         white_feat, black_feat = NNUEFeatures.board_to_features(board)
         return self.evaluate_full(white_feat, black_feat, board.turn == chess.WHITE)
 
@@ -773,7 +774,7 @@ class DNNInference:
             self._max_feature_idx
         )
 
-    def evaluate_board(self, board: chess.Board) -> float:
+    def evaluate_board(self, board: CachedBoard) -> float:
         feat = DNNFeatures.board_to_features(board)
         return self.evaluate_full(feat)
 

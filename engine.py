@@ -15,24 +15,6 @@ from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
 from nn_inference import MAX_SCORE
 
 CURR_DIR = Path(__file__).resolve().parent
-
-# TODO
-# Phase 1: C++ Board Library (Biggest Win)
-# ├── Create Python bindings for C++ chess library (pybind11)
-# ├── Replace chess.Board internals in CachedBoard
-# ├── Keep all caching logic in Python
-# └── Expected: 3-5x speedup in NPS
-#
-# Phase 2: Cython Search Core (Medium Win)
-# ├── Convert negamax() + quiescence() to Cython
-# ├── Use typed memoryviews and C-level loops
-# ├── Direct C++ board calls (no Python boundary)
-# └── Expected: Additional 2-3x speedup
-#
-# Phase 3: Optional - C++ NN Inference
-# ├── Only if doing Lazy SMP (GIL issues)
-# ├── Or if you want SIMD vectorization
-# └── Expected: 10-30% additional speedup
 #
 # TODO Also support
 # # SEE pruning+20-4
