@@ -4,13 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimizing nn_inference">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Cython">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/environment.yml" beforeDir="false" afterPath="$PROJECT_DIR$/environment.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/testing.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/testing.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -128,14 +126,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00079" summary="Before DNN size evaluation - small-tah-mse - passed=238, success-rate=79.33%">
-      <option name="closed" value="true" />
-      <created>1767632080688</created>
-      <option name="number" value="00079" />
-      <option name="presentableId" value="LOCAL-00079" />
-      <option name="project" value="LOCAL" />
-      <updated>1767632080690</updated>
     </task>
     <task id="LOCAL-00080" summary="uci resign, node, nps">
       <option name="closed" value="true" />
@@ -499,7 +489,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768692980037</updated>
     </task>
-    <option name="localTasksCounter" value="128" />
+    <task id="LOCAL-00128" summary="Cython">
+      <option name="closed" value="true" />
+      <created>1768698985776</created>
+      <option name="number" value="00128" />
+      <option name="presentableId" value="LOCAL-00128" />
+      <option name="project" value="LOCAL" />
+      <updated>1768698985776</updated>
+    </task>
+    <option name="localTasksCounter" value="129" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -514,7 +512,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="train_nn.py" />
     <MESSAGE value="DNN, 70M positions, val=0.063" />
     <MESSAGE value="nn_eval.py" />
     <MESSAGE value="nn_tests.py - Accumulator correctness" />
@@ -539,7 +536,8 @@
     <MESSAGE value="Before C++ chess library" />
     <MESSAGE value="C++ chess library" />
     <MESSAGE value="Optimizing nn_inference" />
-    <option name="LAST_COMMIT_MESSAGE" value="Optimizing nn_inference" />
+    <MESSAGE value="Cython" />
+    <option name="LAST_COMMIT_MESSAGE" value="Cython" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -66,25 +66,19 @@ def output_to_centipawns(output: float) -> float:
 
 def evaluator_push(evaluator: NNEvaluator, board: chess.Board, move: chess.Move):
     """
-    Push a move to the evaluator, handling both DNN and NNUE APIs.
+    Push a move to the evaluator and board using the unified interface.
 
-    DNN uses simple push(), NNUE uses two-phase update_pre_push/update_post_push.
+    This matches the pattern used in engine.py's push_move() function.
+    The push_with_board() method handles both DNN and NNUE internally.
     """
-    if isinstance(evaluator, DNNEvaluator):
-        evaluator.push(board, move)
-        board.push(move)
-    elif isinstance(evaluator, NNUEEvaluator):
-        # Two-phase push for NNUE
-        pre_push_data = evaluator.update_pre_push(board, move)
-        board.push(move)
-        evaluator.update_post_push(board, *pre_push_data)
-    else:
-        raise TypeError(f"Unknown evaluator type: {type(evaluator)}")
+    evaluator.push_with_board(board, move)
 
 
 def evaluator_pop(evaluator: NNEvaluator, board: chess.Board):
     """
     Pop a move from the evaluator and board.
+
+    This matches the pattern used in engine.py: board.pop() then evaluator.pop().
     """
     board.pop()
     evaluator.pop()

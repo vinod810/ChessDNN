@@ -26,6 +26,8 @@ from nn_inference import NNUENetwork, DNNNetwork, \
     NNUEFeatures, MAX_SCORE, NNUEIncrementalUpdater, \
     TANH_SCALE, DNNFeatures
 
+# Todo split into nn_train.py and nn_prep_data.py
+
 MATE_FACTOR = 100
 MAX_MATE_DEPTH = 10
 MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
