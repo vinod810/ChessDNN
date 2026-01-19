@@ -1,1260 +1,1159 @@
+#!/usr/bin/env python3
+"""
+nn_train.py - Train NNUE or DNN models from pre-processed binary shards.
+
+This script reads binary shard files created by prepare_data.py and trains
+neural network models for chess position evaluation.
+
+Usage:
+    python nn_train.py --nn-type NNUE --data-dir data/nnue
+    python nn_train.py --nn-type DNN --data-dir data/dnn --resume model/dnn.pt
+
+Features:
+    - Efficient sparse feature handling using index-based accumulation
+    - Parallel data loading without blocking training
+    - Prefetch queue for efficient GPU utilization
+    - Shuffling across multiple shards for better training
+    - 90/10 train/validation split by shard files
+    - Learning rate scheduling and early stopping
+"""
+
 import argparse
-import numpy as np
-import chess.pgn
-import zstandard as zstd
+import os
+import sys
 import io
+import struct
+import glob
+import random
+import time
+import gc
+import traceback
+from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional, Iterator
+from collections import deque
+import threading
+import queue
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from typing import Any
-import random
-import os
-import platform
-import gc
-import time
-import glob
-import multiprocessing as mp
-from multiprocessing import Process, Queue, Event, Value
-from collections import deque
-import threading
-import ctypes
-import chess
-from typing import List, Tuple, Dict, Optional
+import zstandard as zstd
 
-from nn_inference import NNUENetwork, DNNNetwork, \
-    NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, \
-    NNUEFeatures, MAX_SCORE, NNUEIncrementalUpdater, \
-    TANH_SCALE, DNNFeatures
+# Import network architectures and constants from nn_inference
+from nn_inference import (
+    NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, DNN_HIDDEN_LAYERS,
+    TANH_SCALE, MAX_SCORE
+)
 
-# Todo split into nn_train.py and nn_prep_data.py
-
-MATE_FACTOR = 100
-MAX_MATE_DEPTH = 10
-MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
-
-"""
-Chess Neural Network Training Script
-Supports both NNUE and DNN architectures for chess position evaluation.
-
-ARCHITECTURE SELECTION:
-    Set nn_type = "NNUE" or nn_type = "DNN" in the Configuration section below.
-
-NNUE (Efficiently Updatable Neural Network):
-    - Input: Two 40960-dimensional sparse vectors (white/black king-piece features)
-    - Architecture: 40960 -> 256 (shared) -> 512 (concatenated) -> 32 -> 32 -> 1
-    - Hidden activation: Clipped ReLU [0, 1]
-    - Output activation: Linear (no activation)
-    - Features: King-relative piece positions for both perspectives
-    - Output: Position evaluation from side-to-move's perspective
-
-DNN (Deep Neural Network):
-    - Input: Single 768-dimensional one-hot encoded vector (from player's perspective)
-    - Architecture: 768 -> 1024 -> 256 -> 32 -> 1
-    - Hidden activation: Clipped ReLU [0, 1]
-    - Output activation: Linear (no activation)
-    - Features: Piece positions from perspective of player to move
-    - Output: Position evaluation from side-to-move's perspective
-
-Both networks are trained on tanh-normalized targets: tanh(centipawns / 400).
-Both networks output linearly and learn to produce values in approximately [-1, 1].
-Output range: approximately [-1, 1] for both architectures.
-"""
-
-# Main configuration
-BATCH_SIZE = 8192 * 2
-if platform.system() == "Windows":
-    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512) * 2  # Windows file reading is slow
-else:
-    QUEUE_READ_TIMEOUT = int(BATCH_SIZE / 512)
-
-# Worker configuration
-QUEUE_MAX_SIZE = 100  # Max batches in queue
-SHUFFLE_BUFFER_SIZE = BATCH_SIZE * 10
-
-# Misc
-GC_INTERVAL = 1000  # Run garbage collection every N batches
-
-# Training
+# Training configuration
+VALIDATION_SPLIT_RATIO = 0.5 # FIXME
+BATCH_SIZE = 16384
 LEARNING_RATE = 0.001
-VALIDATION_SPLIT = 0.05
-STEPS_PER_EPOCH = int(8 * 1024 * 1024 / BATCH_SIZE)
-POSITIONS_PER_EPOCH = BATCH_SIZE * STEPS_PER_EPOCH
+POSITIONS_PER_EPOCH = 1_000_000 # FIXME 100_000_000  # 100M positions per epoch
+VALIDATION_SIZE = int(POSITIONS_PER_EPOCH / 10) # 10_000_000  # 10M positions for validation (10% of epoch)
 EPOCHS = 500
 EARLY_STOPPING_PATIENCE = 10
 LR_PATIENCE = 3
+SHARDS_PER_BUFFER = 5  # Number of shards to load and shuffle together
+PREFETCH_BATCHES = 2  # Number of batches to prefetch
+#NUM_DATA_WORKERS = 6  # Number of parallel data loading threads
 
-# PGN
-MAX_PLYS_PER_GAME = 200
-OPENING_PLYS = 10
+# Checkpoint configuration
+CHECKPOINT_INTERVAL = 10  # Save checkpoint every N epochs
+VAL_INTERVAL = 1  # Validate every N epochs
+
+# Garbage collection
+GC_INTERVAL = 1000  # Run GC every N batches
+
+# Maximum features per position (for padding)
+MAX_FEATURES_PER_POSITION = 32  # Chess has max 30 non-king pieces
 
 
-class SharedStats:
-    """Thread-safe shared statistics using multiprocessing Values"""
+# =============================================================================
+# Sparse-Efficient Network Implementations for Training
+# =============================================================================
 
-    def __init__(self, num_workers: int):
-        self.num_workers = num_workers
+class NNUENetworkSparse(nn.Module):
+    """
+    NNUE Network optimized for sparse training.
 
-        # Worker stats (arrays indexed by worker_id)
-        self.worker_games = [Value(ctypes.c_uint64, 0) for _ in range(num_workers)]
-        self.worker_positions = [Value(ctypes.c_uint64, 0) for _ in range(num_workers)]
-        self.worker_batches = [Value(ctypes.c_uint64, 0) for _ in range(num_workers)]
-        self.worker_file_loops = [Value(ctypes.c_uint64, 0) for _ in range(num_workers)]
-        self.worker_wait_ms = [Value(ctypes.c_uint64, 0) for _ in range(num_workers)]
-        self.worker_process_ms = [Value(ctypes.c_uint64, 0) for _ in range(num_workers)]
+    Uses EmbeddingBag for efficient sparse feature accumulation in the first layer.
+    This avoids creating huge dense tensors (batch_size × 40960).
 
-        # Main process stats
-        self.main_batches = Value(ctypes.c_uint64, 0)
-        self.main_train_batches = Value(ctypes.c_uint64, 0)
-        self.main_val_batches = Value(ctypes.c_uint64, 0)
-        self.main_wait_ms = Value(ctypes.c_uint64, 0)
-        self.main_process_ms = Value(ctypes.c_uint64, 0)
+    The architecture matches NNUENetwork from nn_inference.py:
+    - Input: 40960 sparse features -> 256 hidden (via EmbeddingBag)
+    - Hidden: 512 (concatenated white+black) -> 32 -> 32 -> 1
+    """
 
-        # Queue stats
-        self.queue_full_count = Value(ctypes.c_uint64, 0)
-        self.queue_empty_count = Value(ctypes.c_uint64, 0)
+    def __init__(self, input_size=NNUE_INPUT_SIZE, hidden_size=NNUE_HIDDEN_SIZE):
+        super(NNUENetworkSparse, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
 
-    def get_worker_stats(self, worker_id: int) -> Dict[str, Any]:
-        return {
-            'games': self.worker_games[worker_id].value,
-            'positions': self.worker_positions[worker_id].value,
-            'batches': self.worker_batches[worker_id].value,
-            'file_loops': self.worker_file_loops[worker_id].value,
-            'wait_seconds': self.worker_wait_ms[worker_id].value / 1000.0,
-            'process_seconds': self.worker_process_ms[worker_id].value / 1000.0,
+        # First layer as EmbeddingBag (sparse-efficient)
+        # EmbeddingBag computes: sum of embeddings for given indices + bias
+        self.ft_weight = nn.EmbeddingBag(input_size, hidden_size, mode='sum', sparse=True)
+        self.ft_bias = nn.Parameter(torch.zeros(hidden_size))
+
+        # Remaining layers (dense, same as original)
+        self.l1 = nn.Linear(hidden_size * 2, 32)
+        self.l2 = nn.Linear(32, 32)
+        self.l3 = nn.Linear(32, 1)
+
+    def forward(self, white_indices, white_offsets, black_indices, black_offsets, stm):
+        """
+        Forward pass with sparse indices.
+
+        Args:
+            white_indices: 1D tensor of all white feature indices (concatenated)
+            white_offsets: 1D tensor of offsets into white_indices for each sample
+            black_indices: 1D tensor of all black feature indices (concatenated)
+            black_offsets: 1D tensor of offsets into black_indices for each sample
+            stm: (batch_size, 1) tensor, 1.0 for white to move, 0.0 for black
+
+        Returns:
+            (batch_size, 1) output tensor
+        """
+        # Compute first layer activations using EmbeddingBag
+        white_hidden = self.ft_weight(white_indices, white_offsets) + self.ft_bias
+        black_hidden = self.ft_weight(black_indices, black_offsets) + self.ft_bias
+
+        # Clipped ReLU [0, 1]
+        white_hidden = torch.clamp(white_hidden, 0, 1)
+        black_hidden = torch.clamp(black_hidden, 0, 1)
+
+        # Concatenate based on side to move
+        # stm=1 (white): [white, black], stm=0 (black): [black, white]
+        stm_expanded = stm.unsqueeze(-1) if stm.dim() == 1 else stm
+        hidden = torch.where(
+            stm_expanded.bool(),
+            torch.cat([white_hidden, black_hidden], dim=-1),
+            torch.cat([black_hidden, white_hidden], dim=-1)
+        )
+
+        # Dense layers with clipped ReLU
+        x = torch.clamp(self.l1(hidden), 0, 1)
+        x = torch.clamp(self.l2(x), 0, 1)
+        x = self.l3(x)
+        return x
+
+    def to_inference_model(self):
+        """
+        Convert to the standard NNUENetwork format for inference.
+        Returns a state dict compatible with nn_inference.NNUENetwork.
+        """
+        state_dict = {
+            'ft.weight': self.ft_weight.weight.data.t(),  # EmbeddingBag is (num_emb, emb_dim), Linear is (out, in)
+            'ft.bias': self.ft_bias.data,
+            'l1.weight': self.l1.weight.data,
+            'l1.bias': self.l1.bias.data,
+            'l2.weight': self.l2.weight.data,
+            'l2.bias': self.l2.bias.data,
+            'l3.weight': self.l3.weight.data,
+            'l3.bias': self.l3.bias.data,
         }
+        return state_dict
 
-    def get_main_stats(self) -> Dict[str, Any]:
-        return {
-            'batches': self.main_batches.value,
-            'train_batches': self.main_train_batches.value,
-            'val_batches': self.main_val_batches.value,
-            'wait_seconds': self.main_wait_ms.value / 1000.0,
-            'process_seconds': self.main_process_ms.value / 1000.0,
+    def load_from_inference_model(self, state_dict):
+        """Load weights from standard NNUENetwork state dict."""
+        self.ft_weight.weight.data = state_dict['ft.weight'].t()
+        self.ft_bias.data = state_dict['ft.bias']
+        self.l1.weight.data = state_dict['l1.weight']
+        self.l1.bias.data = state_dict['l1.bias']
+        self.l2.weight.data = state_dict['l2.weight']
+        self.l2.bias.data = state_dict['l2.bias']
+        self.l3.weight.data = state_dict['l3.weight']
+        self.l3.bias.data = state_dict['l3.bias']
+
+
+class DNNNetworkSparse(nn.Module):
+    """
+    DNN Network optimized for sparse training.
+
+    Uses EmbeddingBag for efficient sparse feature accumulation in the first layer.
+
+    The architecture matches DNNNetwork from nn_inference.py:
+    - Input: 768 sparse features -> 1024 hidden (via EmbeddingBag)
+    - Hidden: 1024 -> 256 -> 32 -> 1
+    """
+
+    def __init__(self, input_size=DNN_INPUT_SIZE, hidden_layers=None):
+        super(DNNNetworkSparse, self).__init__()
+        if hidden_layers is None:
+            hidden_layers = DNN_HIDDEN_LAYERS
+
+        self.input_size = input_size
+        self.hidden_layers = hidden_layers
+
+        # First layer as EmbeddingBag (sparse-efficient)
+        self.l1_weight = nn.EmbeddingBag(input_size, hidden_layers[0], mode='sum', sparse=True)
+        self.l1_bias = nn.Parameter(torch.zeros(hidden_layers[0]))
+
+        # Remaining layers (dense)
+        self.l2 = nn.Linear(hidden_layers[0], hidden_layers[1])
+        self.l3 = nn.Linear(hidden_layers[1], hidden_layers[2])
+        self.l4 = nn.Linear(hidden_layers[2], 1)
+
+    def forward(self, indices, offsets):
+        """
+        Forward pass with sparse indices.
+
+        Args:
+            indices: 1D tensor of all feature indices (concatenated)
+            offsets: 1D tensor of offsets into indices for each sample
+
+        Returns:
+            (batch_size, 1) output tensor
+        """
+        # Compute first layer activation using EmbeddingBag
+        x = self.l1_weight(indices, offsets) + self.l1_bias
+        x = torch.clamp(x, 0, 1)
+
+        # Dense layers with clipped ReLU
+        x = torch.clamp(self.l2(x), 0, 1)
+        x = torch.clamp(self.l3(x), 0, 1)
+        x = self.l4(x)
+        return x
+
+    def to_inference_model(self):
+        """
+        Convert to the standard DNNNetwork format for inference.
+        Returns a state dict compatible with nn_inference.DNNNetwork.
+        """
+        state_dict = {
+            'l1.weight': self.l1_weight.weight.data.t(),
+            'l1.bias': self.l1_bias.data,
+            'l2.weight': self.l2.weight.data,
+            'l2.bias': self.l2.bias.data,
+            'l3.weight': self.l3.weight.data,
+            'l3.bias': self.l3.bias.data,
+            'l4.weight': self.l4.weight.data,
+            'l4.bias': self.l4.bias.data,
         }
+        return state_dict
 
-    def print_stats(self, file_paths: List[str]):
-        """Print formatted statistics"""
-        print("\n" + "=" * 80)
-        print("PERFORMANCE STATISTICS")
-        print("=" * 80)
-
-        total_worker_wait = 0
-        total_worker_process = 0
-
-        for i in range(self.num_workers):
-            stats = self.get_worker_stats(i)
-            total_worker_wait += stats['wait_seconds']
-            total_worker_process += stats['process_seconds']
-
-            file_name = os.path.basename(file_paths[i]) if i < len(file_paths) else f"worker_{i}"
-            print(f"\nWorker {i} ({file_name}):")
-            print(f"  Games: {stats['games']:,} | Positions: {stats['positions']:,} | "
-                  f"Batches: {stats['batches']:,}")
-            print(f"  File loops: {stats['file_loops']} | "
-                  f"Wait: {stats['wait_seconds']:.1f}s | Process: {stats['process_seconds']:.1f}s")
-
-            if stats['wait_seconds'] + stats['process_seconds'] > 0:
-                wait_pct = stats['wait_seconds'] / (stats['wait_seconds'] + stats['process_seconds']) * 100
-                print(f"  Wait ratio: {wait_pct:.1f}%")
-
-        main_stats = self.get_main_stats()
-        print(f"\nMain Process:")
-        print(f"  Batches consumed: {main_stats['batches']:,} "
-              f"(Train: {main_stats['train_batches']:,}, Val: {main_stats['val_batches']:,})")
-        print(f"  Wait: {main_stats['wait_seconds']:.1f}s | Process: {main_stats['process_seconds']:.1f}s")
-
-        if main_stats['wait_seconds'] + main_stats['process_seconds'] > 0:
-            wait_pct = main_stats['wait_seconds'] / (main_stats['wait_seconds'] + main_stats['process_seconds']) * 100
-            print(f"  Wait ratio: {wait_pct:.1f}%")
-
-        print(f"\nQueue Events:")
-        print(f"  Queue full events: {self.queue_full_count.value:,}")
-        print(f"  Queue empty events: {self.queue_empty_count.value:,}")
-
-        # Analysis
-        print(f"\nANALYSIS:")
-        avg_worker_wait = total_worker_wait / max(1, self.num_workers)
-        if avg_worker_wait > main_stats['wait_seconds'] * 1.5:
-            print("  ⚠ Workers waiting more than main - queue may be full often")
-            print("    Consider: increase QUEUE_MAX_SIZE or reduce worker count")
-        elif main_stats['wait_seconds'] > avg_worker_wait * 1.5:
-            print("  ⚠ Main process waiting more than workers - queue often empty")
-            print("    Consider: add more workers or increase batch size")
-        else:
-            print("  ✓ Balanced: workers and main process have similar wait times")
-
-        print("=" * 80)
+    def load_from_inference_model(self, state_dict):
+        """Load weights from standard DNNNetwork state dict."""
+        self.l1_weight.weight.data = state_dict['l1.weight'].t()
+        self.l1_bias.data = state_dict['l1.bias']
+        self.l2.weight.data = state_dict['l2.weight']
+        self.l2.bias.data = state_dict['l2.bias']
+        self.l3.weight.data = state_dict['l3.weight']
+        self.l3.bias.data = state_dict['l3.bias']
+        self.l4.weight.data = state_dict['l4.weight']
+        self.l4.bias.data = state_dict['l4.bias']
 
 
-def encode_sparse_batch(positions: List[Tuple], nn_type: str) -> Dict[str, Any]:
+# =============================================================================
+# Data Loading
+# =============================================================================
+
+class ShardReader:
+    """Reads positions from compressed binary shard files."""
+
+    def __init__(self, nn_type: str):
+        self.nn_type = nn_type.upper()
+        self.dctx = zstd.ZstdDecompressor()
+
+    def read_shard(self, shard_path: str) -> List[Dict[str, Any]]:
+        """
+        Read all positions from a shard file.
+
+        Returns:
+            List of position dicts with keys depending on nn_type:
+            - DNN: 'score_cp', 'features'
+            - NNUE: 'score_cp', 'stm', 'white_features', 'black_features'
+        """
+        positions = []
+
+        with open(shard_path, 'rb') as f:
+            compressed_data = f.read()
+
+        data = self.dctx.decompress(compressed_data)
+        buf = io.BytesIO(data)
+
+        while True:
+            # Read score (int16)
+            score_bytes = buf.read(2)
+            if len(score_bytes) < 2:
+                break
+            score_cp = struct.unpack('<h', score_bytes)[0]
+
+            if self.nn_type == "DNN":
+                # Read num_features (uint8)
+                num_features = struct.unpack('<B', buf.read(1))[0]
+                # Read features (uint16[])
+                features = []
+                for _ in range(num_features):
+                    features.append(struct.unpack('<H', buf.read(2))[0])
+
+                positions.append({
+                    'score_cp': score_cp,
+                    'features': features
+                })
+            else:  # NNUE
+                # Read stm (uint8)
+                stm = struct.unpack('<B', buf.read(1))[0]
+                # Read white features
+                num_white = struct.unpack('<B', buf.read(1))[0]
+                white_features = []
+                for _ in range(num_white):
+                    white_features.append(struct.unpack('<H', buf.read(2))[0])
+                # Read black features
+                num_black = struct.unpack('<B', buf.read(1))[0]
+                black_features = []
+                for _ in range(num_black):
+                    black_features.append(struct.unpack('<H', buf.read(2))[0])
+
+                positions.append({
+                    'score_cp': score_cp,
+                    'stm': stm,
+                    'white_features': white_features,
+                    'black_features': black_features
+                })
+
+        return positions
+
+
+def create_dnn_batch_sparse(positions: List[Dict], device: torch.device):
     """
-    OPTIMIZED: Encode with flattened numpy arrays for faster IPC.
-
-    Uses offset arrays to reconstruct per-sample indices, which pickles
-    much faster than lists of lists.
-    """
-    if nn_type == "NNUE":
-        all_white_indices = []
-        all_black_indices = []
-        white_offsets = [0]
-        black_offsets = [0]
-        stms = []
-        scores = []
-
-        for white_feat, black_feat, stm, score in positions:
-            all_white_indices.extend(white_feat)
-            all_black_indices.extend(black_feat)
-            white_offsets.append(len(all_white_indices))
-            black_offsets.append(len(all_black_indices))
-            stms.append(stm)
-            scores.append(score)
-
-        return {
-            'white_indices_flat': np.array(all_white_indices, dtype=np.int32),
-            'white_offsets': np.array(white_offsets, dtype=np.int32),
-            'black_indices_flat': np.array(all_black_indices, dtype=np.int32),
-            'black_offsets': np.array(black_offsets, dtype=np.int32),
-            'stm': np.array(stms, dtype=np.float32),
-            'scores': np.array(scores, dtype=np.float32),
-            'batch_size': len(positions),
-            'format': 'flattened'  # Flag to identify format
-        }
-    else:  # DNN
-        all_features = []
-        offsets = [0]
-        scores = []
-
-        for feat, score in positions:
-            all_features.extend(feat)
-            offsets.append(len(all_features))
-            scores.append(score)
-
-        return {
-            'features_flat': np.array(all_features, dtype=np.int32),
-            'offsets': np.array(offsets, dtype=np.int32),
-            'scores': np.array(scores, dtype=np.float32),
-            'batch_size': len(positions),
-            'format': 'flattened'
-        }
-
-
-def decode_sparse_batch(batch_data: Dict[str, Any], device: str = 'cpu', nn_type: str = "NNUE") -> Tuple[
-    torch.Tensor, ...]:
-    """
-    OPTIMIZED: Decode flattened numpy format using vectorized operations.
-
-    Uses np.repeat to build batch indices from offsets - fully vectorized,
-    no Python loops over batch_size.
-    """
-    batch_size = batch_data['batch_size']
-    scores = torch.tensor(batch_data['scores'], dtype=torch.float32, device=device).unsqueeze(1)
-
-    # Compute INPUT_SIZE based on nn_type
-    input_size = NNUE_INPUT_SIZE if nn_type == "NNUE" else DNN_INPUT_SIZE
-
-    if nn_type == "NNUE":
-        white_input = torch.zeros(batch_size, input_size, device=device)
-        black_input = torch.zeros(batch_size, input_size, device=device)
-
-        # Get flattened arrays and offsets
-        white_flat = batch_data['white_indices_flat']
-        white_offsets = batch_data['white_offsets']
-        black_flat = batch_data['black_indices_flat']
-        black_offsets = batch_data['black_offsets']
-
-        # Build batch indices from offsets using np.repeat (fully vectorized)
-        # np.diff gives counts per sample, np.repeat expands to batch indices
-        if len(white_flat) > 0:
-            white_batch_idx = np.repeat(np.arange(batch_size, dtype=np.int64), np.diff(white_offsets))
-            white_input[white_batch_idx, white_flat] = 1.0
-
-        if len(black_flat) > 0:
-            black_batch_idx = np.repeat(np.arange(batch_size, dtype=np.int64), np.diff(black_offsets))
-            black_input[black_batch_idx, black_flat] = 1.0
-
-        stm = torch.tensor(batch_data['stm'], dtype=torch.float32, device=device).unsqueeze(1)
-        return white_input, black_input, stm, scores
-
-    else:  # DNN
-        features = torch.zeros(batch_size, input_size, device=device)
-
-        feat_flat = batch_data['features_flat']
-        offsets = batch_data['offsets']
-
-        if len(feat_flat) > 0:
-            batch_idx = np.repeat(np.arange(batch_size, dtype=np.int64), np.diff(offsets))
-            features[batch_idx, feat_flat] = 1.0
-
-        return features, scores
-
-
-def worker_process(
-        worker_id: int,
-        pgn_file: str,
-        output_queue: Queue,
-        stop_event: Event,
-        stats: SharedStats,
-        nn_type: str,
-        batch_size: int = BATCH_SIZE,
-        max_positions_per_game: int = MAX_PLYS_PER_GAME,
-        opening_plys: int = OPENING_PLYS,
-        shuffle_buffer_size: int = SHUFFLE_BUFFER_SIZE,  # 2000  # Reduced from 10000 for faster startup
-        skip_games_count: int = 0  # Number of games to skip on first file loop (for resume)
-):
-    """
-    Worker process that streams positions from a PGN file.
-    Loops through the file repeatedly until stop_event is set.
-    Uses a shuffle buffer to randomize position order.
+    Create sparse batch tensors for DNN training.
 
     Args:
-        skip_games_count: Number of games to skip at the start of the first file loop.
-                          Used when resuming training to avoid reprocessing games.
-                          :param skip_games_count:
-                          :param shuffle_buffer_size:
-                          :param opening_plys:
-                          :param max_positions_per_game:
-                          :param batch_size:
-                          :param stats:
-                          :param stop_event:
-                          :param output_queue:
-                          :param pgn_file:
-                          :param worker_id:
+        positions: List of position dicts with 'score_cp' and 'features'
+        device: Target device
+
+    Returns:
+        (indices, offsets, targets)
+        - indices: 1D tensor of all feature indices concatenated
+        - offsets: 1D tensor marking start of each sample's features
+        - targets: (batch_size, 1) tensor of tanh targets
     """
-    print(f"Worker {worker_id} starting: {os.path.basename(pgn_file)}" +
-          (f" (skipping first {skip_games_count} games)" if skip_games_count > 0 else ""))
+    #batch_size = len(positions)
 
-    position_buffer = []
-    gc_counter = 0
-    is_first_file_loop = True  # Track if this is the first pass through the file
-    games_skipped = 0  # Counter for skipped games
+    # Collect all indices and compute offsets
+    all_indices = []
+    offsets = [0]
+    targets = []
 
-    # Create local game processor with validation (no shared state)
-    game_processor = ProcessGameWithValidation(nn_type)
+    for pos in positions:
+        features = pos['features']
+        all_indices.extend(features)
+        offsets.append(len(all_indices))
+        targets.append(np.tanh(pos['score_cp'] / TANH_SCALE))
 
-    while not stop_event.is_set():
-        try:
-            # Open and stream from file
-            with open(pgn_file, 'rb') as f:
-                dctx = zstd.ZstdDecompressor()
-                with dctx.stream_reader(f) as reader:
-                    text_stream = io.TextIOWrapper(reader, encoding='utf-8')
+    # Remove last offset (not needed for EmbeddingBag)
+    offsets = offsets[:-1]
 
-                    while not stop_event.is_set():
-                        process_start = time.time()
+    # Convert to tensors
+    indices = torch.tensor(all_indices, dtype=torch.long, device=device)
+    offsets = torch.tensor(offsets, dtype=torch.long, device=device)
+    targets = torch.tensor(targets, dtype=torch.float32, device=device).unsqueeze(1)
 
-                        game = chess.pgn.read_game(text_stream)
-                        if game is None:
-                            # EOF reached, increment loop counter and break to restart
-                            # with stats.worker_file_loops[worker_id].get_lock(): # Rare event so lock is fine
-                            stats.worker_file_loops[worker_id].value += 1
-                            is_first_file_loop = False  # No longer first loop after completing file
-                            break
-
-                        # Skip games on the first file loop if resuming
-                        if is_first_file_loop and games_skipped < skip_games_count:
-                            games_skipped += 1
-                            if games_skipped % 10000 == 0:
-                                print(f"Worker {worker_id}: Skipped {games_skipped}/{skip_games_count} games...")
-                            continue
-
-                        # Process game with periodic validation (using local counter)
-                        positions = game_processor(game, max_positions_per_game, opening_plys)
-
-                        if positions:
-                            position_buffer.extend(positions)
-                            # with stats.worker_games[worker_id].get_lock():
-                            stats.worker_games[worker_id].value += 1
-                            # with stats.worker_positions[worker_id].get_lock():
-                            stats.worker_positions[worker_id].value += len(positions)
-
-                        process_time = time.time() - process_start
-                        # with stats.worker_process_ms[worker_id].get_lock():
-                        stats.worker_process_ms[worker_id].value += int(process_time * 1000)
-
-                        # When buffer is large enough, shuffle and send batches
-                        while len(position_buffer) >= shuffle_buffer_size and not stop_event.is_set():
-                            # Shuffle the buffer
-                            random.shuffle(position_buffer)
-
-                            # Send batches until buffer is half empty
-                            while len(
-                                    position_buffer) >= shuffle_buffer_size // 2 + batch_size and not stop_event.is_set():
-                                batch_positions = position_buffer[:batch_size]
-                                position_buffer = position_buffer[batch_size:]
-
-                                # Encode to sparse format
-                                sparse_batch = encode_sparse_batch(batch_positions, nn_type)
-
-                                # Try to put in queue, track wait time
-                                wait_start = time.time()
-                                while not stop_event.is_set():
-                                    try:
-                                        output_queue.put(sparse_batch, timeout=0.1)
-                                        # with stats.worker_batches[worker_id].get_lock():
-                                        stats.worker_batches[worker_id].value += 1
-                                        break
-                                    except:
-                                        stats.queue_full_count.value += 1
-
-                                wait_time = time.time() - wait_start
-                                # with stats.worker_wait_ms[worker_id].get_lock():
-                                stats.worker_wait_ms[worker_id].value += int(wait_time * 1000)
-
-                                # Clear batch_positions explicitly
-                                del batch_positions
-                                del sparse_batch
-
-                        # Periodic garbage collection
-                        gc_counter += 1
-                        if gc_counter >= GC_INTERVAL:
-                            gc.collect()
-                            gc_counter = 0
-
-                    # Clean up text stream
-                    del text_stream
-
-            # File loop completed, garbage collect
-            gc.collect()
-
-        except Exception as e:
-            print(f"Worker {worker_id} error: {e}")
-            import traceback
-            traceback.print_exc()
-            time.sleep(1)  # Brief pause before retry
-
-    # Send remaining positions (shuffle first)
-    if position_buffer and not stop_event.is_set():
-        random.shuffle(position_buffer)
-        while len(position_buffer) >= batch_size:
-            batch_positions = position_buffer[:batch_size]
-            position_buffer = position_buffer[batch_size:]
-            sparse_batch = encode_sparse_batch(batch_positions, nn_type)
-            try:
-                output_queue.put(sparse_batch, timeout=1.0)
-            except:
-                break
-        # Send any remaining as partial batch
-        if position_buffer:
-            sparse_batch = encode_sparse_batch(position_buffer, nn_type)
-            try:
-                output_queue.put(sparse_batch, timeout=1.0)
-            except:
-                pass
-
-    # Clear buffer
-    position_buffer.clear()
-    gc.collect()
-
-    print(f"Worker {worker_id} stopped")
+    return indices, offsets, targets
 
 
-class EarlyStopping:
-    """Early stopping to stop training when validation loss doesn't improve"""
+def create_nnue_batch_sparse(positions: List[Dict], device: torch.device):
+    """
+    Create sparse batch tensors for NNUE training.
 
-    def __init__(self, patience: int = EARLY_STOPPING_PATIENCE, min_delta: float = 0.0, verbose: bool = True,
-                 checkpoint_path: str = "model/nnue.pt", nn_type: str = "NNUE", initial_best_loss: float = None,
-                 initial_best_epoch: int = 0):
-        self.patience = patience
-        self.min_delta = min_delta
-        self.verbose = verbose
-        self.checkpoint_path = checkpoint_path
-        self.nn_type = nn_type
-        self.counter = 0
-        self.best_loss = initial_best_loss
-        self.early_stop = False
-        self.best_epoch = initial_best_epoch
-        # Store references for checkpoint saving
-        self.optimizer = None
-        self.scheduler = None
+    Args:
+        positions: List of position dicts with 'score_cp', 'stm', 'white_features', 'black_features'
+        device: Target device
 
-    def set_optimizer_scheduler(self, optimizer, scheduler):
-        """Set optimizer and scheduler references for checkpoint saving"""
-        self.optimizer = optimizer
-        self.scheduler = scheduler
+    Returns:
+        (white_indices, white_offsets, black_indices, black_offsets, stm, targets)
+    """
+    batch_size = len(positions)
 
-    def __call__(self, val_loss: float, model: nn.Module, epoch: int) -> bool:
-        if self.best_loss is None:
-            self.best_loss = val_loss
-            self.best_epoch = epoch
-            self._save_checkpoint(model, epoch, val_loss)
-            if self.verbose:
-                print(f"  First validation loss: {val_loss:.6f}")
-                print(f"  Saved checkpoint to {self.checkpoint_path}")
-            return False
+    # Collect all indices and compute offsets
+    white_indices = []
+    white_offsets = [0]
+    black_indices = []
+    black_offsets = [0]
+    stm_list = []
+    targets = []
 
-        if val_loss < self.best_loss - self.min_delta:
-            improvement = self.best_loss - val_loss
-            if self.verbose:
-                print(f"  Validation loss improved by {improvement:.6f}")
-            self.best_loss = val_loss
-            self.best_epoch = epoch
-            self._save_checkpoint(model, epoch, val_loss)
-            if self.verbose:
-                print(f"  Saved checkpoint to {self.checkpoint_path}")
-            self.counter = 0
-            return False
+    for pos in positions:
+        white_indices.extend(pos['white_features'])
+        white_offsets.append(len(white_indices))
 
-        self.counter += 1
-        if self.verbose:
-            print(f"  No improvement for {self.counter}/{self.patience} epochs")
+        black_indices.extend(pos['black_features'])
+        black_offsets.append(len(black_indices))
 
-        if self.counter >= self.patience:
-            self.early_stop = True
-            if self.verbose:
-                print(f"  Early stopping triggered! Best loss: {self.best_loss:.6f} (epoch {self.best_epoch})")
-            return True
+        stm_list.append(float(pos['stm']))
+        targets.append(np.tanh(pos['score_cp'] / TANH_SCALE))
 
-        return False
+    # Remove last offsets
+    white_offsets = white_offsets[:-1]
+    black_offsets = black_offsets[:-1]
 
-    def _save_checkpoint(self, model: nn.Module, epoch: int, val_loss: float):
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'val_loss': val_loss,
-            'best_loss': self.best_loss,
-            'nn_type': self.nn_type,
-        }
-        # Save optimizer state if available
-        if self.optimizer is not None:
-            checkpoint['optimizer_state_dict'] = self.optimizer.state_dict()
-        # Save scheduler state if available
-        if self.scheduler is not None:
-            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
-        torch.save(checkpoint, self.checkpoint_path)
+    # Convert to tensors
+    white_indices = torch.tensor(white_indices, dtype=torch.long, device=device)
+    white_offsets = torch.tensor(white_offsets, dtype=torch.long, device=device)
+    black_indices = torch.tensor(black_indices, dtype=torch.long, device=device)
+    black_offsets = torch.tensor(black_offsets, dtype=torch.long, device=device)
+    stm = torch.tensor(stm_list, dtype=torch.float32, device=device).unsqueeze(1)
+    targets = torch.tensor(targets, dtype=torch.float32, device=device).unsqueeze(1)
 
-    def restore_best_model(self, model: nn.Module):
-        if self.checkpoint_path and self.best_loss is not None:
-            checkpoint = torch.load(self.checkpoint_path, weights_only=True)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            print(f"Restored model from epoch {checkpoint['epoch']} "
-                  f"with validation loss: {checkpoint['val_loss']:.6f}")
+    return white_indices, white_offsets, black_indices, black_offsets, stm, targets
 
 
-class ParallelTrainer:
-    """Main training coordinator with parallel data loading"""
+class DataLoader:
+    """
+    Efficient data loader with parallel shard reading and batch preparation.
+
+    Architecture:
+    - Multiple reader threads load shards in parallel into a shared buffer
+    - One batcher thread creates batches from the buffer and puts them in the output queue
+    - Main thread consumes batches from the queue while workers continue loading
+
+    This ensures training is never blocked waiting for I/O.
+    """
 
     def __init__(
             self,
-            pgn_dir: str,
-            model: nn.Module,
-            nn_type: str = "NNUE",
-            batch_size: int = BATCH_SIZE,
-            validation_split: float = VALIDATION_SPLIT,
-            queue_size: int = QUEUE_MAX_SIZE,
-            device: str = 'cpu',
-            seed: int = 42,
-            skip_games_count: int = 0  # Games to skip per file when resuming
+            shard_files: List[str],
+            nn_type: str,
+            batch_size: int,
+            device: torch.device,
+            shards_per_buffer: int = SHARDS_PER_BUFFER,
+            prefetch_batches: int = PREFETCH_BATCHES,
+            shuffle: bool = True,
+            max_positions: Optional[int] = None,
+            num_workers: int = 4
     ):
-        self.grad_clip = None
-        self.pgn_dir = pgn_dir
-        self.model = model.to(device)
-        self.nn_type = nn_type
+        self.shard_files = shard_files.copy()
+        self.nn_type = nn_type.upper()
         self.batch_size = batch_size
-        self.validation_split = validation_split
-        self.queue_size = queue_size
         self.device = device
-        self.seed = seed
-        self.skip_games_count = skip_games_count
+        self.shards_per_buffer = shards_per_buffer
+        self.prefetch_batches = prefetch_batches
+        self.shuffle = shuffle
+        self.max_positions = max_positions
+        self.num_workers = num_workers
 
-        # Find all PGN files
-        self.pgn_files = sorted(glob.glob(os.path.join(pgn_dir, "*.pgn.zst")))
-        if not self.pgn_files:
-            raise ValueError(f"No .pgn.zst files found in {pgn_dir}")
+        # Queues for inter-thread communication
+        self.shard_queue = queue.Queue()  # Shards to be read
+        self.position_queue = queue.Queue(maxsize=shards_per_buffer)  # Loaded positions
+        self.batch_queue = queue.Queue(maxsize=prefetch_batches)  # Ready batches
 
-        print(f"Found {len(self.pgn_files)} PGN files:")
-        for f in self.pgn_files:
-            print(f"  - {os.path.basename(f)}")
+        self.stop_event = threading.Event()
+        self.reader_threads = []
+        self.batcher_thread = None
+        self.positions_yielded = 0
+        self._positions_yielded_lock = threading.Lock()
 
-        self.num_workers = len(self.pgn_files)
+    def _reader_worker(self, worker_id: int):
+        """Worker thread that reads shards from shard_queue into position_queue."""
+        reader = ShardReader(self.nn_type)
 
-        # Multiprocessing components
-        self.data_queue = None
-        self.stop_event = None
-        self.workers = []
-        self.stats = None
-
-        # Training state
-        self.rng = random.Random(seed)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)  # Use self.model, not model
-        self.criterion = nn.MSELoss()
-
-        # Validation buffer with size limit
-        self.val_buffer = deque(maxlen=1000)  # Limit validation buffer size in batches
-        self.val_buffer_lock = threading.Lock()
-
-    def start_workers(self):
-        """Start all worker processes"""
-        self.data_queue = mp.Queue(maxsize=self.queue_size)
-        self.stop_event = mp.Event()
-        self.stats = SharedStats(self.num_workers)
-
-        for i, pgn_file in enumerate(self.pgn_files):
-            p = Process(
-                target=worker_process,
-                args=(i, pgn_file, self.data_queue, self.stop_event, self.stats,
-                      self.nn_type, self.batch_size),
-                kwargs={'skip_games_count': self.skip_games_count}
-            )
-            p.daemon = True
-            p.start()
-            self.workers.append(p)
-
-        print(f"Started {len(self.workers)} worker processes" +
-              (f" (skipping first {self.skip_games_count} games per file)"
-               if self.skip_games_count > 0 else ""))
-
-    def stop_workers(self):
-        """Stop all worker processes and clean up"""
-        print("Stopping workers...")
-        self.stop_event.set()
-
-        # Drain the queue to unblock workers
-        while not self.data_queue.empty():
+        while not self.stop_event.is_set():
             try:
-                self.data_queue.get_nowait()
+                shard_path = self.shard_queue.get(timeout=0.5)
+                if shard_path is None:  # Poison pill
+                    break
+
+                try:
+                    positions = reader.read_shard(shard_path)
+                    self.position_queue.put(positions, timeout=5.0)
+                except Exception as e:
+                    print(f"Warning: Worker {worker_id} error reading {shard_path}: {e}")
+
+            except queue.Empty:
+                continue
+
+        # Signal batcher that this reader is done
+        try:
+            self.position_queue.put(None, timeout=5.0)
+        except queue.Full:
+            pass  # Batcher may have already stopped
+
+    def _batcher_worker(self):
+        """Worker thread that creates batches from loaded positions."""
+        buffer = []
+        shards_loaded = 0
+        active_readers = self.num_workers
+
+        while not self.stop_event.is_set():
+            # Check if we've reached max positions
+            with self._positions_yielded_lock:
+                if self.max_positions and self.positions_yielded >= self.max_positions:
+                    break
+
+            # Try to get more positions from readers
+            try:
+                positions = self.position_queue.get(timeout=0.1)
+                if positions is None:  # Reader finished
+                    active_readers -= 1
+                    if active_readers <= 0 and len(buffer) == 0:
+                        break
+                    continue
+
+                buffer.extend(positions)
+                shards_loaded += 1
+
+                # Shuffle when we have enough data
+                if shards_loaded >= self.shards_per_buffer:
+                    if self.shuffle:
+                        random.shuffle(buffer)
+                    shards_loaded = 0
+
+            except queue.Empty:
+                # No new positions, but we might have buffered data
+                if active_readers <= 0 and len(buffer) < self.batch_size:
+                    # All readers done and not enough data for another batch
+                    break
+
+            # Create batches while we have enough data
+            while len(buffer) >= self.batch_size:
+                # Check max positions again
+                with self._positions_yielded_lock:
+                    if self.max_positions and self.positions_yielded >= self.max_positions:
+                        break
+
+                batch_positions = buffer[:self.batch_size]
+                buffer = buffer[self.batch_size:]
+
+                try:
+                    if self.nn_type == "DNN":
+                        batch = create_dnn_batch_sparse(batch_positions, self.device)
+                    else:
+                        batch = create_nnue_batch_sparse(batch_positions, self.device)
+
+                    self.batch_queue.put(batch, timeout=5.0)
+
+                    with self._positions_yielded_lock:
+                        self.positions_yielded += len(batch_positions)
+
+                except queue.Full:
+                    # Queue full, put positions back
+                    buffer = batch_positions + buffer
+                    break
+                except Exception as e:
+                    print(f"Warning: Error creating batch: {e}")
+
+        # Process remaining positions in buffer
+        while len(buffer) >= self.batch_size:
+            with self._positions_yielded_lock:
+                if self.max_positions and self.positions_yielded >= self.max_positions:
+                    break
+
+            batch_positions = buffer[:self.batch_size]
+            buffer = buffer[self.batch_size:]
+
+            try:
+                if self.nn_type == "DNN":
+                    batch = create_dnn_batch_sparse(batch_positions, self.device)
+                else:
+                    batch = create_nnue_batch_sparse(batch_positions, self.device)
+
+                self.batch_queue.put(batch, timeout=5.0)
+
+                with self._positions_yielded_lock:
+                    self.positions_yielded += len(batch_positions)
             except:
                 break
 
-        # Wait for workers to finish
-        for p in self.workers:
-            p.join(timeout=5.0)
-            if p.is_alive():
-                p.terminate()
+        # Signal end
+        self.batch_queue.put(None)
 
-        self.workers.clear()
+    def start(self):
+        """Start all worker threads."""
+        self.stop_event.clear()
+        with self._positions_yielded_lock:
+            self.positions_yielded = 0
 
-        # Clean up queue
-        self.data_queue.close()
-        self.data_queue.join_thread()
+        # Prepare shard list
+        shard_list = self.shard_files.copy()
+        if self.shuffle:
+            random.shuffle(shard_list)
 
-        print("All workers stopped")
+        # Fill shard queue
+        for shard in shard_list:
+            self.shard_queue.put(shard)
 
-    def get_batch(self, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
-        """Get a batch from the queue with timeout"""
-        wait_start = time.time()
+        # Add poison pills for readers
+        for _ in range(self.num_workers):
+            self.shard_queue.put(None)
 
-        while True:
-            try:
-                batch = self.data_queue.get(timeout=timeout)
-                wait_time = time.time() - wait_start
-                # with self.stats.main_wait_ms.get_lock():
-                self.stats.main_wait_ms.value += int(wait_time * 1000)
-                return batch
-            except:
-                # with self.stats.queue_empty_count.get_lock():
-                self.stats.queue_empty_count.value += 1
+        # Start reader threads
+        self.reader_threads = []
+        for i in range(self.num_workers):
+            t = threading.Thread(target=self._reader_worker, args=(i,), daemon=True)
+            t.start()
+            self.reader_threads.append(t)
 
-                # Check if all workers are dead
-                alive_workers = sum(1 for p in self.workers if p.is_alive())
-                if alive_workers == 0:
-                    return None
+        # Start batcher thread
+        self.batcher_thread = threading.Thread(target=self._batcher_worker, daemon=True)
+        self.batcher_thread.start()
 
-                if time.time() - wait_start > timeout:
-                    return None
+    def stop(self):
+        """Stop all worker threads."""
+        self.stop_event.set()
 
-    def train_epoch(self, positions_per_epoch: int = POSITIONS_PER_EPOCH) -> Tuple[float, float]:
-        """
-        Train for one epoch.
-        Returns (train_loss, val_loss)
-        """
-        self.model.train()
+        # Clear queues to unblock threads
+        try:
+            while True:
+                self.shard_queue.get_nowait()
+        except queue.Empty:
+            pass
 
-        total_train_loss = 0
-        train_batch_count = 0
-        positions_processed = 0
-        gc_counter = 0
+        try:
+            while True:
+                self.position_queue.get_nowait()
+        except queue.Empty:
+            pass
 
-        # Clear old validation data
-        with self.val_buffer_lock:
-            self.val_buffer.clear()
+        try:
+            while True:
+                self.batch_queue.get_nowait()
+        except queue.Empty:
+            pass
 
-        while positions_processed < positions_per_epoch:
-            batch_data = self.get_batch(timeout=QUEUE_READ_TIMEOUT)
+        # Wait for threads
+        for t in self.reader_threads:
+            t.join(timeout=2.0)
+        if self.batcher_thread:
+            self.batcher_thread.join(timeout=2.0)
 
-            if batch_data is None:
-                print("Warning: No batch received, waiting...")
-                continue
+    def __iter__(self):
+        """Iterate over batches."""
+        self.start()
+        try:
+            while True:
+                try:
+                    batch = self.batch_queue.get(timeout=30.0)
+                    if batch is None:
+                        break
+                    yield batch
+                except queue.Empty:
+                    # Check if batcher is still running
+                    if self.batcher_thread and not self.batcher_thread.is_alive():
+                        break
+        finally:
+            self.stop()
 
-            process_start = time.time()
+    def get_positions_yielded(self) -> int:
+        with self._positions_yielded_lock:
+            return self.positions_yielded
 
-            # Train/validation split (main process decides)
-            is_validation = self.stats.main_val_batches.value < positions_per_epoch / BATCH_SIZE * self.validation_split
 
-            self.stats.main_batches.value += 1
+class Trainer:
+    """Handles the training loop with validation and checkpointing."""
 
-            if is_validation:
-                # Store for validation (with size limit via deque maxlen)
-                with self.val_buffer_lock:
-                    self.val_buffer.append(batch_data)
-                self.stats.main_val_batches.value += 1
+    def __init__(
+            self,
+            model: nn.Module,
+            nn_type: str,
+            train_shards: List[str],
+            val_shards: List[str],
+            device: torch.device,
+            batch_size: int = BATCH_SIZE,
+            lr: float = LEARNING_RATE,
+            num_workers: int = 4
+    ):
+        self.model = model.to(device)
+        self.nn_type = nn_type.upper()
+        self.train_shards = train_shards
+        self.val_shards = val_shards
+        self.device = device
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+        self.criterion = nn.MSELoss()
+
+        # For sparse EmbeddingBag, we need to use SparseAdam for the sparse parameters
+        # and regular Adam for dense parameters
+        sparse_params = []
+        dense_params = []
+        for name, param in model.named_parameters():
+            if 'weight' in name and hasattr(model, name.split('.')[0]):
+                module = getattr(model, name.split('.')[0])
+                if isinstance(module, nn.EmbeddingBag) and module.sparse:
+                    sparse_params.append(param)
+                else:
+                    dense_params.append(param)
             else:
-                # Training step
-                if self.nn_type == "NNUE":
-                    white_input, black_input, stm, target = decode_sparse_batch(
-                        batch_data, self.device, self.nn_type
-                    )
-                    self.optimizer.zero_grad()
-                    output = self.model(white_input, black_input, stm)
-                    loss = self.criterion(output, target)
-                    loss.backward()
+                dense_params.append(param)
 
-                    # Gradient clipping for stability
-                    if hasattr(self, 'grad_clip') and self.grad_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+        # Use SparseAdam for embedding parameters, Adam for the rest
+        if sparse_params:
+            self.optimizer = optim.SparseAdam(sparse_params, lr=lr)
+            self.optimizer_dense = optim.Adam(dense_params, lr=lr)
+        else:
+            self.optimizer = optim.Adam(model.parameters(), lr=lr)
+            self.optimizer_dense = None
 
-                    self.optimizer.step()
+        # Scheduler only on dense optimizer (or main optimizer if no sparse)
+        main_optimizer = self.optimizer_dense if self.optimizer_dense else self.optimizer
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            main_optimizer, mode='min', factor=0.5, patience=LR_PATIENCE
+        )
 
-                    total_train_loss += loss.item()
-                    train_batch_count += 1
-                    positions_processed += batch_data['batch_size']
+        self.best_val_loss = float('inf')
+        self.epochs_without_improvement = 0
+        self.current_epoch = 0
+        self.history = {'train_loss': [], 'val_loss': [], 'lr': []}
 
-                    self.stats.main_train_batches.value += 1
+    def _forward_dnn(self, batch):
+        """Forward pass for DNN with sparse batch."""
+        indices, offsets, targets = batch
+        outputs = self.model(indices, offsets)
+        return outputs, targets
 
-                    # Clean up tensors
-                    del white_input, black_input, stm, target, output, loss
+    def _forward_nnue(self, batch):
+        """Forward pass for NNUE with sparse batch."""
+        white_indices, white_offsets, black_indices, black_offsets, stm, targets = batch
+        outputs = self.model(white_indices, white_offsets, black_indices, black_offsets, stm)
+        return outputs, targets
 
-                else:  # DNN
-                    features, target = decode_sparse_batch(
-                        batch_data, self.device, self.nn_type
-                    )
-                    self.optimizer.zero_grad()
-                    output = self.model(features)
-                    loss = self.criterion(output, target)
-                    loss.backward()
+    def train_epoch(self, positions_per_epoch: int) -> float:
+        """Train for one epoch."""
+        self.model.train()
+        total_loss = 0.0
+        num_batches = 0
 
-                    # Gradient clipping for stability
-                    if hasattr(self, 'grad_clip') and self.grad_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+        # Calculate report interval for ~10 updates per epoch
+        expected_batches = positions_per_epoch // self.batch_size
+        report_interval = max(1, expected_batches // 100)
 
-                    self.optimizer.step()
+        loader = DataLoader(
+            self.train_shards,
+            self.nn_type,
+            self.batch_size,
+            self.device,
+            shuffle=True,
+            max_positions=positions_per_epoch,
+            num_workers=self.num_workers
+        )
 
-                    total_train_loss += loss.item()
-                    train_batch_count += 1
-                    positions_processed += batch_data['batch_size']
+        start_time = time.time()
 
-                    self.stats.main_train_batches.value += 1
+        for batch in loader:
+            # Forward pass
+            if self.nn_type == "DNN":
+                outputs, targets = self._forward_dnn(batch)
+            else:
+                outputs, targets = self._forward_nnue(batch)
 
-                    # Clean up tensors
-                    del features, target, output, loss
+            # Compute loss
+            loss = self.criterion(outputs, targets)
 
-            # Clean up batch data
-            del batch_data
+            # Backward pass
+            self.optimizer.zero_grad()
+            if self.optimizer_dense:
+                self.optimizer_dense.zero_grad()
 
-            process_time = time.time() - process_start
-            self.stats.main_process_ms.value += int(process_time * 1000)
+            loss.backward()
 
-            # Progress update
-            if train_batch_count != 0 and train_batch_count % int(
-                    POSITIONS_PER_EPOCH / BATCH_SIZE / 50) == 0:  # 50 prints per epoch
-                avg_loss = total_train_loss / max(1, train_batch_count)
-                print(f"  Batch {train_batch_count}: Loss={avg_loss:.6f}, "
-                      f"Positions={positions_processed:,}/{positions_per_epoch:,}")
+            # Gradient clipping (only for dense parameters)
+            torch.nn.utils.clip_grad_norm_(
+                [p for p in self.model.parameters() if p.grad is not None and not p.grad.is_sparse],
+                1.0
+            )
 
-            # Periodic garbage collection
-            gc_counter += 1
-            if gc_counter >= GC_INTERVAL:
+            self.optimizer.step()
+            if self.optimizer_dense:
+                self.optimizer_dense.step()
+
+            total_loss += loss.item()
+            num_batches += 1
+
+            # Progress reporting
+            #if num_batches % 100 == 0:
+            #    elapsed = time.time() - start_time
+            #    positions = num_batches * self.batch_size
+            #    pos_per_sec = positions / elapsed if elapsed > 0 else 0
+            #    print(f"\r  Batch {num_batches} | Loss: {loss.item():.6f} | "
+            #          f"Positions: {positions:,} | {pos_per_sec:,.0f} pos/sec", end='')
+            # Progress reporting (~10 times per epoch)
+            if num_batches % report_interval == 0:
+                pct = 100 * num_batches * self.batch_size / positions_per_epoch
+                print(f"\r  [{pct:5.1f}%] Loss: {loss.item():.6f}", end='', flush=True)
+
+            # Garbage collection
+            if num_batches % GC_INTERVAL == 0:
                 gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                gc_counter = 0
 
-        # Calculate validation loss
-        val_loss = self._compute_validation_loss()
+        print()  # New line after progress
 
-        avg_train_loss = total_train_loss / max(1, train_batch_count)
+        avg_loss = total_loss / max(1, num_batches)
+        return avg_loss
 
-        # Clear validation buffer after computing loss
-        with self.val_buffer_lock:
-            self.val_buffer.clear()
-        self.stats.main_val_batches.value = 0
-
-        gc.collect()
-
-        return avg_train_loss, val_loss
-
-    def _compute_validation_loss(self) -> float:
-        """Compute validation loss from buffered batches"""
+    def validate(self, max_positions: int = VALIDATION_SIZE) -> float:
+        """Run validation."""
         self.model.eval()
-        total_loss = 0
-        batch_count = 0
+        total_loss = 0.0
+        num_batches = 0
 
-        with self.val_buffer_lock:
-            val_batches = list(self.val_buffer)
-            print(f"Computing validation loss, val_batches size={len(val_batches)}...")
+        loader = DataLoader(
+            self.val_shards,
+            self.nn_type,
+            self.batch_size,
+            self.device,
+            shuffle=False,
+            max_positions=max_positions,
+            num_workers=self.num_workers
+        )
 
         with torch.no_grad():
-            for batch_data in val_batches:
-                if self.nn_type == "NNUE":
-                    white_input, black_input, stm, target = decode_sparse_batch(
-                        batch_data, self.device, self.nn_type
-                    )
-                    output = self.model(white_input, black_input, stm)
-                    loss = self.criterion(output, target)
-                    total_loss += loss.item()
-                    batch_count += 1
-                    # Clean up
-                    del white_input, black_input, stm, target, output, loss
-                else:  # DNN
-                    features, target = decode_sparse_batch(
-                        batch_data, self.device, self.nn_type
-                    )
-                    output = self.model(features)
-                    loss = self.criterion(output, target)
-                    total_loss += loss.item()
-                    batch_count += 1
-                    # Clean up
-                    del features, target, output, loss
+            for batch in loader:
+                if self.nn_type == "DNN":
+                    outputs, targets = self._forward_dnn(batch)
+                else:
+                    outputs, targets = self._forward_nnue(batch)
 
-        # Clear the local copy
-        del val_batches
+                loss = self.criterion(outputs, targets)
+                total_loss += loss.item()
+                num_batches += 1
 
-        self.model.train()
-        return total_loss / max(1, batch_count)
+        avg_loss = total_loss / max(1, num_batches)
+        return avg_loss
+
+    def save_checkpoint(self, path: str, is_best: bool = False):
+        """Save model checkpoint in inference-compatible format."""
+        # Convert sparse training model to inference format
+        inference_state_dict = self.model.to_inference_model()
+
+        checkpoint = {
+            'epoch': self.current_epoch,
+            'model_state_dict': inference_state_dict,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'optimizer_dense_state_dict': self.optimizer_dense.state_dict() if self.optimizer_dense else None,
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'best_loss': self.best_val_loss,
+            'val_loss': self.history['val_loss'][-1] if self.history['val_loss'] else float('inf'),
+            'train_loss': self.history['train_loss'][-1] if self.history['train_loss'] else float('inf'),
+            'nn_type': self.nn_type,
+            'history': self.history
+        }
+
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+
+        torch.save(checkpoint, path)
+
+        if is_best:
+            best_path = path.replace('.pt', '_best.pt')
+            torch.save(checkpoint, best_path)
+
+    def load_checkpoint(self, path: str):
+        """Load model checkpoint."""
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+
+        # Verify nn_type matches
+        if checkpoint.get('nn_type', self.nn_type) != self.nn_type:
+            raise ValueError(f"Checkpoint nn_type ({checkpoint.get('nn_type')}) "
+                             f"does not match current ({self.nn_type})")
+
+        # Load from inference format into sparse training model
+        self.model.load_from_inference_model(checkpoint['model_state_dict'])
+
+        # Load optimizer states if available
+        if 'optimizer_state_dict' in checkpoint:
+            try:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except:
+                print("Warning: Could not load optimizer state, starting fresh")
+
+        if self.optimizer_dense and checkpoint.get('optimizer_dense_state_dict'):
+            try:
+                self.optimizer_dense.load_state_dict(checkpoint['optimizer_dense_state_dict'])
+            except:
+                print("Warning: Could not load dense optimizer state, starting fresh")
+
+        if 'scheduler_state_dict' in checkpoint:
+            try:
+                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            except:
+                print("Warning: Could not load scheduler state, starting fresh")
+
+        self.current_epoch = checkpoint.get('epoch', 0)
+        self.best_val_loss = checkpoint.get('best_loss', float('inf'))
+        self.history = checkpoint.get('history', {'train_loss': [], 'val_loss': [], 'lr': []})
+
+        print(f"Loaded checkpoint from epoch {self.current_epoch}")
+        print(f"  Best validation loss: {self.best_val_loss:.6f}")
 
     def train(
             self,
-            epochs: int = EPOCHS,
-            lr: float = LEARNING_RATE,
-            positions_per_epoch: int = POSITIONS_PER_EPOCH,
-            early_stopping_patience: int = EARLY_STOPPING_PATIENCE,
-            checkpoint_path: str = "model/nnue.pt",
-            lr_scheduler: str = "plateau",  # "plateau", "step", or "none"
-            grad_clip: float = 1.0,  # Gradient clipping max norm
-            resume_checkpoint: dict = None  # Checkpoint dict for resuming
+            epochs: int,
+            positions_per_epoch: int,
+            checkpoint_path: str,
+            early_stopping_patience: int = EARLY_STOPPING_PATIENCE
     ) -> Dict[str, List[float]]:
-        """Main training loop with LR scheduling and gradient clipping
+        """
+        Main training loop.
 
         Args:
-            epochs: Total number of epochs to train
-            lr: Learning rate (ignored if resuming with saved optimizer state)
-            positions_per_epoch: Number of positions per epoch
-            early_stopping_patience: Patience for early stopping
+            epochs: Number of epochs to train
+            positions_per_epoch: Positions to process per epoch
             checkpoint_path: Path to save checkpoints
-            lr_scheduler: Type of learning rate scheduler
-            grad_clip: Gradient clipping max norm
-            resume_checkpoint: Optional checkpoint dict to resume from
-        """
-        start_epoch = 0
-        initial_best_loss = None
-        initial_best_epoch = 0
-
-        # Handle resuming from checkpoint
-        if resume_checkpoint is not None:
-            start_epoch = resume_checkpoint.get('epoch', 0)
-            initial_best_loss = resume_checkpoint.get('best_loss', resume_checkpoint.get('val_loss'))
-            initial_best_epoch = resume_checkpoint.get('epoch', 0)
-            print(f"Resuming from epoch {start_epoch} with best loss {initial_best_loss:.6f}")
-
-        # Update learning rate (only if not resuming with optimizer state)
-        if resume_checkpoint is None or 'optimizer_state_dict' not in resume_checkpoint:
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = lr
-
-        # Setup learning rate scheduler
-        scheduler = None
-        if lr_scheduler == "plateau":
-            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, mode='min', factor=0.5, patience=LR_PATIENCE,
-                min_lr=1e-6
-            )
-        elif lr_scheduler == "step":  # Not used
-            scheduler = optim.lr_scheduler.StepLR(
-                self.optimizer, step_size=100, gamma=0.5
-            )
-
-        # Load optimizer and scheduler state if resuming
-        if resume_checkpoint is not None:
-            if 'optimizer_state_dict' in resume_checkpoint:
-                self.optimizer.load_state_dict(resume_checkpoint['optimizer_state_dict'])
-                print("Restored optimizer state from checkpoint")
-            if 'scheduler_state_dict' in resume_checkpoint and scheduler is not None:
-                scheduler.load_state_dict(resume_checkpoint['scheduler_state_dict'])
-                print("Restored scheduler state from checkpoint")
-
-        self.grad_clip = grad_clip
-
-        early_stopping = EarlyStopping(
-            patience=early_stopping_patience,
-            checkpoint_path=checkpoint_path,
-            nn_type=self.nn_type,
-            initial_best_loss=initial_best_loss,
-            initial_best_epoch=initial_best_epoch
-        )
-        # Provide optimizer and scheduler to early stopping for checkpoint saving
-        early_stopping.set_optimizer_scheduler(self.optimizer, scheduler)
-
-        history = {'train_loss': [], 'val_loss': [], 'lr': []}
-
-        self.start_workers()
-
-        try:
-            for epoch in range(start_epoch, epochs):
-                current_lr = self.optimizer.param_groups[0]['lr']
-                print(f"\n{'=' * 60}")
-                print(f"Epoch {epoch + 1}/{epochs} (LR: {current_lr:.6f})")
-                print('=' * 60)
-
-                train_loss, val_loss = self.train_epoch(positions_per_epoch)
-
-                history['train_loss'].append(train_loss)
-                history['val_loss'].append(val_loss)
-                history['lr'].append(current_lr)
-
-                print(f"\n  Train Loss: {train_loss:.6f}")
-                print(f"  Validation Loss: {val_loss:.6f}")
-
-                # Update learning rate scheduler
-                if scheduler is not None:
-                    old_lr = self.optimizer.param_groups[0]['lr']
-                    if lr_scheduler == "plateau":
-                        scheduler.step(val_loss)
-                    else:
-                        scheduler.step()
-                    new_lr = self.optimizer.param_groups[0]['lr']
-                    if new_lr != old_lr:
-                        print(f"  Learning rate reduced: {old_lr:.6f} -> {new_lr:.6f}")
-
-                if early_stopping(val_loss, self.model, epoch + 1):
-                    print(f"\nEarly stopping at epoch {epoch + 1}")
-                    break
-
-                # Print stats periodically
-                if (epoch + 1) % 5 == 0:
-                    self.stats.print_stats(self.pgn_files)
-
-        finally:
-            self.stop_workers()
-            early_stopping.restore_best_model(self.model)
-
-            # Final stats
-            self.stats.print_stats(self.pgn_files)
-
-        return history
-
-
-class ProcessGameWithValidation:
-    """
-    Callable class that processes games with periodic validation of incremental features.
-    Each instance maintains its own position counter (no global state).
-    """
-
-    VALIDATION_INTERVAL = 10000
-
-    def __init__(self, nn_type):
-        self.position_count = 0
-        self.nn_type = nn_type
-
-    def is_matching_full_vs_incremental(self, board, white_feat, black_feat):
-        # Full extraction for comparison
-        white_feat_full, black_feat_full = NNUEFeatures.board_to_features(board)
-
-        # Compare as sets (order doesn't matter)
-        white_match = set(white_feat) == set(white_feat_full)
-        black_match = set(black_feat) == set(black_feat_full)
-
-        if not white_match or not black_match:
-            print(f"\n⚠️  WARNING: Incremental feature mismatch at position {self.position_count}!")
-            print(f"    FEN: {board.fen()}")
-            if not white_match:
-                incremental_only = set(white_feat) - set(white_feat_full)
-                full_only = set(white_feat_full) - set(white_feat)
-                print(f"    White features - Incremental only: {incremental_only}")
-                print(f"    White features - Full only: {full_only}")
-            if not black_match:
-                incremental_only = set(black_feat) - set(black_feat_full)
-                full_only = set(black_feat_full) - set(black_feat)
-                print(f"    Black features - Incremental only: {incremental_only}")
-                print(f"    Black features - Full only: {full_only}")
-
-            return False
-        else:
-            return True
-
-    @staticmethod
-    def eval_to_cp_stm(ev, board_turn: bool) -> Optional[int]:
-        """
-        Convert a chess.engine evaluation to centipawns from side-to-move perspective.
-
-        Args:
-            ev: The evaluation from node.eval() (can be None)
-            board_turn: True if white to move, False if black to move
+            early_stopping_patience: Epochs without improvement before stopping
 
         Returns:
-            Centipawn score from STM perspective, or None if ev is None
+            Training history dict
         """
-        if ev is None:
-            return None
+        print(f"\n{'=' * 60}")
+        print(f"Training {self.nn_type} Network")
+        print(f"{'=' * 60}")
+        print(f"Train shards: {len(self.train_shards)}")
+        print(f"Validation shards: {len(self.val_shards)}")
+        print(f"Batch size: {self.batch_size:,}")
+        print(f"Positions per epoch: {positions_per_epoch:,}")
+        print(f"Device: {self.device}")
+        print(f"{'=' * 60}\n")
 
-        if ev.is_mate():
-            mate_in = ev.white().mate()
-            if mate_in < 0:  # -ve when black is winning
-                mate_in = max(-MAX_MATE_DEPTH, mate_in)
-                score_cp = -MAX_SCORE - mate_in * MATE_FACTOR
+        start_epoch = self.current_epoch + 1
+
+        for epoch in range(start_epoch, epochs + 1):
+            self.current_epoch = epoch
+            epoch_start = time.time()
+
+            print(f"Epoch {epoch}/{epochs}")
+            print("-" * 40)
+
+            # Train
+            train_loss = self.train_epoch(positions_per_epoch)
+            self.history['train_loss'].append(train_loss)
+
+            # Validate
+            print("  Validating...")
+            val_loss = self.validate()
+            self.history['val_loss'].append(val_loss)
+
+            # Learning rate
+            current_lr = self.optimizer.param_groups[0]['lr']
+            self.history['lr'].append(current_lr)
+
+            # Update scheduler
+            self.scheduler.step(val_loss)
+
+            # Sync LR to sparse optimizer if using separate optimizers
+            if self.optimizer_dense:
+                new_lr = self.optimizer_dense.param_groups[0]['lr']
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = new_lr
+                current_lr = new_lr
             else:
-                mate_in = min(MAX_MATE_DEPTH, mate_in)
-                score_cp = MAX_SCORE - mate_in * MATE_FACTOR
-        else:
-            score_cp = ev.white().score()
-            score_cp = min(score_cp, MAX_NON_MATE_SCORE)
-            score_cp = max(score_cp, -MAX_NON_MATE_SCORE)
+                current_lr = self.optimizer.param_groups[0]['lr']
 
-        # Lichess eval is always from White's perspective - convert to STM
-        if not board_turn:  # Black to move
-            score_cp = -score_cp
+            epoch_time = time.time() - epoch_start
 
-        return score_cp
+            # Print epoch summary
+            print(f"  Train Loss: {train_loss:.6f}")
+            print(f"  Val Loss:   {val_loss:.6f}")
+            print(f"  LR:         {current_lr:.2e}")
+            print(f"  Time:       {epoch_time:.1f}s")
 
-    def process_game_positions(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME,
-                               opening_plys: int = OPENING_PLYS) -> List[Tuple[chess.Board, int]]:
-        """
-        Process a single game and return valid positions with centipawn scores.
+            # Check for improvement
+            is_best = val_loss < self.best_val_loss
+            if is_best:
+                self.best_val_loss = val_loss
+                self.epochs_without_improvement = 0
+                print(f"  ✓ New best validation loss!")
+            else:
+                self.epochs_without_improvement += 1
+                print(f"  No improvement for {self.epochs_without_improvement} epoch(s)")
 
-        This method contains the shared filtering logic used by both training and testing:
-        - Skip variant games
-        - Skip opening moves
-        - Skip game-over positions
-        - Skip positions where side-to-move is in check
-        - Skip positions after captures (tactically unstable)
+            # Save checkpoint
+            if epoch % CHECKPOINT_INTERVAL == 0 or is_best:
+                self.save_checkpoint(checkpoint_path, is_best)
+                print(f"  Checkpoint saved to {checkpoint_path}")
 
-        Args:
-            game: A chess.pgn game object
-            max_plys_per_game: Maximum positions to extract per game
-            opening_plys: Number of opening moves to skip
-
-        Returns:
-            List of (board_copy, score_cp_stm) tuples where score_cp_stm is the
-            centipawn score from side-to-move perspective
-        """
-        if game is None:
-            return []
-
-        # Skip variant games
-        if any("Variant" in key for key in game.headers.keys()):
-            return []
-
-        positions = []
-        board = game.board()
-        move_count = 0
-
-        for node in game.mainline():
-            move_count += 1
-            current_move = node.move
-
-            # Check if this move is a capture BEFORE pushing it
-            was_last_move_capture = board.is_capture(current_move)
-
-            if len(positions) >= max_plys_per_game:
+            # Early stopping
+            if self.epochs_without_improvement >= early_stopping_patience:
+                print(f"\nEarly stopping triggered after {epoch} epochs")
                 break
 
-            if move_count <= opening_plys:
-                board.push(current_move)
-                continue
+            print()
 
-            board.push(current_move)
+        # Final checkpoint
+        self.save_checkpoint(checkpoint_path, False)
 
-            if board.is_game_over():
-                continue
+        return self.history
 
-            # Skip if side to move is in check
-            if board.is_check():
-                continue
 
-            # Skip if this move was a capture (position after capture is tactically unstable)
-            if was_last_move_capture:
-                continue
+def discover_shards(data_dir: str, nn_type: str) -> List[str]:
+    """Discover all shard files in a directory."""
+    pattern = os.path.join(data_dir, "*.bin.zst")
+    shards = sorted(glob.glob(pattern))
 
-            score_cp = self.eval_to_cp_stm(node.eval(), board.turn == chess.WHITE)
-            if score_cp is not None:
-                positions.append((board.copy(), score_cp))
+    if not shards:
+        # Try looking in nn_type subdirectory
+        pattern = os.path.join(data_dir, nn_type.lower(), "*.bin.zst")
+        shards = sorted(glob.glob(pattern))
 
-        return positions
+    return shards
 
-    def __call__(self, game, max_plys_per_game: int = MAX_PLYS_PER_GAME, opening_plys: int = OPENING_PLYS) -> List[
-        Tuple]:
-        """
-        Process a single game and return positions with evaluations.
-        Uses incremental feature updates for efficiency.
-        Periodically validates incremental updates against full extraction.
-        """
-        if game is None:
-            return []
 
-        # Skip variant games
-        if any("Variant" in key for key in game.headers.keys()):
-            return []
+def split_shards(shards: List[str], val_ratio: float = VALIDATION_SPLIT_RATIO) -> Tuple[List[str], List[str]]:
+    """Split shards into training and validation sets."""
+    num_val = max(1, int(len(shards) * val_ratio))
+    num_train = len(shards) - num_val
 
-        positions = []
-        board = game.board()
+    # Use last shards for validation (they're from later in processing)
+    train_shards = shards[:num_train]
+    val_shards = shards[num_train:]
 
-        # Initialize incremental updater after skipping early moves
-        feature_updater = None
-        move_count = 0
-
-        for node in game.mainline():
-            move_count += 1
-            current_move = node.move
-
-            # Check if this move is a capture BEFORE pushing it
-            was_last_move_capture = board.is_capture(current_move)
-
-            if len(positions) >= max_plys_per_game:
-                break
-
-            if move_count <= opening_plys:
-                board.push(current_move)
-                continue
-
-            # Initialize feature updater on first position we might use
-            if feature_updater is None:
-                feature_updater = NNUEIncrementalUpdater(board)
-
-            # Update features incrementally (this also updates the updater's internal board)
-            is_white_king_move, is_black_king_move, change_record = feature_updater.update_pre_push(board, node.move)
-            board.push(node.move)
-            feature_updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
-
-            if board.is_game_over():
-                continue
-
-            # Skip if side to move is in check
-            if board.is_check():
-                continue
-
-            # Skip if this move was a capture (position after capture is tactically unstable)
-            if was_last_move_capture:
-                continue
-
-            score_cp = self.eval_to_cp_stm(node.eval(), board.turn == chess.WHITE)
-            if score_cp is not None:
-                score_tanh = np.tanh(score_cp / TANH_SCALE)
-
-                if self.nn_type == "NNUE":
-                    # Get features from incremental updater (faster than full recompute)
-                    white_feat, black_feat = feature_updater.get_features_unsorted()
-
-                    # Periodic validation: compare incremental vs full extraction
-                    self.position_count += 1
-                    if self.position_count % self.VALIDATION_INTERVAL == 0:
-                        if not self.is_matching_full_vs_incremental(board, white_feat, black_feat):
-                            # Use full-extraction as fallback
-                            white_feat, black_feat = NNUEFeatures.board_to_features(board)
-
-                    stm = 1.0 if board.turn == chess.WHITE else 0.0
-                    positions.append((white_feat, black_feat, stm, score_tanh))
-
-                else:  # DNN
-                    # Extract features from perspective of side to move
-                    feat = DNNFeatures.board_to_features(board)
-                    positions.append((feat, score_tanh))
-
-        return positions
+    return train_shards, val_shards
 
 
 def main():
-    # Required for multiprocessing on some platforms
-    mp.set_start_method('spawn', force=True)
+    parser = argparse.ArgumentParser(
+        description='Train NNUE or DNN model from binary shards.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    # Train NNUE model
+    python nn_train.py --nn-type NNUE --data-dir data/nnue
 
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Neural Network Training with Parallel Data Loading')
-    parser.add_argument('--nn-type', type=str, default='NNUE', choices=['NNUE', 'DNN'],
-                        help='Neural network architecture type (default: NNUE)')
-    parser.add_argument('--resume', type=str, default=None, metavar='PATH',
-                        help='Path to checkpoint .pt file to resume training from')
-    parser.add_argument('--skip-games', type=int, default=0, metavar='N',
-                        help='When resuming, skip the first N games from each pgn.zst file (default: 0)')
-    parser.add_argument('--pgn-dir', type=str, default='./pgn',
-                        help='Directory containing .pgn.zst files (default: ./pgn)')
-    parser.add_argument('--epochs', type=int, default=EPOCHS,
-                        help=f'Total number of epochs to train (default: {EPOCHS})')
-    parser.add_argument('--lr', type=float, default=LEARNING_RATE,
-                        help=f'Learning rate (default: {LEARNING_RATE})')
-    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
-                        help=f'Batch size (default: {BATCH_SIZE})')
-    parser.add_argument('--checkpoint', type=str, default=None,
-                        help='Path to save checkpoints (default: model/nnue.pt or model/dnn.pt based on --nn-type)')
+    # Train DNN model with custom parameters
+    python nn_train.py --nn-type DNN --data-dir data/dnn --batch-size 8192 --lr 0.0005
+
+    # Resume training from checkpoint
+    python nn_train.py --nn-type NNUE --data-dir data/nnue --resume model/nnue.pt
+"""
+    )
+
+    parser.add_argument(
+        '--nn-type',
+        type=str,
+        required=True,
+        choices=['NNUE', 'DNN'],
+        help='Neural network type'
+    )
+
+    parser.add_argument(
+        '--data-dir',
+        type=str,
+        required=True,
+        help='Directory containing shard files (or parent directory with nnue/dnn subdirs)'
+    )
+
+    parser.add_argument(
+        '--checkpoint',
+        type=str,
+        default=None,
+        help='Path to save checkpoints (default: model/{nn_type}.pt)'
+    )
+
+    parser.add_argument(
+        '--resume',
+        type=str,
+        default=None,
+        help='Path to checkpoint to resume from'
+    )
+
+    parser.add_argument(
+        '--epochs',
+        type=int,
+        default=EPOCHS,
+        help=f'Number of epochs (default: {EPOCHS})'
+    )
+
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=BATCH_SIZE,
+        help=f'Batch size (default: {BATCH_SIZE})'
+    )
+
+    parser.add_argument(
+        '--lr',
+        type=float,
+        default=LEARNING_RATE,
+        help=f'Learning rate (default: {LEARNING_RATE})'
+    )
+
+    parser.add_argument(
+        '--positions-per-epoch',
+        type=int,
+        default=POSITIONS_PER_EPOCH,
+        help=f'Positions per epoch (default: {POSITIONS_PER_EPOCH:,})'
+    )
+
+    parser.add_argument(
+        '--val-size',
+        type=int,
+        default=VALIDATION_SIZE,
+        help=f'Validation set size (default: {VALIDATION_SIZE:,})'
+    )
+
+    parser.add_argument(
+        '--early-stopping',
+        type=int,
+        default=EARLY_STOPPING_PATIENCE,
+        help=f'Early stopping patience (default: {EARLY_STOPPING_PATIENCE})'
+    )
+
+    parser.add_argument(
+        '--num-workers',
+        type=int,
+        default=4,
+        help='Number of parallel data loading workers (default: 4)'
+    )
+
     args = parser.parse_args()
 
-    # Use nn_type from args
-    nn_type = args.nn_type
-    model_path = args.checkpoint if args.checkpoint else ("model/nnue.pt" if nn_type == "NNUE" else "model/dnn.pt")
+    # Determine checkpoint path
+    checkpoint_path = args.checkpoint or f"model/{args.nn_type.lower()}.pt"
 
-    pgn_dir = args.pgn_dir
-    resume_checkpoint = None
+    # Discover shards
+    print(f"Discovering shards in {args.data_dir}...")
+    shards = discover_shards(args.data_dir, args.nn_type)
 
-    print("=" * 60)
-    print(f"{nn_type} Training with Parallel Data Loading")
-    print("=" * 60)
+    if not shards:
+        print(f"Error: No shard files found in {args.data_dir}")
+        print("Expected files matching: *.bin.zst")
+        sys.exit(1)
+
+    print(f"Found {len(shards)} shard files")
+
+    # Split into train/val
+    train_shards, val_shards = split_shards(shards, val_ratio=VALIDATION_SPLIT_RATIO)
+    print(f"Train shards: {len(train_shards)}")
+    print(f"Validation shards: {len(val_shards)}")
 
     # Detect device
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-    print(f"Network type: {nn_type}")
+    print(f"Data loading workers: {args.num_workers}")
 
-    # Create model based on nn_type
-    if nn_type == "NNUE":
-        model = NNUENetwork(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
-    else:  # DNN
-        model = DNNNetwork(DNN_INPUT_SIZE)
+    # Create sparse training model
+    if args.nn_type == "NNUE":
+        model = NNUENetworkSparse(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
+    else:
+        model = DNNNetworkSparse(DNN_INPUT_SIZE)
 
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Create trainer
+    trainer = Trainer(
+        model=model,
+        nn_type=args.nn_type,
+        train_shards=train_shards,
+        val_shards=val_shards,
+        device=device,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        num_workers=args.num_workers
+    )
     # Load checkpoint if resuming
     if args.resume:
         if not os.path.exists(args.resume):
-            print(f"Error: Checkpoint file not found: {args.resume}")
-            exit(1)
+            print(f"Error: Checkpoint not found: {args.resume}")
+            sys.exit(1)
+        trainer.load_checkpoint(args.resume)
 
-        print(f"\nLoading checkpoint from: {args.resume}")
-        resume_checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
-
-        # Verify network type matches
-        checkpoint_nn_type = resume_checkpoint.get('nn_type', nn_type)
-        if checkpoint_nn_type != nn_type:
-            print(f"Error: Checkpoint network type ({checkpoint_nn_type}) does not match "
-                  f"current configuration ({nn_type})")
-            exit(1)
-
-        # Load model weights
-        model.load_state_dict(resume_checkpoint['model_state_dict'])
-        print(f"Loaded model from epoch {resume_checkpoint['epoch']} "
-              f"with validation loss: {resume_checkpoint['val_loss']:.6f}")
-
-        if 'best_loss' in resume_checkpoint:
-            print(f"Best validation loss so far: {resume_checkpoint['best_loss']:.6f}")
-
-    print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
-
-    # Determine skip_games_count (only used when resuming)
-    skip_games_count = args.skip_games if args.resume else 0
-    if skip_games_count > 0 and not args.resume:
-        print("Warning: --skip-games has no effect without --resume")
-        skip_games_count = 0
-
-    # Create trainer
-    trainer = ParallelTrainer(
-        pgn_dir=pgn_dir,
-        model=model,
-        nn_type=nn_type,
-        batch_size=args.batch_size,
-        validation_split=VALIDATION_SPLIT,
-        queue_size=QUEUE_MAX_SIZE,
-        device=device,
-        seed=42,
-        skip_games_count=skip_games_count
-    )
-
-    # Train with improved parameters
-    # - Higher positions_per_epoch for better convergence
-    # - Learning rate scheduler to reduce LR when plateauing
-    # - Longer patience since LR will be reduced
-    # - Gradient clipping for stability
+    # Train
     history = trainer.train(
         epochs=args.epochs,
-        lr=args.lr,
-        positions_per_epoch=POSITIONS_PER_EPOCH,  # 1M positions per epoch (was 100k)
-        early_stopping_patience=EARLY_STOPPING_PATIENCE,  # More patience since LR scheduler helps
-        checkpoint_path=model_path,
-        lr_scheduler="plateau",  # Reduce LR on plateau
-        grad_clip=1.0,  # Gradient clipping
-        resume_checkpoint=resume_checkpoint
+        positions_per_epoch=args.positions_per_epoch,
+        checkpoint_path=checkpoint_path,
+        early_stopping_patience=args.early_stopping
     )
 
     # Summary
@@ -1264,7 +1163,18 @@ def main():
     print(f"Final train loss: {history['train_loss'][-1]:.6f}")
     print(f"Best validation loss: {min(history['val_loss']):.6f}")
     print(f"Epochs trained: {len(history['train_loss'])}")
+    print(f"Checkpoint saved to: {checkpoint_path}")
+    print(f"\nNote: Checkpoint is saved in inference-compatible format.")
+    print(f"      Use with nn_inference.py NNUENetwork/DNNNetwork directly.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        response = input("\nKeyboardInterrupt detected. Type 'exit' to quit, Enter to continue: ").strip()
+        if response.lower() == "exit":
+            print("Resuming...\n")
+    except Exception as e:
+        print("Error:", e)
+        traceback.print_exc()
