@@ -28,6 +28,14 @@ NN Training
 DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 91-epochs
 NNUE -
 
+Loss Expectations Revised
+Given your data statistics (std=0.6, many extreme targets):
+Epoch, Expected Loss, Your Status
+1, 0.24 - 0.35✅, 0.24 is good!
+10, 0.15 - 0.20, Target
+50, 0.08 - 0.12, Well-trained
+100+, 0.05 - 0.08, Excellent
+
 Version, WAC, ELO (stockfish), nps
 python-chess, 217/300, 1954, NA
 C++ chess library, 218/300, 2070, 1077

@@ -10,7 +10,6 @@ echo ""
 while true; do
     read -p "FEN> " FEN
 
-    # Check for exit conditions
     case "${FEN,,}" in
         quit|exit)
             echo "Goodbye!"
@@ -22,7 +21,6 @@ while true; do
             ;;
     esac
 
-    echo "Evaluating at depth $DEPTH..."
 
     # Use a temp file to capture output
     TMPFILE=$(mktemp)
@@ -32,7 +30,7 @@ while true; do
         echo "uci"
         echo "isready"
         echo "position fen $FEN"
-        echo "go depth $DEPTH"
+        echo "eval"
         # Give stockfish time to process
         sleep 2
         echo "quit"
@@ -41,14 +39,10 @@ while true; do
     SF_OUTPUT=$(cat "$TMPFILE")
     rm -f "$TMPFILE"
 
-    LAST_INFO_LINE=$(echo "$SF_OUTPUT" | grep "^info " | grep " score " | tail -n 1)
-    SCORE_TYPE=$(echo "$LAST_INFO_LINE" | grep -oP 'score \K(cp|mate)')
-    SCORE_VALUE=$(echo "$LAST_INFO_LINE" | grep -oP "score $SCORE_TYPE \K-?\d+")
-    BEST_MOVE=$(echo "$SF_OUTPUT" | grep "^bestmove" | awk '{print $2}')
+    NNUE_SCORE=$(echo "$SF_OUTPUT" | grep "^NNUE evaluation" | awk '{print $3}')
 
-    if [ -n "$SCORE_VALUE" ]; then
-        echo "Evaluation ($SCORE_TYPE): $SCORE_VALUE"
-        echo "Best Move: $BEST_MOVE"
+    if [ -n "$NNUE_SCORE" ]; then
+        echo "NNUE Score: $NNUE_SCORE"
     else
         echo "Could not find a valid evaluation. Check your FEN."
         echo "Debug output:"

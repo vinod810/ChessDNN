@@ -4,10 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="FUTILITY_PRUNING_ENABLED WAC 236/300">
-      <change afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="pre-data - train split">
+      <change afterPath="$PROJECT_DIR$/test/verify_data.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/stockfish_eval.sh" beforeDir="false" afterPath="$PROJECT_DIR$/utils/sf_static_eval.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -73,8 +77,8 @@
       <recent name="$PROJECT_DIR$/test" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/chess_cpp_integration" />
       <recent name="$PROJECT_DIR$/test" />
+      <recent name="$PROJECT_DIR$/chess_cpp_integration" />
       <recent name="C:\ChessDNN\utils" />
       <recent name="$PROJECT_DIR$" />
     </key>
@@ -124,14 +128,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00087" summary="Training 40 epochs loss 0.5">
-      <option name="closed" value="true" />
-      <created>1767850099138</created>
-      <option name="number" value="00087" />
-      <option name="presentableId" value="LOCAL-00087" />
-      <option name="project" value="LOCAL" />
-      <updated>1767850099138</updated>
     </task>
     <task id="LOCAL-00088" summary=" 10 epochs val loss 0.56, max_games=20">
       <option name="closed" value="true" />
@@ -495,7 +491,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768778227959</updated>
     </task>
-    <option name="localTasksCounter" value="136" />
+    <task id="LOCAL-00136" summary="pre-data - train split">
+      <option name="closed" value="true" />
+      <created>1768788605458</created>
+      <option name="number" value="00136" />
+      <option name="presentableId" value="LOCAL-00136" />
+      <option name="project" value="LOCAL" />
+      <updated>1768788605459</updated>
+    </task>
+    <option name="localTasksCounter" value="137" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -510,7 +514,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Reorg files" />
     <MESSAGE value="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds" />
     <MESSAGE value="Revert fixed" />
     <MESSAGE value="nn_evaluator.py" />
@@ -535,7 +538,8 @@
     <MESSAGE value="Code cleanup" />
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 238/300" />
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 236/300" />
-    <option name="LAST_COMMIT_MESSAGE" value="FUTILITY_PRUNING_ENABLED WAC 236/300" />
+    <MESSAGE value="pre-data - train split" />
+    <option name="LAST_COMMIT_MESSAGE" value="pre-data - train split" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

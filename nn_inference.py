@@ -78,11 +78,11 @@ class NNUEFeatures:
     """Handles feature extraction for NNUE network"""
 
     @staticmethod
-    def get_piece_index(piece_type: int, is_friendly_piece_color: bool) -> int:
+    def get_piece_index(piece_type: int, is_friendly_piece: bool) -> int:
         if piece_type == chess.KING:
             return -1
         type_idx = piece_type - 1
-        color_idx = 1 if is_friendly_piece_color else 0
+        color_idx = 1 if is_friendly_piece else 0
         return type_idx + color_idx * PIECE_TYPES
 
     @staticmethod
