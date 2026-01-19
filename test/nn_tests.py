@@ -22,12 +22,12 @@ import argparse
 import numpy as np
 import sys
 import time
+import io
 import chess
+import random
 import glob
 import zstandard as zstd
-import io
 import chess.pgn
-import random
 
 # Import from our modules - this ensures we test the actual production code
 from nn_inference import (
@@ -35,6 +35,7 @@ from nn_inference import (
     NNUE_INPUT_SIZE, DNN_INPUT_SIZE, MAX_SCORE
 )
 from nn_evaluator import NNEvaluator, DNNEvaluator, NNUEEvaluator
+from shard_io import ShardReader, find_shards
 
 # Configuration
 VALID_TEST_TYPES = {
@@ -1548,6 +1549,59 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
 # =============================================================================
 # Data Integrity Test
 # =============================================================================
+import chess
+
+def fen_to_sparse_planes_chatgpt(fen: str) -> list[int]:
+    """
+    Convert a FEN string into sparse one-hot indices for a
+    12x64 (768) feature vector.
+
+    Plane order per side:
+        K, Q, R, B, N, P
+
+    Planes:
+        0–5   : side to move
+        6–11  : opponent
+
+    Board is oriented from the side-to-move perspective.
+    """
+    board = chess.Board(fen)
+
+    # Piece → plane index (within a side)
+    piece_to_plane = {
+        chess.KING:   0,
+        chess.QUEEN:  1,
+        chess.ROOK:   2,
+        chess.BISHOP: 3,
+        chess.KNIGHT: 4,
+        chess.PAWN:   5,
+    }
+
+    sparse_indices = []
+    stm = board.turn  # True = White, False = Black
+
+    for square, piece in board.piece_map().items():
+        # Base plane index (0–5)
+        plane = piece_to_plane[piece.piece_type]
+
+        # Offset for opponent pieces
+        if piece.color != stm:
+            plane += 6
+
+        # Orient square from side-to-move perspective
+        if stm == chess.WHITE:
+            oriented_square = square
+        else:
+            oriented_square = chess.square(
+                chess.square_file(square),
+                7 - chess.square_rank(square)
+            )
+
+        index = plane * 64 + oriented_square
+        sparse_indices.append(index)
+
+    return sparse_indices
+
 
 def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "data",
                         stockfish_path: str = "stockfish", time_limit: float = 2.0,

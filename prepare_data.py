@@ -14,9 +14,25 @@ Output format:
     - Progress: data/{prefix}_progress.json
 
 Binary shard format:
-    DNN:  [score:int16][num_features:uint8][features:uint16[num_features]] per position
-    NNUE: [score:int16][stm:uint8][num_white:uint8][white_features:uint16[num_white]]
-          [num_black:uint8][black_features:uint16[num_black]] per position
+    DNN Normal record:
+        [score:int16][num_features:uint8][features:uint16[num_features]]
+
+    DNN Diagnostic record (every 1000 positions, first byte = 0xFF):
+        [marker:uint8=0xFF][score:int16][stm:uint8][num_features:uint8][features:uint16[num_features]]
+        [fen_length:uint8][fen_bytes:char[fen_length]]
+
+    NNUE Normal record:
+        [score:int16][stm:uint8][num_white:uint8][white_features:uint16[num_white]]
+        [num_black:uint8][black_features:uint16[num_black]]
+
+    NNUE Diagnostic record (every 1000 positions, first byte = 0xFF):
+        [marker:uint8=0xFF][score:int16][stm:uint8][num_white:uint8][white_features:uint16[num_white]]
+        [num_black:uint8][black_features:uint16[num_black]][fen_length:uint8][fen_bytes:char[fen_length]]
+
+Feature encoding:
+    - Piece order (shared by DNN and NNUE): P=0, N=1, B=2, R=3, Q=4, K=5 (piece_type - 1)
+    - DNN: 768 features = 12 planes × 64 squares, feature_idx = piece_idx * 64 + square
+    - NNUE: 40,960 features = king_sq * 640 + piece_sq * 10 + (type_idx + color_idx * 5)
 """
 
 import argparse
@@ -24,7 +40,6 @@ import json
 import os
 import sys
 import io
-import struct
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
@@ -36,6 +51,9 @@ import zstandard as zstd
 from nn_inference import (
     NNUEFeatures, DNNFeatures, MAX_SCORE,
 )
+
+# Import ShardWriter from shared module
+from shard_io import ShardWriter
 
 # Constants from nn_train.py
 MATE_FACTOR = 100
@@ -81,6 +99,9 @@ def eval_to_cp_stm(ev, board_turn: bool) -> Optional[int]:
     return score_cp
 
 
+import chess
+
+
 def process_game(game) -> List[Dict[str, Any]]:
     """
     Process a single game and extract positions with features.
@@ -94,7 +115,7 @@ def process_game(game) -> List[Dict[str, Any]]:
     - Only include positions with valid eval comments
 
     Returns:
-        List of dicts with keys: 'score_cp', 'dnn_features', 'nnue_white', 'nnue_black', 'stm'
+        List of dicts with keys: 'score_cp', 'dnn_features', 'nnue_white', 'nnue_black', 'stm', 'fen'
     """
     if game is None:
         return []
@@ -136,6 +157,9 @@ def process_game(game) -> List[Dict[str, Any]]:
         if score_cp is None:
             continue
 
+        # Get FEN for diagnostic records
+        fen = board.fen()
+
         # Extract DNN features (from perspective of side to move)
         dnn_features = DNNFeatures.extract_features(board, board.turn == chess.WHITE)
 
@@ -151,96 +175,11 @@ def process_game(game) -> List[Dict[str, Any]]:
             'dnn_features': dnn_features,
             'nnue_white': nnue_white,
             'nnue_black': nnue_black,
-            'stm': stm
+            'stm': stm,
+            'fen': fen
         })
 
     return positions
-
-
-class ShardWriter:
-    """Handles writing positions to compressed binary shard files."""
-
-    def __init__(self, output_dir: str, prefix: str, nn_type: str, positions_per_shard: int):
-        self.output_dir = Path(output_dir) / nn_type.lower()
-        self.prefix = prefix
-        self.nn_type = nn_type.upper()
-        self.positions_per_shard = positions_per_shard
-
-        # Create output directory
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Current shard state
-        self.current_shard_num = 0
-        self.positions_in_current_shard = 0
-        self.buffer = io.BytesIO()
-        self.total_positions = 0
-
-        # Compression context (reusable)
-        self.cctx = zstd.ZstdCompressor(level=3)
-
-    def _get_shard_path(self, shard_num: int) -> Path:
-        return self.output_dir / f"{self.prefix}_{shard_num:04d}.bin.zst"
-
-    def _flush_shard(self):
-        """Write current buffer to a shard file."""
-        if self.positions_in_current_shard == 0:
-            return
-
-        self.current_shard_num += 1
-        shard_path = self._get_shard_path(self.current_shard_num)
-
-        # Compress and write
-        compressed = self.cctx.compress(self.buffer.getvalue())
-        with open(shard_path, 'wb') as f:
-            f.write(compressed)
-
-        # Reset buffer
-        self.buffer = io.BytesIO()
-        self.positions_in_current_shard = 0
-
-    def add_position(self, position: Dict[str, Any]):
-        """Add a position to the current shard."""
-        score_cp = position['score_cp']
-
-        if self.nn_type == "DNN":
-            features = position['dnn_features']
-            # Format: [score:int16][num_features:uint8][features:uint16[]]
-            self.buffer.write(struct.pack('<h', score_cp))  # int16
-            self.buffer.write(struct.pack('<B', len(features)))  # uint8
-            for f in features:
-                self.buffer.write(struct.pack('<H', f))  # uint16
-        else:  # NNUE
-            white_feat = position['nnue_white']
-            black_feat = position['nnue_black']
-            stm = position['stm']
-            # Format: [score:int16][stm:uint8][num_white:uint8][white:uint16[]]
-            #         [num_black:uint8][black:uint16[]]
-            self.buffer.write(struct.pack('<h', score_cp))  # int16
-            self.buffer.write(struct.pack('<B', stm))  # uint8
-            self.buffer.write(struct.pack('<B', len(white_feat)))  # uint8
-            for f in white_feat:
-                self.buffer.write(struct.pack('<H', f))  # uint16
-            self.buffer.write(struct.pack('<B', len(black_feat)))  # uint8
-            for f in black_feat:
-                self.buffer.write(struct.pack('<H', f))  # uint16
-
-        self.positions_in_current_shard += 1
-        self.total_positions += 1
-
-        # Check if shard is full
-        if self.positions_in_current_shard >= self.positions_per_shard:
-            self._flush_shard()
-
-    def finalize(self):
-        """Flush any remaining positions to a final shard."""
-        if self.positions_in_current_shard > 0:
-            self._flush_shard()
-
-    def get_stats(self) -> Dict[str, int]:
-        return {
-            'total_positions': self.total_positions,
-            'num_shards': self.current_shard_num
-        }
 
 
 class ProgressTracker:

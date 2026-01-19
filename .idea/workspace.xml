@@ -4,14 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="pre-data - train split">
-      <change afterPath="$PROJECT_DIR$/test/verify_data.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="NN vs Stockfish test">
+      <change afterPath="$PROJECT_DIR$/shard_io.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/stockfish_eval.sh" beforeDir="false" afterPath="$PROJECT_DIR$/utils/sf_static_eval.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/verify_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/verify_data.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -128,14 +128,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00088" summary=" 10 epochs val loss 0.56, max_games=20">
-      <option name="closed" value="true" />
-      <created>1767921918525</created>
-      <option name="number" value="00088" />
-      <option name="presentableId" value="LOCAL-00088" />
-      <option name="project" value="LOCAL" />
-      <updated>1767921918525</updated>
     </task>
     <task id="LOCAL-00089" summary=" 2 epochs train loss 0.12, max_games=200">
       <option name="closed" value="true" />
@@ -499,7 +491,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768788605459</updated>
     </task>
-    <option name="localTasksCounter" value="137" />
+    <task id="LOCAL-00137" summary="NN vs Stockfish test">
+      <option name="closed" value="true" />
+      <created>1768840223928</created>
+      <option name="number" value="00137" />
+      <option name="presentableId" value="LOCAL-00137" />
+      <option name="project" value="LOCAL" />
+      <updated>1768840223929</updated>
+    </task>
+    <option name="localTasksCounter" value="138" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -514,7 +514,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Reverting to internal board.  Incremental Evaluation - Accumulator Add/Subtract (500 push/pop cycles)&#10;   Time: 0.0550 seconds" />
     <MESSAGE value="Revert fixed" />
     <MESSAGE value="nn_evaluator.py" />
     <MESSAGE value="tests to cover King moves" />
@@ -539,7 +538,8 @@
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 238/300" />
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 236/300" />
     <MESSAGE value="pre-data - train split" />
-    <option name="LAST_COMMIT_MESSAGE" value="pre-data - train split" />
+    <MESSAGE value="NN vs Stockfish test" />
+    <option name="LAST_COMMIT_MESSAGE" value="NN vs Stockfish test" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

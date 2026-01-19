@@ -22,6 +22,17 @@ Features:
     - Shuffling across multiple shards for better training
     - 90/10 train/validation split by shard files
     - Learning rate scheduling and early stopping
+    - Handles diagnostic records (marker=0xFF) with embedded FEN strings
+
+Binary shard format (created by prepare_data.py):
+    DNN Normal:     [score:int16][num_features:uint8][features:uint16[]]
+    DNN Diagnostic: [0xFF][score:int16][stm:uint8][num_features:uint8][features:uint16[]]
+                    [fen_length:uint8][fen_bytes]
+
+    NNUE Normal:     [score:int16][stm:uint8][num_white:uint8][white:uint16[]]
+                     [num_black:uint8][black:uint16[]]
+    NNUE Diagnostic: [0xFF][score:int16][stm:uint8][num_white:uint8][white:uint16[]]
+                     [num_black:uint8][black:uint16[]][fen_length:uint8][fen_bytes]
 """
 
 import argparse
@@ -29,7 +40,6 @@ import os
 import sys
 import io
 import struct
-import glob
 import random
 import time
 import gc
@@ -428,20 +438,48 @@ class ShardReader:
             return self._read_nnue_shard(buf)
 
     def _read_dnn_shard(self, buf: io.BytesIO) -> DNNPositionArray:
-        """Read DNN positions into compact arrays."""
-        # First pass: count positions and total features
+        """Read DNN positions into compact arrays.
+
+        Handles both normal and diagnostic records:
+        - Normal: [score:int16][num_features:uint8][features:uint16[]]
+        - Diagnostic (marker=0xFF): [marker:uint8][score:int16][stm:uint8][num_features:uint8]
+                                    [features:uint16[]][fen_length:uint8][fen_bytes]
+        """
         positions_data = []
+        DIAGNOSTIC_MARKER = 0xFF
 
         while True:
-            score_bytes = buf.read(2)
-            if len(score_bytes) < 2:
+            first_byte = buf.read(1)
+            if len(first_byte) < 1:
                 break
-            score_cp = struct.unpack('<h', score_bytes)[0]
-            num_features = struct.unpack('<B', buf.read(1))[0]
 
-            features = []
-            for _ in range(num_features):
-                features.append(struct.unpack('<H', buf.read(2))[0])
+            first_val = struct.unpack('<B', first_byte)[0]
+
+            if first_val == DIAGNOSTIC_MARKER:
+                # Diagnostic record: read score, skip stm, read features, skip FEN
+                score_cp = struct.unpack('<h', buf.read(2))[0]
+                _stm = buf.read(1)  # skip STM byte
+                num_features = struct.unpack('<B', buf.read(1))[0]
+
+                features = []
+                for _ in range(num_features):
+                    features.append(struct.unpack('<H', buf.read(2))[0])
+
+                # Skip FEN string
+                fen_length = struct.unpack('<B', buf.read(1))[0]
+                buf.read(fen_length)  # skip FEN bytes
+            else:
+                # Normal record: first_byte is high byte of score (little-endian)
+                # Read the second byte of score
+                second_byte = buf.read(1)
+                if len(second_byte) < 1:
+                    break
+                score_cp = struct.unpack('<h', first_byte + second_byte)[0]
+                num_features = struct.unpack('<B', buf.read(1))[0]
+
+                features = []
+                for _ in range(num_features):
+                    features.append(struct.unpack('<H', buf.read(2))[0])
 
             positions_data.append((score_cp, features))
 
@@ -469,25 +507,59 @@ class ShardReader:
         return DNNPositionArray(scores, all_features, offsets)
 
     def _read_nnue_shard(self, buf: io.BytesIO) -> NNUEPositionArray:
-        """Read NNUE positions into compact arrays."""
+        """Read NNUE positions into compact arrays.
+
+        Handles both normal and diagnostic records:
+        - Normal: [score:int16][stm:uint8][num_white:uint8][white:uint16[]]
+                  [num_black:uint8][black:uint16[]]
+        - Diagnostic (marker=0xFF): [marker:uint8][score:int16][stm:uint8][num_white:uint8]
+                  [white:uint16[]][num_black:uint8][black:uint16[]][fen_length:uint8][fen_bytes]
+        """
         positions_data = []
+        DIAGNOSTIC_MARKER = 0xFF
 
         while True:
-            score_bytes = buf.read(2)
-            if len(score_bytes) < 2:
+            first_byte = buf.read(1)
+            if len(first_byte) < 1:
                 break
-            score_cp = struct.unpack('<h', score_bytes)[0]
-            stm = struct.unpack('<B', buf.read(1))[0]
 
-            num_white = struct.unpack('<B', buf.read(1))[0]
-            white_features = []
-            for _ in range(num_white):
-                white_features.append(struct.unpack('<H', buf.read(2))[0])
+            first_val = struct.unpack('<B', first_byte)[0]
 
-            num_black = struct.unpack('<B', buf.read(1))[0]
-            black_features = []
-            for _ in range(num_black):
-                black_features.append(struct.unpack('<H', buf.read(2))[0])
+            if first_val == DIAGNOSTIC_MARKER:
+                # Diagnostic record
+                score_cp = struct.unpack('<h', buf.read(2))[0]
+                stm = struct.unpack('<B', buf.read(1))[0]
+
+                num_white = struct.unpack('<B', buf.read(1))[0]
+                white_features = []
+                for _ in range(num_white):
+                    white_features.append(struct.unpack('<H', buf.read(2))[0])
+
+                num_black = struct.unpack('<B', buf.read(1))[0]
+                black_features = []
+                for _ in range(num_black):
+                    black_features.append(struct.unpack('<H', buf.read(2))[0])
+
+                # Skip FEN string
+                fen_length = struct.unpack('<B', buf.read(1))[0]
+                buf.read(fen_length)  # skip FEN bytes
+            else:
+                # Normal record: first_byte is high byte of score (little-endian)
+                second_byte = buf.read(1)
+                if len(second_byte) < 1:
+                    break
+                score_cp = struct.unpack('<h', first_byte + second_byte)[0]
+                stm = struct.unpack('<B', buf.read(1))[0]
+
+                num_white = struct.unpack('<B', buf.read(1))[0]
+                white_features = []
+                for _ in range(num_white):
+                    white_features.append(struct.unpack('<H', buf.read(2))[0])
+
+                num_black = struct.unpack('<B', buf.read(1))[0]
+                black_features = []
+                for _ in range(num_black):
+                    black_features.append(struct.unpack('<H', buf.read(2))[0])
 
             positions_data.append((score_cp, stm, white_features, black_features))
 
@@ -1258,17 +1330,8 @@ class Trainer:
         return self.history
 
 
-def discover_shards(data_dir: str, nn_type: str) -> List[str]:
-    """Discover all shard files in a directory."""
-    pattern = os.path.join(data_dir, "*.bin.zst")
-    shards = sorted(glob.glob(pattern))
-
-    if not shards:
-        # Try looking in nn_type subdirectory
-        pattern = os.path.join(data_dir, nn_type.lower(), "*.bin.zst")
-        shards = sorted(glob.glob(pattern))
-
-    return shards
+# Import discover_shards from shared module
+from shard_io import discover_shards
 
 
 def split_shards(shards: List[str], val_ratio: float = VALIDATION_SPLIT_RATIO) -> Tuple[List[str], List[str]]:

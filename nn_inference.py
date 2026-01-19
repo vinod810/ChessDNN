@@ -65,13 +65,19 @@ MAX_SCORE = 10_000
 
 # Pre-computed lookup tables
 _FLIPPED_SQUARES = np.array([(7 - (sq // 8)) * 8 + (sq % 8) for sq in range(64)], dtype=np.int32)
-_DNN_PIECE_TYPE_MAP = np.zeros(7, dtype=np.int32)
-_DNN_PIECE_TYPE_MAP[chess.KING] = 0
-_DNN_PIECE_TYPE_MAP[chess.QUEEN] = 1
-_DNN_PIECE_TYPE_MAP[chess.ROOK] = 2
-_DNN_PIECE_TYPE_MAP[chess.BISHOP] = 3
-_DNN_PIECE_TYPE_MAP[chess.KNIGHT] = 4
-_DNN_PIECE_TYPE_MAP[chess.PAWN] = 5
+
+# Piece type mapping (shared by DNN and NNUE):
+# Uses piece_type - 1 since chess.PAWN=1, chess.KNIGHT=2, chess.BISHOP=3, chess.ROOK=4, chess.QUEEN=5, chess.KING=6
+# This gives: P=0, N=1, B=2, R=3, Q=4, K=5
+#
+# DNN encoding (768 features):
+#   - 12 planes × 64 squares
+#   - Planes 0-5: STM pieces [P, N, B, R, Q, K], Planes 6-11: Opponent pieces
+#   - Feature index = piece_idx * 64 + square
+#
+# NNUE encoding (40,960 features):
+#   - King excluded from piece features (only P, N, B, R, Q)
+#   - Feature index = king_sq * 640 + piece_sq * 10 + (type_idx + color_idx * 5)
 
 
 class NNUEFeatures:
@@ -136,11 +142,25 @@ class NNUEFeatures:
 
 
 class DNNFeatures:
-    """Handles feature extraction for DNN network (768-dimensional one-hot encoding)"""
+    """
+    Handles feature extraction for DNN network (768-dimensional one-hot encoding).
+
+    Encoding scheme:
+    - 12 planes × 64 squares = 768 features
+    - Planes 0-5: STM (side-to-move) pieces [P, N, B, R, Q, K]
+    - Planes 6-11: Opponent pieces [P, N, B, R, Q, K]
+    - Piece order matches NNUE (piece_type - 1): P=0, N=1, B=2, R=3, Q=4, K=5
+    - Board is flipped when Black to move (so STM always sees board from their perspective)
+    - Feature index = piece_idx * 64 + square
+    """
 
     @staticmethod
     def get_piece_index(piece_type: int, is_friendly_piece: bool) -> int:
-        type_idx = int(_DNN_PIECE_TYPE_MAP[piece_type])
+        """Get piece index (0-11) for the feature encoding.
+
+        Uses piece_type - 1 to match NNUE ordering: P=0, N=1, B=2, R=3, Q=4, K=5
+        """
+        type_idx = piece_type - 1  # chess.PAWN=1 -> 0, chess.KNIGHT=2 -> 1, etc.
         return type_idx + (0 if is_friendly_piece else 6)
 
     @staticmethod
@@ -156,8 +176,8 @@ class DNNFeatures:
                 adj_square = int(_FLIPPED_SQUARES[square])
 
             is_friendly_piece = (piece.color == chess.WHITE) == perspective
-            piece_idx = int(_DNN_PIECE_TYPE_MAP[piece.piece_type]) + (0 if is_friendly_piece else 6)
-            feature_idx = adj_square * 12 + piece_idx
+            piece_idx = (piece.piece_type - 1) + (0 if is_friendly_piece else 6)
+            feature_idx = piece_idx * 64 + adj_square
             features.append(feature_idx)
 
         return features
