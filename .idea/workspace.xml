@@ -4,15 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Fixed bugs in DNN data. Refactoring. Untested code.">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Fixed bugs in DNN data. Refactoring. Partially tested code.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_ops_fast.pyx" beforeDir="false" afterPath="$PROJECT_DIR$/nn_ops_fast.pyx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/shard_io.py" beforeDir="false" afterPath="$PROJECT_DIR$/shard_io.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/verify_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/data_test.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -284,14 +279,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00112" summary="Code clean up">
-      <option name="closed" value="true" />
-      <created>1768403852656</created>
-      <option name="number" value="00112" />
-      <option name="presentableId" value="LOCAL-00112" />
-      <option name="project" value="LOCAL" />
-      <updated>1768403852660</updated>
-    </task>
     <task id="LOCAL-00113" summary="Moved common code to nn_inference.py">
       <option name="closed" value="true" />
       <created>1768436880412</created>
@@ -500,7 +487,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768850793815</updated>
     </task>
-    <option name="localTasksCounter" value="139" />
+    <task id="LOCAL-00139" summary="Fixed bugs in DNN data. Refactoring. Partially tested code.">
+      <option name="closed" value="true" />
+      <created>1768868139662</created>
+      <option name="number" value="00139" />
+      <option name="presentableId" value="LOCAL-00139" />
+      <option name="project" value="LOCAL" />
+      <updated>1768868139663</updated>
+    </task>
+    <option name="localTasksCounter" value="140" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -515,7 +510,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="nn_evaluator.py" />
     <MESSAGE value="tests to cover King moves" />
     <MESSAGE value="Minor edits" />
     <MESSAGE value="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207" />
@@ -540,7 +534,8 @@
     <MESSAGE value="pre-data - train split" />
     <MESSAGE value="NN vs Stockfish test" />
     <MESSAGE value="Fixed bugs in DNN data. Refactoring. Untested code." />
-    <option name="LAST_COMMIT_MESSAGE" value="Fixed bugs in DNN data. Refactoring. Untested code." />
+    <MESSAGE value="Fixed bugs in DNN data. Refactoring. Partially tested code." />
+    <option name="LAST_COMMIT_MESSAGE" value="Fixed bugs in DNN data. Refactoring. Partially tested code." />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

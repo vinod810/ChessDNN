@@ -43,15 +43,15 @@ VALID_TEST_TYPES = {
     1: "Incremental-vs-Full",
     2: "Accumulator-Correctness",
     3: "Eval-Accuracy",
-    4: "Feature-Extraction",
-    5: "Symmetry",
-    6: "Edge-Cases",
-    7: "Reset-Consistency",
-    8: "Deep-Search-Simulation",
-    9: "Random-Games",
-    10: "Data-Integrity",
-    11: "All",
-    31: "NN-vs-Stockfish",
+    4: "NN-vs-Stockfish",
+    5: "Feature-Extraction",
+    6: "Symmetry",
+    7: "Edge-Cases",
+    8: "Reset-Consistency",
+    9: "Deep-Search-Simulation",
+    10: "Random-Games",
+    11: "CP-Integrity",
+    12: "All",
 }
 
 
@@ -1255,7 +1255,7 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
 
 
 # =============================================================================
-# Data Integrity Test
+# CP Integrity Test
 # =============================================================================
 import chess
 
@@ -1311,9 +1311,9 @@ def fen_to_sparse_planes_chatgpt(fen: str) -> list[int]:
     return sparse_indices
 
 
-def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "data",
-                        stockfish_path: str = "stockfish", time_limit: float = 2.0,
-                        threshold: float = 0.01):
+def test_cp_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "data",
+                      stockfish_path: str = "stockfish", time_limit: float = 2.0,
+                      threshold: float = 0.01):
     """
     Test training data integrity by comparing stored scores against Stockfish evaluation.
 
@@ -1339,7 +1339,7 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
     from shard_io import ShardReader, find_shards
 
     print("\n" + "=" * 70)
-    print(f"{nn_type} Data Integrity Test")
+    print(f"{nn_type} CP Integrity Test")
     print("=" * 70)
 
     # Constants matching nn_inference.py
@@ -1506,6 +1506,7 @@ def run_all_tests(nn_type: str, model_path: str):
         ("Reset Consistency", lambda: test_reset_consistency(nn_type, model_path)),
         ("Deep Search Simulation", lambda: test_deep_search_simulation(nn_type, model_path, depth=4, num_iterations=20, tolerance=1e-3)),
         ("Random Games", lambda: test_random_games(nn_type, model_path, num_games=5, max_moves=50)),
+        ("CP-Integrity", lambda: test_cp_integrity(nn_type=nn_type)),
     ]
 
     for test_name, test_func in tests:
@@ -1560,15 +1561,15 @@ Test types:
   1  Incremental-vs-Full     - Performance comparison
   2  Accumulator-Correctness - Verify incremental == full evaluation
   3  Eval-Accuracy           - Test prediction accuracy against training data
-  4  Feature-Extraction      - Verify feature extraction correctness
-  5  Symmetry                - Test evaluation symmetry
-  6  Edge-Cases              - Test edge cases (checkmate, stalemate, etc.)
-  7  Reset-Consistency       - Test evaluator reset functionality
-  8  Deep-Search-Simulation  - Simulate deep search with many push/pop cycles
-  9  Random-Games            - Test with random legal move sequences
-  10 Data-Integrity          - Validate training data against Stockfish
-  11 All                     - Run all non-interactive tests
-  31 NN-vs-Stockfish         - Compare NN predictions against Stockfish static eval
+  4  NN-vs-Stockfish         - Compare NN predictions against Stockfish static eval
+  5  Feature-Extraction      - Verify feature extraction correctness
+  6  Symmetry                - Test evaluation symmetry
+  7  Edge-Cases              - Test edge cases (checkmate, stalemate, etc.)
+  8  Reset-Consistency       - Test evaluator reset functionality
+  9  Deep-Search-Simulation  - Simulate deep search with many push/pop cycles
+  10 Random-Games            - Test with random legal move sequences
+  11 CP-Integrity            - Validate training data against Stockfish
+  12 All                     - Run all non-interactive tests
 
 Examples:
   %(prog)s --nn-type NNUE --test 0          # Interactive FEN
@@ -1650,28 +1651,28 @@ Examples:
         '--num-positions',
         type=int,
         default=10,
-        help='Number of positions for Data-Integrity test (default: 10)'
+        help='Number of positions for CP-Integrity test (default: 10)'
     )
 
     parser.add_argument(
         '--data-dir',
         type=str,
         default='data',
-        help='Data directory for Data-Integrity test (default: data)'
+        help='Data directory for CP-Integrity test (default: data)'
     )
 
     parser.add_argument(
         '--stockfish',
         type=str,
         default='stockfish',
-        help='Path to Stockfish binary for Data-Integrity and NN-vs-Stockfish tests (default: stockfish)'
+        help='Path to Stockfish binary for CP-Integrity and NN-vs-Stockfish tests (default: stockfish)'
     )
 
     parser.add_argument(
         '--time-limit',
         type=float,
         default=2.0,
-        help='Stockfish time limit per position in seconds for Data-Integrity test (default: 2.0)'
+        help='Stockfish time limit per position in seconds for CP-Integrity test (default: 2.0)'
     )
 
     args = parser.parse_args()
@@ -1731,8 +1732,8 @@ Examples:
         success = run_all_tests(nn_type, model_path)
         sys.exit(0 if success else 1)
 
-    elif test_type == "Data-Integrity":
-        success = test_data_integrity(
+    elif test_type == "CP-Integrity":
+        success = test_cp_integrity(
             nn_type=nn_type,
             num_positions=args.num_positions,
             data_dir=args.data_dir,

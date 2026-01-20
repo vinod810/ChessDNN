@@ -293,7 +293,11 @@ class ShardReader:
             return self._read_normal_record(buf, first_byte)
 
     def _try_read_diagnostic_record(self, buf: io.BytesIO, include_fen: bool = False) -> Optional[Dict[str, Any]]:
-        """Try to read a diagnostic record. Returns None if validation fails."""
+        """Try to read a diagnostic record. Returns None if validation fails.
+
+        IMPORTANT: Validation must be strict enough to reject random data that
+        happens to start with 0xFF. False positives corrupt parsing.
+        """
         score_cp = struct.unpack('<h', buf.read(2))[0]
         stm = struct.unpack('<B', buf.read(1))[0]
 
@@ -332,6 +336,9 @@ class ShardReader:
                 # Basic FEN validation: should contain '/' and space
                 if '/' not in fen or ' ' not in fen:
                     return None
+                # Additional FEN validation: should have 7 slashes (8 ranks)
+                if fen.count('/') != 7:
+                    return None
             except UnicodeDecodeError:
                 return None
 
@@ -349,8 +356,9 @@ class ShardReader:
         else:  # NNUE
             num_white = struct.unpack('<B', buf.read(1))[0]
 
-            # Validate: at most 15 non-king pieces per side
-            if num_white > 15 or num_white < 0:
+            # Validate: NNUE features are all non-king pieces from one perspective
+            # Maximum is 30 pieces (15 per side × 2 sides, excluding both kings)
+            if num_white > 30:
                 return None
 
             white_features = []
@@ -362,7 +370,7 @@ class ShardReader:
                 white_features.append(feat)
 
             num_black = struct.unpack('<B', buf.read(1))[0]
-            if num_black > 15 or num_black < 0:
+            if num_black > 30:
                 return None
 
             black_features = []
@@ -371,6 +379,9 @@ class ShardReader:
                 if feat >= 40960:
                     return None
                 black_features.append(feat)
+
+            # Note: num_white and num_black should be equal (same pieces, different perspectives)
+            # but we don't enforce this strictly to handle edge cases
 
             fen_length = struct.unpack('<B', buf.read(1))[0]
             if fen_length < 15 or fen_length > 100:
@@ -383,6 +394,9 @@ class ShardReader:
             try:
                 fen = fen_bytes.decode('utf-8')
                 if '/' not in fen or ' ' not in fen:
+                    return None
+                # Additional FEN validation: should have 7 slashes (8 ranks)
+                if fen.count('/') != 7:
                     return None
             except UnicodeDecodeError:
                 return None
