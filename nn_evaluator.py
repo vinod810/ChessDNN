@@ -232,20 +232,20 @@ class DNNEvaluator(NNEvaluator):
 
     def evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators."""
-        if board.is_game_over():
-            if board.is_checkmate():
-                return -MAX_SCORE + board.ply()
-            return 0.0
+        #if board.is_game_over():
+        #    if board.is_checkmate():
+        #        return -MAX_SCORE + board.ply()
+        #    return 0.0
 
         perspective = board.turn == chess.WHITE
         return self.inference.evaluate_incremental(perspective)
 
     def evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
-        if board.is_game_over():
-            if board.is_checkmate():
-                return -MAX_SCORE + board.ply()
-            return 0.0
+        #if board.is_game_over():
+        #    if board.is_checkmate():
+        #        return -MAX_SCORE + board.ply()
+        #    return 0.0
 
         return self.inference.evaluate_board(board)
 
@@ -390,20 +390,20 @@ class NNUEEvaluator(NNEvaluator):
 
     def evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators."""
-        if board.is_game_over():
-            if board.is_checkmate():
-                return -MAX_SCORE + board.ply()
-            return 0.0
+        #if board.is_game_over():
+        #    if board.is_checkmate():
+        #        return -MAX_SCORE + board.ply()
+        #    return 0.0
 
         stm = board.turn == chess.WHITE
         return self.inference.evaluate_incremental(stm)
 
     def evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
-        if board.is_game_over():
-            if board.is_checkmate():
-                return -MAX_SCORE + board.ply()
-            return 0.0
+        #if board.is_game_over():
+        #    if board.is_checkmate():
+        #        return -MAX_SCORE + board.ply()
+        #    return 0.0
 
         return self.inference.evaluate_board(board)
 

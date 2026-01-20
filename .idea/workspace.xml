@@ -4,11 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Builds work. Convergence not yet verified.">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="NNUE and DNN converging well.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -280,14 +281,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00114" summary="More refactoring">
-      <option name="closed" value="true" />
-      <created>1768439918410</created>
-      <option name="number" value="00114" />
-      <option name="presentableId" value="LOCAL-00114" />
-      <option name="project" value="LOCAL" />
-      <updated>1768439918410</updated>
-    </task>
     <task id="LOCAL-00115" summary="Moved ProcessGameWithValidation back to nn_train.py">
       <option name="closed" value="true" />
       <created>1768484508867</created>
@@ -496,7 +489,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768871921874</updated>
     </task>
-    <option name="localTasksCounter" value="141" />
+    <task id="LOCAL-00141" summary="NNUE and DNN converging well.">
+      <option name="closed" value="true" />
+      <created>1768889324764</created>
+      <option name="number" value="00141" />
+      <option name="presentableId" value="LOCAL-00141" />
+      <option name="project" value="LOCAL" />
+      <updated>1768889324764</updated>
+    </task>
+    <option name="localTasksCounter" value="142" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -511,7 +512,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Minor edits" />
     <MESSAGE value="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207" />
     <MESSAGE value="Code clean up" />
     <MESSAGE value="Moved common code to nn_inference.py" />
@@ -536,7 +536,8 @@
     <MESSAGE value="Fixed bugs in DNN data. Refactoring. Untested code." />
     <MESSAGE value="Fixed bugs in DNN data. Refactoring. Partially tested code." />
     <MESSAGE value="Builds work. Convergence not yet verified." />
-    <option name="LAST_COMMIT_MESSAGE" value="Builds work. Convergence not yet verified." />
+    <MESSAGE value="NNUE and DNN converging well." />
+    <option name="LAST_COMMIT_MESSAGE" value="NNUE and DNN converging well." />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -526,7 +526,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
 # =============================================================================
 # NN vs Stockfish Test
 # =============================================================================
-
+# TODO save 10_000 eavluations to a file for faster testing
 def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, stockfish_path: str = "stockfish"):
     """
     Test neural network predictions against Stockfish's static NNUE evaluation.

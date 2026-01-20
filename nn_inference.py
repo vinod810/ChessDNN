@@ -48,7 +48,8 @@ except ImportError:
         get_dnn_feature_index as _cy_get_dnn_feature_index,
     )
     HAS_CYTHON = False
-    print("! Cython not available, using pure Python fallback")
+    #print("! Cython not available, using pure Python fallback")
+    print("\033[91m! Cython not available, using pure Python fallback\033[0m")
 
 
 KING_SQUARES = 64

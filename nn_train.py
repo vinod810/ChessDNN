@@ -61,16 +61,16 @@ from nn_inference import (
 )
 
 # Training configuration
-VALIDATION_SPLIT_RATIO = 0.1  # FIXME 0.02
-BATCH_SIZE = 16384 // 1 # TODO match stockfish
+VALIDATION_SPLIT_RATIO = 0.05  # FIXME 0.02
+BATCH_SIZE = 16384 // 2  # TODO match stockfish (use integer division)
 LEARNING_RATE = 0.001
 
 # Embedding mode: True = use EmbeddingBag (sparse), False = use one-hot dense vectors
 EMBEDDING_BAG = False
 # Adjusted learning rate for dense mode (one-hot vectors may need different tuning)
-LEARNING_RATE_DENSE = 0.001 # TODO try 0.0005
+LEARNING_RATE_DENSE = 0.001  # TODO try 0.0005
 POSITIONS_PER_EPOCH = 10_000_000  # FIXME 100_000_000  # 100M positions per epoch
-VALIDATION_SIZE = int(POSITIONS_PER_EPOCH / 10)  # 10_000_000  # 10M positions for validation (10% of epoch)
+VALIDATION_SIZE = POSITIONS_PER_EPOCH // 20  # 10_000_000  # 10M positions for validation (10% of epoch)
 EPOCHS = 500
 EARLY_STOPPING_PATIENCE = 10
 LR_PATIENCE = 3
@@ -113,7 +113,7 @@ class NNUENetworkSparse(nn.Module):
 
         # First layer as EmbeddingBag (sparse-efficient)
         # EmbeddingBag computes: sum of embeddings for given indices + bias
-        self.ft_weight = nn.EmbeddingBag(input_size, hidden_size, mode='sum', sparse=False)
+        self.ft_weight = nn.EmbeddingBag(input_size, hidden_size, mode='sum', sparse=True)
         self.ft_bias = nn.Parameter(torch.zeros(hidden_size))
 
         # Remaining layers (dense, same as original)
@@ -1156,22 +1156,25 @@ class Trainer:
             self,
             model: nn.Module,
             nn_type: str,
-            train_shards: List[str],
-            val_shards: List[str],
+            data_dir: str,
             device: torch.device,
             batch_size: int = BATCH_SIZE,
             lr: float = LEARNING_RATE,
             num_workers: int = 2,  # Reduced default from 4
-            use_embedding_bag: bool = EMBEDDING_BAG
+            use_embedding_bag: bool = EMBEDDING_BAG,
+            val_ratio: float = VALIDATION_SPLIT_RATIO
     ):
         self.model = model.to(device)
         self.nn_type = nn_type.upper()
-        self.train_shards = train_shards
-        self.val_shards = val_shards
+        self.data_dir = data_dir
+        self.val_ratio = val_ratio
         self.device = device
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.use_embedding_bag = use_embedding_bag
+
+        # Initial shard discovery
+        self._refresh_shards()
 
         self.criterion = nn.MSELoss()
 
@@ -1208,6 +1211,12 @@ class Trainer:
         self.epochs_without_improvement = 0
         self.current_epoch = 0
         self.history = {'train_loss': [], 'val_loss': [], 'lr': []}
+
+    def _refresh_shards(self):
+        """Re-discover shards from data directory and split into train/val."""
+        all_shards = discover_shards(self.data_dir, self.nn_type)
+        self.train_shards, self.val_shards = split_shards(all_shards, val_ratio=self.val_ratio)
+        return len(all_shards)
 
     def _forward_dnn(self, batch):
         """Forward pass for DNN."""
@@ -1431,6 +1440,16 @@ class Trainer:
             self.current_epoch = epoch
             epoch_start = time.time()
 
+            # Re-discover shards at start of each epoch to pick up new data
+            prev_train = len(self.train_shards)
+            prev_val = len(self.val_shards)
+            total_shards = self._refresh_shards()
+            new_train = len(self.train_shards)
+            new_val = len(self.val_shards)
+
+            if new_train != prev_train or new_val != prev_val:
+                print(f"  Shards updated: {prev_train}+{prev_val} -> {new_train}+{new_val} (total: {total_shards})")
+
             print(f"Epoch {epoch}/{epochs}")
             print("-" * 40)
 
@@ -1620,7 +1639,7 @@ Memory Optimization Notes:
     # Determine checkpoint path
     checkpoint_path = args.checkpoint or f"model/{args.nn_type.lower()}.pt"
 
-    # Discover shards
+    # Discover shards (Trainer will re-discover each epoch)
     print(f"Discovering shards in {args.data_dir}...")
     shards = discover_shards(args.data_dir, args.nn_type)
 
@@ -1631,7 +1650,7 @@ Memory Optimization Notes:
 
     print(f"Found {len(shards)} shard files")
 
-    # Split into train/val
+    # Preview train/val split (actual split done in Trainer and refreshed each epoch)
     train_shards, val_shards = split_shards(shards, val_ratio=VALIDATION_SPLIT_RATIO)
     print(f"Train shards: {len(train_shards)}")
     print(f"Validation shards: {len(val_shards)}")
@@ -1671,13 +1690,13 @@ Memory Optimization Notes:
     trainer = Trainer(
         model=model,
         nn_type=args.nn_type,
-        train_shards=train_shards,
-        val_shards=val_shards,
+        data_dir=args.data_dir,
         device=device,
         batch_size=args.batch_size,
         lr=lr,
         num_workers=args.num_workers,
-        use_embedding_bag=EMBEDDING_BAG
+        use_embedding_bag=EMBEDDING_BAG,
+        val_ratio=VALIDATION_SPLIT_RATIO
     )
     # Load checkpoint if resuming
     if args.resume:
@@ -1712,8 +1731,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("KeyboardInterrupt detected, Exiting...\n")
         exit()
-        #response = input("\nKeyboardInterrupt detected. Type 'exit' to quit, Enter to continue: ").strip()
-        #if response.lower() == "exit":
+        # response = input("\nKeyboardInterrupt detected. Type 'exit' to quit, Enter to continue: ").strip()
+        # if response.lower() == "exit":
         #    print("Exiting...\n")
     except Exception as e:
         print("Error:", e)
