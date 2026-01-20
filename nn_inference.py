@@ -88,6 +88,7 @@ class NNUEFeatures:
         if piece_type == chess.KING:
             return -1
         type_idx = piece_type - 1
+        # Enemy features first
         color_idx = 1 if is_friendly_piece else 0
         return type_idx + color_idx * PIECE_TYPES
 

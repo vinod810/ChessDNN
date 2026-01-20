@@ -25,7 +25,7 @@ DNN1024 vs. DNN512
 DNN512 +6.9 ELO / 50 games
 
 NN Training
-DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 91-epochs
+DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 91-epochs( 10M)
 NNUE -
 
 Loss Expectations Revised

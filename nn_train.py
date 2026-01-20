@@ -62,8 +62,13 @@ from nn_inference import (
 
 # Training configuration
 VALIDATION_SPLIT_RATIO = 0.1  # FIXME 0.02
-BATCH_SIZE = 16384
+BATCH_SIZE = 16384 // 1 # TODO match stockfish
 LEARNING_RATE = 0.001
+
+# Embedding mode: True = use EmbeddingBag (sparse), False = use one-hot dense vectors
+EMBEDDING_BAG = False
+# Adjusted learning rate for dense mode (one-hot vectors may need different tuning)
+LEARNING_RATE_DENSE = 0.001 # TODO try 0.0005
 POSITIONS_PER_EPOCH = 10_000_000  # FIXME 100_000_000  # 100M positions per epoch
 VALIDATION_SIZE = int(POSITIONS_PER_EPOCH / 10)  # 10_000_000  # 10M positions for validation (10% of epoch)
 EPOCHS = 500
@@ -108,7 +113,7 @@ class NNUENetworkSparse(nn.Module):
 
         # First layer as EmbeddingBag (sparse-efficient)
         # EmbeddingBag computes: sum of embeddings for given indices + bias
-        self.ft_weight = nn.EmbeddingBag(input_size, hidden_size, mode='sum', sparse=True)
+        self.ft_weight = nn.EmbeddingBag(input_size, hidden_size, mode='sum', sparse=False)
         self.ft_bias = nn.Parameter(torch.zeros(hidden_size))
 
         # Remaining layers (dense, same as original)
@@ -252,6 +257,155 @@ class DNNNetworkSparse(nn.Module):
         """Load weights from standard DNNNetwork state dict."""
         self.l1_weight.weight.data = state_dict['l1.weight'].t()
         self.l1_bias.data = state_dict['l1.bias']
+        self.l2.weight.data = state_dict['l2.weight']
+        self.l2.bias.data = state_dict['l2.bias']
+        self.l3.weight.data = state_dict['l3.weight']
+        self.l3.bias.data = state_dict['l3.bias']
+        self.l4.weight.data = state_dict['l4.weight']
+        self.l4.bias.data = state_dict['l4.bias']
+
+
+# =============================================================================
+# Dense Network Implementations (using one-hot vectors instead of EmbeddingBag)
+# =============================================================================
+
+class NNUENetworkDense(nn.Module):
+    """
+    NNUE Network using dense one-hot vectors instead of EmbeddingBag.
+
+    This creates explicit one-hot dense vectors and uses standard Linear layers
+    for the first layer. More memory intensive but may train differently.
+    """
+
+    def __init__(self, input_size=NNUE_INPUT_SIZE, hidden_size=NNUE_HIDDEN_SIZE):
+        super(NNUENetworkDense, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+
+        # First layer as standard Linear (for dense one-hot input)
+        self.ft = nn.Linear(input_size, hidden_size)
+
+        # Remaining layers (dense, same as original)
+        self.l1 = nn.Linear(hidden_size * 2, 32)
+        self.l2 = nn.Linear(32, 32)
+        self.l3 = nn.Linear(32, 1)
+
+    def forward(self, white_onehot, black_onehot, stm):
+        """
+        Forward pass with dense one-hot vectors.
+
+        Args:
+            white_onehot: (batch_size, input_size) dense one-hot tensor
+            black_onehot: (batch_size, input_size) dense one-hot tensor
+            stm: (batch_size, 1) tensor, 1.0 for white to move, 0.0 for black
+
+        Returns:
+            (batch_size, 1) output tensor
+        """
+        # Compute first layer activations
+        white_hidden = self.ft(white_onehot)
+        black_hidden = self.ft(black_onehot)
+
+        # Clipped ReLU [0, 1]
+        white_hidden = torch.clamp(white_hidden, 0, 1)
+        black_hidden = torch.clamp(black_hidden, 0, 1)
+
+        # Concatenate based on side to move
+        stm_expanded = stm.unsqueeze(-1) if stm.dim() == 1 else stm
+        hidden = torch.where(
+            stm_expanded.bool(),
+            torch.cat([white_hidden, black_hidden], dim=-1),
+            torch.cat([black_hidden, white_hidden], dim=-1)
+        )
+
+        # Dense layers with clipped ReLU
+        x = torch.clamp(self.l1(hidden), 0, 1)
+        x = torch.clamp(self.l2(x), 0, 1)
+        x = self.l3(x)
+        return x
+
+    def to_inference_model(self):
+        """Convert to inference format."""
+        state_dict = {
+            'ft.weight': self.ft.weight.data,
+            'ft.bias': self.ft.bias.data,
+            'l1.weight': self.l1.weight.data,
+            'l1.bias': self.l1.bias.data,
+            'l2.weight': self.l2.weight.data,
+            'l2.bias': self.l2.bias.data,
+            'l3.weight': self.l3.weight.data,
+            'l3.bias': self.l3.bias.data,
+        }
+        return state_dict
+
+    def load_from_inference_model(self, state_dict):
+        """Load weights from standard NNUENetwork state dict."""
+        self.ft.weight.data = state_dict['ft.weight']
+        self.ft.bias.data = state_dict['ft.bias']
+        self.l1.weight.data = state_dict['l1.weight']
+        self.l1.bias.data = state_dict['l1.bias']
+        self.l2.weight.data = state_dict['l2.weight']
+        self.l2.bias.data = state_dict['l2.bias']
+        self.l3.weight.data = state_dict['l3.weight']
+        self.l3.bias.data = state_dict['l3.bias']
+
+
+class DNNNetworkDense(nn.Module):
+    """
+    DNN Network using dense one-hot vectors instead of EmbeddingBag.
+
+    Uses standard Linear layers throughout.
+    """
+
+    def __init__(self, input_size=DNN_INPUT_SIZE, hidden_layers=None):
+        super(DNNNetworkDense, self).__init__()
+        if hidden_layers is None:
+            hidden_layers = DNN_HIDDEN_LAYERS
+
+        self.input_size = input_size
+        self.hidden_layers = hidden_layers
+
+        # All layers as standard Linear
+        self.l1 = nn.Linear(input_size, hidden_layers[0])
+        self.l2 = nn.Linear(hidden_layers[0], hidden_layers[1])
+        self.l3 = nn.Linear(hidden_layers[1], hidden_layers[2])
+        self.l4 = nn.Linear(hidden_layers[2], 1)
+
+    def forward(self, onehot):
+        """
+        Forward pass with dense one-hot vector.
+
+        Args:
+            onehot: (batch_size, input_size) dense one-hot tensor
+
+        Returns:
+            (batch_size, 1) output tensor
+        """
+        x = self.l1(onehot)
+        x = torch.clamp(x, 0, 1)
+        x = torch.clamp(self.l2(x), 0, 1)
+        x = torch.clamp(self.l3(x), 0, 1)
+        x = self.l4(x)
+        return x
+
+    def to_inference_model(self):
+        """Convert to inference format."""
+        state_dict = {
+            'l1.weight': self.l1.weight.data,
+            'l1.bias': self.l1.bias.data,
+            'l2.weight': self.l2.weight.data,
+            'l2.bias': self.l2.bias.data,
+            'l3.weight': self.l3.weight.data,
+            'l3.bias': self.l3.bias.data,
+            'l4.weight': self.l4.weight.data,
+            'l4.bias': self.l4.bias.data,
+        }
+        return state_dict
+
+    def load_from_inference_model(self, state_dict):
+        """Load weights from standard DNNNetwork state dict."""
+        self.l1.weight.data = state_dict['l1.weight']
+        self.l1.bias.data = state_dict['l1.bias']
         self.l2.weight.data = state_dict['l2.weight']
         self.l2.bias.data = state_dict['l2.bias']
         self.l3.weight.data = state_dict['l3.weight']
@@ -535,6 +689,75 @@ def create_nnue_batch_from_array(
     return white_indices, white_offsets, black_indices, black_offsets, stm_t, targets_t
 
 
+def create_dnn_batch_from_array_dense(
+        position_array: DNNPositionArray,
+        indices: np.ndarray,
+        device: torch.device,
+        input_size: int = DNN_INPUT_SIZE
+):
+    """
+    Create dense one-hot batch tensors for DNN training from position array.
+    """
+    scores, all_features, batch_offsets = position_array.get_batch(indices)
+    batch_size = len(indices)
+
+    # Compute targets
+    targets = np.tanh(scores.astype(np.float32) / TANH_SCALE)
+
+    # Create dense one-hot tensor
+    onehot = torch.zeros(batch_size, input_size, device=device)
+
+    # Fill in the one-hot vectors
+    for i in range(batch_size):
+        start = batch_offsets[i]
+        end = batch_offsets[i + 1] if i + 1 < batch_size else len(all_features)
+        feature_indices = all_features[start:end]
+        onehot[i, feature_indices] = 1.0
+
+    targets_t = torch.from_numpy(targets).to(device).unsqueeze(1)
+
+    return onehot, targets_t
+
+
+def create_nnue_batch_from_array_dense(
+        position_array: NNUEPositionArray,
+        indices: np.ndarray,
+        device: torch.device,
+        input_size: int = NNUE_INPUT_SIZE
+):
+    """
+    Create dense one-hot batch tensors for NNUE training from position array.
+    """
+    scores, stm, white_feat, white_off, black_feat, black_off = position_array.get_batch(indices)
+    batch_size = len(indices)
+
+    # Compute targets
+    targets = np.tanh(scores.astype(np.float32) / TANH_SCALE)
+
+    # Create dense one-hot tensors for white and black
+    white_onehot = torch.zeros(batch_size, input_size, device=device)
+    black_onehot = torch.zeros(batch_size, input_size, device=device)
+
+    # Fill in the one-hot vectors for white
+    for i in range(batch_size):
+        start = white_off[i]
+        end = white_off[i + 1] if i + 1 < batch_size else len(white_feat)
+        feature_indices = white_feat[start:end]
+        white_onehot[i, feature_indices] = 1.0
+
+    # Fill in the one-hot vectors for black
+    for i in range(batch_size):
+        start = black_off[i]
+        end = black_off[i + 1] if i + 1 < batch_size else len(black_feat)
+        feature_indices = black_feat[start:end]
+        black_onehot[i, feature_indices] = 1.0
+
+    stm_t = torch.from_numpy(stm.astype(np.float32)).to(device).unsqueeze(1)
+    targets_t = torch.from_numpy(targets).to(device).unsqueeze(1)
+
+    return white_onehot, black_onehot, stm_t, targets_t
+
+
 class DataLoader:
     """
     Memory-efficient data loader with parallel shard reading and batch preparation.
@@ -555,7 +778,8 @@ class DataLoader:
             prefetch_batches: int = PREFETCH_BATCHES,
             shuffle: bool = True,
             max_positions: Optional[int] = None,
-            num_workers: int = 2  # Reduced default from 4
+            num_workers: int = 2,  # Reduced default from 4
+            use_embedding_bag: bool = EMBEDDING_BAG
     ):
         self.shard_files = shard_files.copy()
         self.nn_type = nn_type.upper()
@@ -566,6 +790,7 @@ class DataLoader:
         self.shuffle = shuffle
         self.max_positions = max_positions
         self.num_workers = num_workers
+        self.use_embedding_bag = use_embedding_bag
 
         # Queues for inter-thread communication
         self.shard_queue = queue.Queue()  # Shards to be read
@@ -696,13 +921,23 @@ class DataLoader:
                     if len(batch_arrays_list) == 1:
                         # Simple case: all from one array
                         if self.nn_type == "DNN":
-                            batch = create_dnn_batch_from_array(
-                                batch_arrays_list[0], batch_indices_list[0], self.device
-                            )
+                            if self.use_embedding_bag:
+                                batch = create_dnn_batch_from_array(
+                                    batch_arrays_list[0], batch_indices_list[0], self.device
+                                )
+                            else:
+                                batch = create_dnn_batch_from_array_dense(
+                                    batch_arrays_list[0], batch_indices_list[0], self.device
+                                )
                         else:
-                            batch = create_nnue_batch_from_array(
-                                batch_arrays_list[0], batch_indices_list[0], self.device
-                            )
+                            if self.use_embedding_bag:
+                                batch = create_nnue_batch_from_array(
+                                    batch_arrays_list[0], batch_indices_list[0], self.device
+                                )
+                            else:
+                                batch = create_nnue_batch_from_array_dense(
+                                    batch_arrays_list[0], batch_indices_list[0], self.device
+                                )
                     else:
                         # Multiple arrays: need to combine batches
                         batch = self._combine_batches(batch_arrays_list, batch_indices_list)
@@ -746,11 +981,22 @@ class DataLoader:
 
             targets = np.tanh(scores.astype(np.float32) / TANH_SCALE)
 
-            indices_t = torch.from_numpy(features.astype(np.int64)).to(self.device)
-            offsets_t = torch.from_numpy(offsets.astype(np.int64)).to(self.device)
-            targets_t = torch.from_numpy(targets).to(self.device).unsqueeze(1)
-
-            return indices_t, offsets_t, targets_t
+            if self.use_embedding_bag:
+                indices_t = torch.from_numpy(features.astype(np.int64)).to(self.device)
+                offsets_t = torch.from_numpy(offsets.astype(np.int64)).to(self.device)
+                targets_t = torch.from_numpy(targets).to(self.device).unsqueeze(1)
+                return indices_t, offsets_t, targets_t
+            else:
+                # Dense mode: create one-hot vectors
+                batch_size = sum(len(idx) for idx in indices_list)
+                onehot = torch.zeros(batch_size, DNN_INPUT_SIZE, device=self.device)
+                for i in range(batch_size):
+                    start = offsets[i]
+                    end = offsets[i + 1] if i + 1 < batch_size else len(features)
+                    feature_indices = features[start:end]
+                    onehot[i, feature_indices] = 1.0
+                targets_t = torch.from_numpy(targets).to(self.device).unsqueeze(1)
+                return onehot, targets_t
         else:
             # NNUE
             all_scores = []
@@ -782,14 +1028,29 @@ class DataLoader:
 
             targets = np.tanh(scores.astype(np.float32) / TANH_SCALE)
 
-            white_indices = torch.from_numpy(white_feat.astype(np.int64)).to(self.device)
-            white_offsets = torch.from_numpy(white_off.astype(np.int64)).to(self.device)
-            black_indices = torch.from_numpy(black_feat.astype(np.int64)).to(self.device)
-            black_offsets = torch.from_numpy(black_off.astype(np.int64)).to(self.device)
-            stm_t = torch.from_numpy(stm.astype(np.float32)).to(self.device).unsqueeze(1)
-            targets_t = torch.from_numpy(targets).to(self.device).unsqueeze(1)
-
-            return white_indices, white_offsets, black_indices, black_offsets, stm_t, targets_t
+            if self.use_embedding_bag:
+                white_indices = torch.from_numpy(white_feat.astype(np.int64)).to(self.device)
+                white_offsets = torch.from_numpy(white_off.astype(np.int64)).to(self.device)
+                black_indices = torch.from_numpy(black_feat.astype(np.int64)).to(self.device)
+                black_offsets = torch.from_numpy(black_off.astype(np.int64)).to(self.device)
+                stm_t = torch.from_numpy(stm.astype(np.float32)).to(self.device).unsqueeze(1)
+                targets_t = torch.from_numpy(targets).to(self.device).unsqueeze(1)
+                return white_indices, white_offsets, black_indices, black_offsets, stm_t, targets_t
+            else:
+                # Dense mode: create one-hot vectors
+                batch_size = sum(len(idx) for idx in indices_list)
+                white_onehot = torch.zeros(batch_size, NNUE_INPUT_SIZE, device=self.device)
+                black_onehot = torch.zeros(batch_size, NNUE_INPUT_SIZE, device=self.device)
+                for i in range(batch_size):
+                    w_start = white_off[i]
+                    w_end = white_off[i + 1] if i + 1 < batch_size else len(white_feat)
+                    white_onehot[i, white_feat[w_start:w_end]] = 1.0
+                    b_start = black_off[i]
+                    b_end = black_off[i + 1] if i + 1 < batch_size else len(black_feat)
+                    black_onehot[i, black_feat[b_start:b_end]] = 1.0
+                stm_t = torch.from_numpy(stm.astype(np.float32)).to(self.device).unsqueeze(1)
+                targets_t = torch.from_numpy(targets).to(self.device).unsqueeze(1)
+                return white_onehot, black_onehot, stm_t, targets_t
 
     def start(self):
         """Start all worker threads."""
@@ -900,7 +1161,8 @@ class Trainer:
             device: torch.device,
             batch_size: int = BATCH_SIZE,
             lr: float = LEARNING_RATE,
-            num_workers: int = 2  # Reduced default from 4
+            num_workers: int = 2,  # Reduced default from 4
+            use_embedding_bag: bool = EMBEDDING_BAG
     ):
         self.model = model.to(device)
         self.nn_type = nn_type.upper()
@@ -909,6 +1171,7 @@ class Trainer:
         self.device = device
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.use_embedding_bag = use_embedding_bag
 
         self.criterion = nn.MSELoss()
 
@@ -931,6 +1194,7 @@ class Trainer:
             self.optimizer = optim.SparseAdam(sparse_params, lr=lr)
             self.optimizer_dense = optim.Adam(dense_params, lr=lr)
         else:
+            # Dense mode: use Adam for all parameters
             self.optimizer = optim.Adam(model.parameters(), lr=lr)
             self.optimizer_dense = None
 
@@ -946,15 +1210,27 @@ class Trainer:
         self.history = {'train_loss': [], 'val_loss': [], 'lr': []}
 
     def _forward_dnn(self, batch):
-        """Forward pass for DNN with sparse batch."""
-        indices, offsets, targets = batch
-        outputs = self.model(indices, offsets)
+        """Forward pass for DNN."""
+        if self.use_embedding_bag:
+            # Sparse batch: (indices, offsets, targets)
+            indices, offsets, targets = batch
+            outputs = self.model(indices, offsets)
+        else:
+            # Dense batch: (onehot, targets)
+            onehot, targets = batch
+            outputs = self.model(onehot)
         return outputs, targets
 
     def _forward_nnue(self, batch):
-        """Forward pass for NNUE with sparse batch."""
-        white_indices, white_offsets, black_indices, black_offsets, stm, targets = batch
-        outputs = self.model(white_indices, white_offsets, black_indices, black_offsets, stm)
+        """Forward pass for NNUE."""
+        if self.use_embedding_bag:
+            # Sparse batch: (white_indices, white_offsets, black_indices, black_offsets, stm, targets)
+            white_indices, white_offsets, black_indices, black_offsets, stm, targets = batch
+            outputs = self.model(white_indices, white_offsets, black_indices, black_offsets, stm)
+        else:
+            # Dense batch: (white_onehot, black_onehot, stm, targets)
+            white_onehot, black_onehot, stm, targets = batch
+            outputs = self.model(white_onehot, black_onehot, stm)
         return outputs, targets
 
     def train_epoch(self, positions_per_epoch: int) -> float:
@@ -974,7 +1250,8 @@ class Trainer:
             self.device,
             shuffle=True,
             max_positions=positions_per_epoch,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            use_embedding_bag=self.use_embedding_bag
         )
 
         start_time = time.time()
@@ -1036,7 +1313,8 @@ class Trainer:
             self.device,
             shuffle=False,
             max_positions=max_positions,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            use_embedding_bag=self.use_embedding_bag
         )
 
         with torch.no_grad():
@@ -1363,11 +1641,29 @@ Memory Optimization Notes:
     print(f"Using device: {device}")
     print(f"Data loading workers: {args.num_workers}")
 
-    # Create sparse training model
-    if args.nn_type == "NNUE":
-        model = NNUENetworkSparse(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
+    # Print embedding mode
+    if EMBEDDING_BAG:
+        print(f"Embedding mode: EmbeddingBag (sparse)")
     else:
-        model = DNNNetworkSparse(DNN_INPUT_SIZE)
+        print(f"Embedding mode: Dense one-hot vectors")
+
+    # Adjust learning rate for dense mode if not explicitly set
+    lr = args.lr
+    if not EMBEDDING_BAG and args.lr == LEARNING_RATE:
+        lr = LEARNING_RATE_DENSE
+        print(f"Adjusted learning rate for dense mode: {lr}")
+
+    # Create training model based on embedding mode
+    if args.nn_type == "NNUE":
+        if EMBEDDING_BAG:
+            model = NNUENetworkSparse(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
+        else:
+            model = NNUENetworkDense(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
+    else:
+        if EMBEDDING_BAG:
+            model = DNNNetworkSparse(DNN_INPUT_SIZE)
+        else:
+            model = DNNNetworkDense(DNN_INPUT_SIZE)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -1379,8 +1675,9 @@ Memory Optimization Notes:
         val_shards=val_shards,
         device=device,
         batch_size=args.batch_size,
-        lr=args.lr,
-        num_workers=args.num_workers
+        lr=lr,
+        num_workers=args.num_workers,
+        use_embedding_bag=EMBEDDING_BAG
     )
     # Load checkpoint if resuming
     if args.resume:
@@ -1413,9 +1710,12 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        response = input("\nKeyboardInterrupt detected. Type 'exit' to quit, Enter to continue: ").strip()
-        if response.lower() == "exit":
-            print("Resuming...\n")
+        print("KeyboardInterrupt detected, Exiting...\n")
+        exit()
+        #response = input("\nKeyboardInterrupt detected. Type 'exit' to quit, Enter to continue: ").strip()
+        #if response.lower() == "exit":
+        #    print("Exiting...\n")
     except Exception as e:
         print("Error:", e)
         traceback.print_exc()
+        exit()
