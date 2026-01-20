@@ -38,8 +38,6 @@ Binary shard format (created by prepare_data.py):
 import argparse
 import os
 import sys
-import io
-import struct
 import random
 import time
 import gc
@@ -408,13 +406,15 @@ class ShardReader:
     """
     Reads positions from compressed binary shard files.
 
-    MEMORY OPTIMIZATION: Uses streaming decompression and returns
-    compact NumPy-based position arrays instead of Python dicts.
+    MEMORY OPTIMIZATION: Uses shard_io for parsing, then converts to
+    compact NumPy-based position arrays for efficient training.
     """
 
     def __init__(self, nn_type: str):
         self.nn_type = nn_type.upper()
-        self.dctx = zstd.ZstdDecompressor()
+        # Import here to avoid circular imports
+        from shard_io import ShardReader as BaseShardReader
+        self._base_reader = BaseShardReader(nn_type)
 
     def read_shard(self, shard_path: str):
         """
@@ -423,179 +423,69 @@ class ShardReader:
         Returns:
             DNNPositionArray or NNUEPositionArray depending on nn_type
         """
-        # Use streaming decompression to avoid holding compressed + decompressed in memory
-        with open(shard_path, 'rb') as f:
-            # Stream decompress
-            reader = self.dctx.stream_reader(f)
-            data = reader.read()
-            reader.close()
-
-        buf = io.BytesIO(data)
+        # Use shard_io to read positions (handles diagnostic records properly)
+        positions = self._base_reader.read_all_positions(shard_path, include_fen=False)
 
         if self.nn_type == "DNN":
-            return self._read_dnn_shard(buf)
+            return self._convert_dnn_positions(positions)
         else:
-            return self._read_nnue_shard(buf)
+            return self._convert_nnue_positions(positions)
 
-    def _read_dnn_shard(self, buf: io.BytesIO) -> DNNPositionArray:
-        """Read DNN positions into compact arrays.
-
-        Handles both normal and diagnostic records:
-        - Normal: [score:int16][num_features:uint8][features:uint16[]]
-        - Diagnostic (marker=0xFF): [marker:uint8][score:int16][stm:uint8][num_features:uint8]
-                                    [features:uint16[]][fen_length:uint8][fen_bytes]
-        """
-        positions_data = []
-        DIAGNOSTIC_MARKER = 0xFF
-
-        while True:
-            first_byte = buf.read(1)
-            if len(first_byte) < 1:
-                break
-
-            first_val = struct.unpack('<B', first_byte)[0]
-
-            if first_val == DIAGNOSTIC_MARKER:
-                # Diagnostic record: read score, skip stm, read features, skip FEN
-                score_cp = struct.unpack('<h', buf.read(2))[0]
-                _stm = buf.read(1)  # skip STM byte
-                num_features = struct.unpack('<B', buf.read(1))[0]
-
-                features = []
-                for _ in range(num_features):
-                    features.append(struct.unpack('<H', buf.read(2))[0])
-
-                # Skip FEN string
-                fen_length = struct.unpack('<B', buf.read(1))[0]
-                buf.read(fen_length)  # skip FEN bytes
-            else:
-                # Normal record: first_byte is high byte of score (little-endian)
-                # Read the second byte of score
-                second_byte = buf.read(1)
-                if len(second_byte) < 1:
-                    break
-                score_cp = struct.unpack('<h', first_byte + second_byte)[0]
-                num_features = struct.unpack('<B', buf.read(1))[0]
-
-                features = []
-                for _ in range(num_features):
-                    features.append(struct.unpack('<H', buf.read(2))[0])
-
-            positions_data.append((score_cp, features))
-
-        # Convert to numpy arrays
-        num_positions = len(positions_data)
+    def _convert_dnn_positions(self, positions: list) -> DNNPositionArray:
+        """Convert list of position dicts to compact DNN arrays."""
+        num_positions = len(positions)
         scores = np.empty(num_positions, dtype=np.int16)
         offsets = np.empty(num_positions + 1, dtype=np.int32)
 
         # Calculate total features
-        total_features = sum(len(p[1]) for p in positions_data)
+        total_features = sum(len(p['features']) for p in positions)
         all_features = np.empty(total_features, dtype=np.uint16)
 
         offset = 0
-        for i, (score, features) in enumerate(positions_data):
-            scores[i] = score
+        for i, pos in enumerate(positions):
+            scores[i] = pos['score_cp']
             offsets[i] = offset
+            features = pos['features']
             for j, f in enumerate(features):
                 all_features[offset + j] = f
             offset += len(features)
         offsets[num_positions] = offset
 
-        # Free intermediate data
-        del positions_data
-
         return DNNPositionArray(scores, all_features, offsets)
 
-    def _read_nnue_shard(self, buf: io.BytesIO) -> NNUEPositionArray:
-        """Read NNUE positions into compact arrays.
-
-        Handles both normal and diagnostic records:
-        - Normal: [score:int16][stm:uint8][num_white:uint8][white:uint16[]]
-                  [num_black:uint8][black:uint16[]]
-        - Diagnostic (marker=0xFF): [marker:uint8][score:int16][stm:uint8][num_white:uint8]
-                  [white:uint16[]][num_black:uint8][black:uint16[]][fen_length:uint8][fen_bytes]
-        """
-        positions_data = []
-        DIAGNOSTIC_MARKER = 0xFF
-
-        while True:
-            first_byte = buf.read(1)
-            if len(first_byte) < 1:
-                break
-
-            first_val = struct.unpack('<B', first_byte)[0]
-
-            if first_val == DIAGNOSTIC_MARKER:
-                # Diagnostic record
-                score_cp = struct.unpack('<h', buf.read(2))[0]
-                stm = struct.unpack('<B', buf.read(1))[0]
-
-                num_white = struct.unpack('<B', buf.read(1))[0]
-                white_features = []
-                for _ in range(num_white):
-                    white_features.append(struct.unpack('<H', buf.read(2))[0])
-
-                num_black = struct.unpack('<B', buf.read(1))[0]
-                black_features = []
-                for _ in range(num_black):
-                    black_features.append(struct.unpack('<H', buf.read(2))[0])
-
-                # Skip FEN string
-                fen_length = struct.unpack('<B', buf.read(1))[0]
-                buf.read(fen_length)  # skip FEN bytes
-            else:
-                # Normal record: first_byte is high byte of score (little-endian)
-                second_byte = buf.read(1)
-                if len(second_byte) < 1:
-                    break
-                score_cp = struct.unpack('<h', first_byte + second_byte)[0]
-                stm = struct.unpack('<B', buf.read(1))[0]
-
-                num_white = struct.unpack('<B', buf.read(1))[0]
-                white_features = []
-                for _ in range(num_white):
-                    white_features.append(struct.unpack('<H', buf.read(2))[0])
-
-                num_black = struct.unpack('<B', buf.read(1))[0]
-                black_features = []
-                for _ in range(num_black):
-                    black_features.append(struct.unpack('<H', buf.read(2))[0])
-
-            positions_data.append((score_cp, stm, white_features, black_features))
-
-        # Convert to numpy arrays
-        num_positions = len(positions_data)
+    def _convert_nnue_positions(self, positions: list) -> NNUEPositionArray:
+        """Convert list of position dicts to compact NNUE arrays."""
+        num_positions = len(positions)
         scores = np.empty(num_positions, dtype=np.int16)
         stm_arr = np.empty(num_positions, dtype=np.uint8)
         white_offsets = np.empty(num_positions + 1, dtype=np.int32)
         black_offsets = np.empty(num_positions + 1, dtype=np.int32)
 
-        total_white = sum(len(p[2]) for p in positions_data)
-        total_black = sum(len(p[3]) for p in positions_data)
+        total_white = sum(len(p['white_features']) for p in positions)
+        total_black = sum(len(p['black_features']) for p in positions)
         all_white = np.empty(total_white, dtype=np.uint16)
         all_black = np.empty(total_black, dtype=np.uint16)
 
         w_offset = 0
         b_offset = 0
-        for i, (score, stm, white_feat, black_feat) in enumerate(positions_data):
-            scores[i] = score
-            stm_arr[i] = stm
+        for i, pos in enumerate(positions):
+            scores[i] = pos['score_cp']
+            stm_arr[i] = pos['stm']
 
             white_offsets[i] = w_offset
+            white_feat = pos['white_features']
             for j, f in enumerate(white_feat):
                 all_white[w_offset + j] = f
             w_offset += len(white_feat)
 
             black_offsets[i] = b_offset
+            black_feat = pos['black_features']
             for j, f in enumerate(black_feat):
                 all_black[b_offset + j] = f
             b_offset += len(black_feat)
 
         white_offsets[num_positions] = w_offset
         black_offsets[num_positions] = b_offset
-
-        # Free intermediate data
-        del positions_data
 
         return NNUEPositionArray(scores, stm_arr, all_white, white_offsets, all_black, black_offsets)
 

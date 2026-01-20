@@ -16,7 +16,6 @@ from nn_inference import MAX_SCORE
 
 CURR_DIR = Path(__file__).resolve().parent
 
-# TODO Try NNE style accumulators of HalfKP
 
 # TODO support multiprocessing
 # # Run a search with OMP limited to 1 thread
@@ -50,6 +49,7 @@ MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_DEFAULT_TIME = 30
 MAX_TABLE_SIZE = 200_000
+FULL_EVAl_FREQ = 3000
 
 IS_BLAS_ENABLED = False
 
@@ -125,7 +125,7 @@ history_heuristic = {}
 kpi = {
     "nodes": 0,
     "pos_eval": 0,
-    "dnn_evals": 0,
+    "nn_evals": 0,
     "beta_cutoffs": 0,
     "tt_hits": 0,
     "qs_tt_hits": 0,
@@ -250,15 +250,15 @@ def evaluate_nn(board: CachedBoard) -> int:
         return dnn_eval_cache[key]
 
     # assert (board.is_quiet_position())
-    kpi['dnn_evals'] += 1
+    kpi['nn_evals'] += 1
     score = nn_evaluator.evaluate_centipawns(board)
     dnn_eval_cache[key] = score
 
     # Occasionally do a full evaluation to rule out any drift errors.
-    if kpi['dnn_evals'] % 10_000 == 0:
+    if kpi['nn_evals'] % FULL_EVAl_FREQ == 0:
         full_score = nn_evaluator.evaluate_full_centipawns(board)
         if abs(full_score - score) > 10:
-            print(f"Warning: incremental({score}))and full({full_score}) evaluation differ, {board.fen()}!")
+            print(f"Warning: incremental({score})) and full({full_score}) evaluation differ, {board.fen()}!")
 
     return score
 

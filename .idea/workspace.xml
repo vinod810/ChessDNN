@@ -4,14 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="NN vs Stockfish test">
-      <change afterPath="$PROJECT_DIR$/shard_io.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Fixed bugs in DNN data. Refactoring. Untested code.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_ops_fast.pyx" beforeDir="false" afterPath="$PROJECT_DIR$/nn_ops_fast.pyx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shard_io.py" beforeDir="false" afterPath="$PROJECT_DIR$/shard_io.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/verify_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/verify_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/verify_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/data_test.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -128,14 +129,6 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763527546461</updated>
-    </task>
-    <task id="LOCAL-00089" summary=" 2 epochs train loss 0.12, max_games=200">
-      <option name="closed" value="true" />
-      <created>1767929063144</created>
-      <option name="number" value="00089" />
-      <option name="presentableId" value="LOCAL-00089" />
-      <option name="project" value="LOCAL" />
-      <updated>1767929063144</updated>
     </task>
     <task id="LOCAL-00090" summary="train_nn.py">
       <created>1768014744842</created>
@@ -499,7 +492,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768840223929</updated>
     </task>
-    <option name="localTasksCounter" value="138" />
+    <task id="LOCAL-00138" summary="Fixed bugs in DNN data. Refactoring. Untested code.">
+      <option name="closed" value="true" />
+      <created>1768850793815</created>
+      <option name="number" value="00138" />
+      <option name="presentableId" value="LOCAL-00138" />
+      <option name="project" value="LOCAL" />
+      <updated>1768850793815</updated>
+    </task>
+    <option name="localTasksCounter" value="139" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -514,7 +515,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Revert fixed" />
     <MESSAGE value="nn_evaluator.py" />
     <MESSAGE value="tests to cover King moves" />
     <MESSAGE value="Minor edits" />
@@ -539,7 +539,8 @@
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 236/300" />
     <MESSAGE value="pre-data - train split" />
     <MESSAGE value="NN vs Stockfish test" />
-    <option name="LAST_COMMIT_MESSAGE" value="NN vs Stockfish test" />
+    <MESSAGE value="Fixed bugs in DNN data. Refactoring. Untested code." />
+    <option name="LAST_COMMIT_MESSAGE" value="Fixed bugs in DNN data. Refactoring. Untested code." />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -434,11 +434,17 @@ class DNNIncrementalUpdater:
     @staticmethod
     def _get_feature_for_perspective(perspective: bool, square: int,
                                      piece_type: int, piece_color: bool) -> int:
+        """Get DNN feature index for a piece from a given perspective.
+
+        New encoding: feature_idx = piece_idx * 64 + oriented_square
+        Piece order: P=0, N=1, B=2, R=3, Q=4, K=5 (piece_type - 1)
+        """
         if not perspective:
             square = int(_FLIPPED_SQUARES[square])
         is_friendly_piece = (piece_color == chess.WHITE) == perspective
-        piece_idx = int(_DNN_PIECE_TYPE_MAP[piece_type]) + (0 if is_friendly_piece else 6)
-        return square * 12 + piece_idx
+        # piece_type - 1 gives: PAWN=0, KNIGHT=1, BISHOP=2, ROOK=3, QUEEN=4, KING=5
+        piece_idx = (piece_type - 1) + (0 if is_friendly_piece else 6)
+        return piece_idx * 64 + square
 
     def _remove_piece_features(self, square: int, piece_type: int, piece_color: bool,
                                change_record: Dict[str, Set[int]]):

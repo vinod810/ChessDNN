@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_data.py - Verify data correctness in DNN/NNUE shards.
+data_test.py - Verify data correctness in DNN/NNUE shards.
 
 Uses diagnostic records (marker=0xFF) to compare stored features against
 features recomputed from the embedded FEN string.
@@ -32,53 +32,50 @@ from shard_io import ShardReader, find_shards
 
 
 def dnn_fen_to_sparse_planes(fen: str) -> list[int]:
-    import chess
+    """
+    Sparse one-hot indices for a 12x64 = 768 feature vector.
 
-    def fen_to_sparse_planes(fen: str) -> list[int]:
-        """
-        Sparse one-hot indices for a 12x64 = 768 feature vector.
+    Plane order (python-chess piece order):
+        [P, N, B, R, Q, K]  -> side to move
+        [p, n, b, r, q, k] -> opponent
+    """
+    board = chess.Board(fen)
 
-        Plane order (python-chess piece order):
-            [P, N, B, R, Q, K]  -> side to move
-            [p, n, b, r, q, k] -> opponent
-        """
-        board = chess.Board(fen)
+    # python-chess piece_type values:
+    # PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6
+    # Map directly to 0–5 by subtracting 1
+    piece_to_plane = {
+        chess.PAWN: 0,
+        chess.KNIGHT: 1,
+        chess.BISHOP: 2,
+        chess.ROOK: 3,
+        chess.QUEEN: 4,
+        chess.KING: 5,
+    }
 
-        # python-chess piece_type values:
-        # PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6
-        # Map directly to 0–5 by subtracting 1
-        piece_to_plane = {
-            chess.PAWN: 0,
-            chess.KNIGHT: 1,
-            chess.BISHOP: 2,
-            chess.ROOK: 3,
-            chess.QUEEN: 4,
-            chess.KING: 5,
-        }
+    sparse_indices = []
+    stm = board.turn  # True = White, False = Black
 
-        sparse_indices = []
-        stm = board.turn  # True = White, False = Black
+    for square, piece in board.piece_map().items():
+        # Base plane from python-chess piece order
+        plane = piece_to_plane[piece.piece_type]
 
-        for square, piece in board.piece_map().items():
-            # Base plane from python-chess piece order
-            plane = piece_to_plane[piece.piece_type]
+        # Opponent offset
+        if piece.color != stm:
+            plane += 6
 
-            # Opponent offset
-            if piece.color != stm:
-                plane += 6
+        # Side-to-move perspective
+        if stm == chess.WHITE:
+            oriented_square = square
+        else:
+            oriented_square = chess.square(
+                chess.square_file(square),
+                7 - chess.square_rank(square)
+            )
 
-            # Side-to-move perspective
-            if stm == chess.WHITE:
-                oriented_square = square
-            else:
-                oriented_square = chess.square(
-                    chess.square_file(square),
-                    7 - chess.square_rank(square)
-                )
+        sparse_indices.append(plane * 64 + oriented_square)
 
-            sparse_indices.append(plane * 64 + oriented_square)
-
-        return sorted(sparse_indices)
+    return sorted(sparse_indices)
 
     # """
     # Compute DNN sparse features from FEN.
@@ -119,74 +116,45 @@ def dnn_fen_to_sparse_planes(fen: str) -> list[int]:
 def nnue_fen_to_halfkp_sparse(fen: str):
     import chess
 
-    def fen_to_halfkp_sparse(fen: str):
-        """
-        Encode HalfKP features in sparse format.
+    board = chess.Board(fen)
 
-        Returns:
-            white_features: list[int]
-            black_features: list[int]
+    white_features = []
+    black_features = []
 
-        Feature index range:
-            0 .. (64 * 64 * 5 * 2) - 1
-        """
-        board = chess.Board(fen)
+    white_king = board.king(chess.WHITE)
+    black_king = board.king(chess.BLACK)
 
-        # Non-king piece mapping (python-chess order)
-        piece_to_index = {
-            chess.PAWN: 0,
-            chess.KNIGHT: 1,
-            chess.BISHOP: 2,
-            chess.ROOK: 3,
-            chess.QUEEN: 4,
-        }
+    for square, piece in board.piece_map().items():
+        if piece.piece_type == chess.KING:
+            continue
 
-        white_features = []
-        black_features = []
+        # piece_type: PAWN=1..QUEEN=5 → 0..4
+        type_idx = piece.piece_type - 1
 
-        white_king = board.king(chess.WHITE)
-        black_king = board.king(chess.BLACK)
+        # ---------- WHITE perspective ----------
+        ksq = white_king
+        psq = square
+        color_idx = 1 if piece.color == chess.WHITE else 0 # enemy
 
-        for square, piece in board.piece_map().items():
-            if piece.piece_type == chess.KING:
-                continue
+        index = ksq * 640 + psq * 10 + (type_idx + color_idx * 5)
+        white_features.append(index)
 
-            piece_type = piece_to_index[piece.piece_type]
+        # ---------- BLACK perspective ----------
+        ksq = chess.square(
+            chess.square_file(black_king),
+            7 - chess.square_rank(black_king)
+        )
+        psq = chess.square(
+            chess.square_file(square),
+            7 - chess.square_rank(square)
+        )
+        color_idx = 1 if piece.color == chess.BLACK else 0
 
-            # ---------- WHITE perspective ----------
-            wk = white_king
-            psq = square
-            ksq = wk
+        index = ksq * 640 + psq * 10 + (type_idx + color_idx * 5)
+        black_features.append(index)
 
-            color = 0 if piece.color == chess.WHITE else 1
+    return sorted(white_features), sorted(black_features)
 
-            index = (
-                    (((ksq * 64 + psq) * 5 + piece_type) * 2)
-                    + color
-            )
-            white_features.append(index)
-
-            # ---------- BLACK perspective ----------
-            bk = black_king
-
-            ksq = chess.square(
-                chess.square_file(bk),
-                7 - chess.square_rank(bk)
-            )
-            psq = chess.square(
-                chess.square_file(square),
-                7 - chess.square_rank(square)
-            )
-
-            color = 0 if piece.color == chess.BLACK else 1
-
-            index = (
-                    (((ksq * 64 + psq) * 5 + piece_type) * 2)
-                    + color
-            )
-            black_features.append(index)
-
-        return sorted(white_features), sorted(black_features)
 
     # """
     # Compute NNUE HalfKP sparse features from FEN.
@@ -431,16 +399,16 @@ def main():
         epilog="""
 Examples:
     # Auto-detect and verify shards in data/ directory
-    python verify_data.py
+    python data_test.py
 
     # Verify specific DNN shard
-    python verify_data.py --dnn-shard data/dnn/train_0001.bin.zst
+    python data_test.py --dnn-shard data/dnn/train_0001.bin.zst
 
     # Verify specific NNUE shard
-    python verify_data.py --nnue-shard data/nnue/train_0001.bin.zst
+    python data_test.py --nnue-shard data/nnue/train_0001.bin.zst
 
     # Analyze shard statistics
-    python verify_data.py --analyze data/nnue/train_0001.bin.zst --nn-type NNUE
+    python data_test.py --analyze data/nnue/train_0001.bin.zst --nn-type NNUE
 """
     )
 

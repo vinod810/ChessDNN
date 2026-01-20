@@ -377,183 +377,40 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
     """
     Test evaluation accuracy against ground truth from training data shards.
 
-    Reads positions from binary shard files in data/{dnn,nnue}/ and compares
+    Uses diagnostic records (with FEN) from binary shard files to compare
     model predictions against stored Stockfish evaluations.
     """
-    import struct
     from pathlib import Path
+    from shard_io import ShardReader, find_shards
 
     print("\n" + "=" * 70)
     print(f"{nn_type} Evaluation Accuracy Test")
     print("=" * 70)
 
     # Find shard files
-    nn_type_lower = nn_type.lower()
-    shard_dir = Path("data") / nn_type_lower
-    shard_files = glob.glob(str(shard_dir / "*.bin.zst"))
+    dnn_shards, nnue_shards = find_shards("data", nn_type)
+    shard_files = dnn_shards if nn_type.upper() == "DNN" else nnue_shards
 
     if not shard_files:
-        print(f"\n❌ ERROR: No shard files found in {shard_dir}/")
+        print(f"\n❌ ERROR: No shard files found for {nn_type}")
         print("Please ensure .bin.zst files exist in the data directory")
         return
 
     # Pick a random shard
     shard_path = random.choice(shard_files)
-    print(f"\nReading positions from: {shard_path}")
+    print(f"\nReading diagnostic records from: {shard_path}")
 
-    # Read and decompress shard
-    with open(shard_path, 'rb') as f:
-        compressed = f.read()
+    # Read diagnostic records (which have FEN)
+    reader = ShardReader(nn_type)
+    records = reader.read_diagnostic_records(shard_path, max_records=positions_size)
 
-    dctx = zstd.ZstdDecompressor()
-    data = dctx.decompress(compressed)
-    buf = io.BytesIO(data)
-
-    # Feature decoders (same as data integrity test)
-    TYPE_IDX_TO_PIECE = {0: chess.KING, 1: chess.QUEEN, 2: chess.ROOK,
-                         3: chess.BISHOP, 4: chess.KNIGHT, 5: chess.PAWN}
-    NNUE_TYPE_IDX_TO_PIECE = {0: chess.PAWN, 1: chess.KNIGHT, 2: chess.BISHOP,
-                               3: chess.ROOK, 4: chess.QUEEN}
-    flipped_squares = [(7 - (sq // 8)) * 8 + (sq % 8) for sq in range(64)]
-
-    def decode_dnn_features(features, stm_is_white):
-        """Reconstruct board from DNN features."""
-        board = chess.Board(fen=None)
-        board.clear()
-
-        for feat_idx in features:
-            adj_square = feat_idx // 12
-            piece_idx = feat_idx % 12
-            is_friendly = piece_idx < 6
-            type_idx = piece_idx % 6
-            piece_type = TYPE_IDX_TO_PIECE[type_idx]
-
-            if stm_is_white:
-                actual_square = adj_square
-                is_white_piece = is_friendly
-            else:
-                actual_square = flipped_squares[adj_square]
-                is_white_piece = not is_friendly
-
-            color = chess.WHITE if is_white_piece else chess.BLACK
-            board.set_piece_at(actual_square, chess.Piece(piece_type, color))
-
-        board.turn = chess.WHITE if stm_is_white else chess.BLACK
-        board.castling_rights = chess.BB_EMPTY
-
-        # Heuristic castling rights
-        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
-            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_H1
-            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_A1
-        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
-            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_H8
-            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_A8
-
-        board.ep_square = None
-        return board
-
-    def decode_nnue_features(white_features, black_features, stm_is_white):
-        """Reconstruct board from NNUE features."""
-        board = chess.Board(fen=None)
-        board.clear()
-
-        white_king_sq = None
-        black_king_sq = None
-
-        # Process white perspective features to get white king and all pieces
-        for feat_idx in white_features:
-            king_sq = feat_idx // 640
-            remainder = feat_idx % 640
-            piece_sq = remainder // 10
-            piece_idx = remainder % 10
-
-            color_idx = piece_idx // 5
-            type_idx = piece_idx % 5
-
-            is_friendly = (color_idx == 1)
-            piece_type = NNUE_TYPE_IDX_TO_PIECE[type_idx]
-
-            white_king_sq = king_sq
-            is_white_piece = is_friendly
-            color = chess.WHITE if is_white_piece else chess.BLACK
-            board.set_piece_at(piece_sq, chess.Piece(piece_type, color))
-
-        # Process black perspective features to get black king square
-        if black_features:
-            feat_idx = black_features[0]
-            king_sq_flipped = feat_idx // 640
-            black_king_sq = flipped_squares[king_sq_flipped]
-
-        # Place kings
-        if white_king_sq is not None:
-            board.set_piece_at(white_king_sq, chess.Piece(chess.KING, chess.WHITE))
-        if black_king_sq is not None:
-            board.set_piece_at(black_king_sq, chess.Piece(chess.KING, chess.BLACK))
-
-        board.turn = chess.WHITE if stm_is_white else chess.BLACK
-        board.castling_rights = chess.BB_EMPTY
-
-        # Heuristic castling
-        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
-            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_H1
-            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_A1
-        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
-            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_H8
-            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_A8
-
-        board.ep_square = None
-        return board
-
-    # Parse positions from shard
-    # DNN format: [score:int16][num_features:uint8][features:uint16[]]
-    # NNUE format: [score:int16][stm:uint8][num_white:uint8][white:uint16[]][num_black:uint8][black:uint16[]]
-    positions = []
-    read_limit = positions_size * 2  # Read extra for random sampling
-
-    print("Parsing shard data...")
-    while len(positions) < read_limit:
-        try:
-            score_cp = struct.unpack('<h', buf.read(2))[0]
-
-            if nn_type.upper() == "DNN":
-                num_features = struct.unpack('<B', buf.read(1))[0]
-                features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_features)]
-                positions.append({
-                    'score_cp': score_cp,
-                    'features': features,
-                    'stm_is_white': True  # DNN uses STM perspective
-                })
-            else:  # NNUE
-                stm = struct.unpack('<B', buf.read(1))[0]
-                num_white = struct.unpack('<B', buf.read(1))[0]
-                white_features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_white)]
-                num_black = struct.unpack('<B', buf.read(1))[0]
-                black_features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_black)]
-                positions.append({
-                    'score_cp': score_cp,
-                    'stm_is_white': stm == 1,
-                    'white_features': white_features,
-                    'black_features': black_features,
-                })
-        except struct.error:
-            break
-
-    if len(positions) > positions_size:
-        positions = random.sample(positions, positions_size)
-
-    if not positions:
-        print("\n❌ ERROR: No valid positions found in shard file")
+    if not records:
+        print("\n❌ ERROR: No diagnostic records found in shard file")
+        print("Diagnostic records are written every 1000 positions and include FEN.")
+        print("You may need to regenerate shards with the updated prepare_data.py")
         return
 
-    print(f"✓ Loaded {len(positions)} positions from shard")
+    print(f"✓ Loaded {len(records)} diagnostic records from shard")
 
     # Create evaluator
     board = chess.Board()
@@ -569,27 +426,25 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
     fen_list = []
     errors = []
 
-    for i, pos in enumerate(positions):
-        if (i + 1) % max(1, len(positions) // 10) == 0:
-            print(f"  Progress: {i + 1}/{len(positions)}")
+    for i, rec in enumerate(records):
+        if (i + 1) % max(1, len(records) // 10) == 0:
+            print(f"  Progress: {i + 1}/{len(records)}")
 
         try:
-            # Reconstruct FEN for display
+            fen = rec['fen']
+            stm_is_white = rec['stm'] == 1
+
+            # Evaluate using features from shard
             if nn_type.upper() == "DNN":
-                board = decode_dnn_features(pos['features'], pos['stm_is_white'])
-                pred_output = evaluator.inference.evaluate_full(pos['features'])
-            else:
-                board = decode_nnue_features(pos['white_features'], pos['black_features'], pos['stm_is_white'])
-                stm = pos['stm_is_white']
+                pred_output = evaluator.inference.evaluate_full(rec['features'])
+            else:  # NNUE
                 pred_output = evaluator.inference.evaluate_full(
-                    pos['white_features'],
-                    pos['black_features'],
-                    stm
+                    rec['white_features'],
+                    rec['black_features'],
+                    stm_is_white
                 )
 
-            fen = board.fen() if board.is_valid() else "INVALID"
-
-            true_tanh = np.tanh(pos['score_cp'] / TANH_SCALE)
+            true_tanh = np.tanh(rec['score_cp'] / TANH_SCALE)
 
             # Convert prediction to CP and cap at MAX_SCORE
             pred_cp_raw = np.arctanh(np.clip(pred_output, -0.99999, 0.99999)) * TANH_SCALE
@@ -597,7 +452,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
 
             true_tanh_values.append(true_tanh)
             pred_tanh_values.append(pred_output)
-            true_cp_list.append(pos['score_cp'])
+            true_cp_list.append(rec['score_cp'])
             pred_cp_list.append(pred_cp_capped)
             fen_list.append(fen)
 
@@ -676,141 +531,41 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     """
     Test neural network predictions against Stockfish's static NNUE evaluation.
 
-    Reads positions from binary shard files in data/{dnn,nnue}/, reconstructs
-    the FEN, gets Stockfish's static eval, and compares against NN predictions.
+    Uses diagnostic records (with FEN) from binary shard files to get actual
+    positions, then compares NN predictions against Stockfish's static eval.
     """
-    import struct
     import subprocess
     from pathlib import Path
+    from shard_io import ShardReader, find_shards
 
     print("\n" + "=" * 70)
     print(f"{nn_type} vs Stockfish Static Evaluation Test")
     print("=" * 70)
 
     # Find shard files
-    nn_type_lower = nn_type.lower()
-    shard_dir = Path("data") / nn_type_lower
-    shard_files = glob.glob(str(shard_dir / "*.bin.zst"))
+    dnn_shards, nnue_shards = find_shards("data", nn_type)
+    shard_files = dnn_shards if nn_type.upper() == "DNN" else nnue_shards
 
     if not shard_files:
-        print(f"\n❌ ERROR: No shard files found in {shard_dir}/")
+        print(f"\n❌ ERROR: No shard files found for {nn_type}")
         print("Please ensure .bin.zst files exist in the data directory")
         return
 
     # Pick a random shard
     shard_path = random.choice(shard_files)
-    print(f"\nReading positions from: {shard_path}")
+    print(f"\nReading diagnostic records from: {shard_path}")
 
-    # Read and decompress shard
-    with open(shard_path, 'rb') as f:
-        compressed = f.read()
+    # Read diagnostic records (which have FEN)
+    reader = ShardReader(nn_type)
+    records = reader.read_diagnostic_records(shard_path, max_records=positions_size)
 
-    dctx = zstd.ZstdDecompressor()
-    data = dctx.decompress(compressed)
-    buf = io.BytesIO(data)
+    if not records:
+        print("\n❌ ERROR: No diagnostic records found in shard file")
+        print("Diagnostic records are written every 1000 positions and include FEN.")
+        print("You may need to regenerate shards with the updated prepare_data.py")
+        return
 
-    # Feature decoders (same as test_eval_accuracy)
-    TYPE_IDX_TO_PIECE = {0: chess.KING, 1: chess.QUEEN, 2: chess.ROOK,
-                         3: chess.BISHOP, 4: chess.KNIGHT, 5: chess.PAWN}
-    NNUE_TYPE_IDX_TO_PIECE = {0: chess.PAWN, 1: chess.KNIGHT, 2: chess.BISHOP,
-                               3: chess.ROOK, 4: chess.QUEEN}
-    flipped_squares = [(7 - (sq // 8)) * 8 + (sq % 8) for sq in range(64)]
-
-    def decode_dnn_features(features, stm_is_white):
-        """Reconstruct board from DNN features."""
-        board = chess.Board(fen=None)
-        board.clear()
-
-        for feat_idx in features:
-            adj_square = feat_idx // 12
-            piece_idx = feat_idx % 12
-            is_friendly = piece_idx < 6
-            type_idx = piece_idx % 6
-            piece_type = TYPE_IDX_TO_PIECE[type_idx]
-
-            if stm_is_white:
-                actual_square = adj_square
-                is_white_piece = is_friendly
-            else:
-                actual_square = flipped_squares[adj_square]
-                is_white_piece = not is_friendly
-
-            color = chess.WHITE if is_white_piece else chess.BLACK
-            board.set_piece_at(actual_square, chess.Piece(piece_type, color))
-
-        board.turn = chess.WHITE if stm_is_white else chess.BLACK
-        board.castling_rights = chess.BB_EMPTY
-
-        # Heuristic castling rights
-        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
-            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_H1
-            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_A1
-        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
-            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_H8
-            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_A8
-
-        board.ep_square = None
-        return board
-
-    def decode_nnue_features(white_features, black_features, stm_is_white):
-        """Reconstruct board from NNUE features."""
-        board = chess.Board(fen=None)
-        board.clear()
-
-        white_king_sq = None
-        black_king_sq = None
-
-        # Process white perspective features to get white king and all pieces
-        for feat_idx in white_features:
-            king_sq = feat_idx // 640
-            remainder = feat_idx % 640
-            piece_sq = remainder // 10
-            piece_idx = remainder % 10
-
-            color_idx = piece_idx // 5
-            type_idx = piece_idx % 5
-
-            is_friendly = (color_idx == 1)
-            piece_type = NNUE_TYPE_IDX_TO_PIECE[type_idx]
-
-            white_king_sq = king_sq
-            is_white_piece = is_friendly
-            color = chess.WHITE if is_white_piece else chess.BLACK
-            board.set_piece_at(piece_sq, chess.Piece(piece_type, color))
-
-        # Process black perspective features to get black king square
-        if black_features:
-            feat_idx = black_features[0]
-            king_sq_flipped = feat_idx // 640
-            black_king_sq = flipped_squares[king_sq_flipped]
-
-        # Place kings
-        if white_king_sq is not None:
-            board.set_piece_at(white_king_sq, chess.Piece(chess.KING, chess.WHITE))
-        if black_king_sq is not None:
-            board.set_piece_at(black_king_sq, chess.Piece(chess.KING, chess.BLACK))
-
-        board.turn = chess.WHITE if stm_is_white else chess.BLACK
-        board.castling_rights = chess.BB_EMPTY
-
-        # Heuristic castling
-        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
-            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_H1
-            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_A1
-        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
-            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_H8
-            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_A8
-
-        board.ep_square = None
-        return board
+    print(f"✓ Loaded {len(records)} diagnostic records from shard")
 
     def get_stockfish_static_eval(fen: str) -> float:
         """Get Stockfish's static NNUE evaluation for a position."""
@@ -847,47 +602,6 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
         return
     print(f"✓ Stockfish working (startpos eval: {test_score:+.1f} cp)")
 
-    # Parse positions from shard
-    positions = []
-    read_limit = positions_size * 2  # Read extra for random sampling
-
-    print("\nParsing shard data...")
-    while len(positions) < read_limit:
-        try:
-            score_cp = struct.unpack('<h', buf.read(2))[0]
-
-            if nn_type.upper() == "DNN":
-                num_features = struct.unpack('<B', buf.read(1))[0]
-                features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_features)]
-                positions.append({
-                    'score_cp': score_cp,
-                    'features': features,
-                    'stm_is_white': True
-                })
-            else:  # NNUE
-                stm = struct.unpack('<B', buf.read(1))[0]
-                num_white = struct.unpack('<B', buf.read(1))[0]
-                white_features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_white)]
-                num_black = struct.unpack('<B', buf.read(1))[0]
-                black_features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_black)]
-                positions.append({
-                    'score_cp': score_cp,
-                    'stm_is_white': stm == 1,
-                    'white_features': white_features,
-                    'black_features': black_features,
-                })
-        except struct.error:
-            break
-
-    if len(positions) > positions_size:
-        positions = random.sample(positions, positions_size)
-
-    if not positions:
-        print("\n❌ ERROR: No valid positions found in shard file")
-        return
-
-    print(f"✓ Loaded {len(positions)} positions from shard")
-
     # Create evaluator
     board = chess.Board()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
@@ -904,29 +618,23 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     fen_list = []
     errors = []
 
-    for i, pos in enumerate(positions):
-        if (i + 1) % max(1, len(positions) // 10) == 0:
-            print(f"  Progress: {i + 1}/{len(positions)}")
+    for i, rec in enumerate(records):
+        if (i + 1) % max(1, len(records) // 10) == 0:
+            print(f"  Progress: {i + 1}/{len(records)}")
 
         try:
-            # Reconstruct FEN
+            fen = rec['fen']
+            stm_is_white = rec['stm'] == 1
+
+            # Evaluate using features from shard
             if nn_type.upper() == "DNN":
-                board = decode_dnn_features(pos['features'], pos['stm_is_white'])
-                pred_output = evaluator.inference.evaluate_full(pos['features'])
-            else:
-                board = decode_nnue_features(pos['white_features'], pos['black_features'], pos['stm_is_white'])
-                stm = pos['stm_is_white']
+                pred_output = evaluator.inference.evaluate_full(rec['features'])
+            else:  # NNUE
                 pred_output = evaluator.inference.evaluate_full(
-                    pos['white_features'],
-                    pos['black_features'],
-                    stm
+                    rec['white_features'],
+                    rec['black_features'],
+                    stm_is_white
                 )
-
-            if not board.is_valid():
-                errors.append((i, "Invalid board reconstructed"))
-                continue
-
-            fen = board.fen()
 
             # Get Stockfish static eval (from white's perspective)
             sf_cp_white = get_stockfish_static_eval(fen)
@@ -935,7 +643,7 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
                 continue
 
             # Convert to STM perspective (matching how our NN is trained)
-            if not pos['stm_is_white']:
+            if not stm_is_white:
                 sf_cp_stm = -sf_cp_white
             else:
                 sf_cp_stm = sf_cp_white
@@ -949,14 +657,14 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
             pred_cp_raw = np.arctanh(np.clip(pred_output, -0.99999, 0.99999)) * TANH_SCALE
             pred_cp_capped = max(-MAX_SCORE, min(MAX_SCORE, pred_cp_raw))
 
-            true_tanh = np.tanh(pos['score_cp'] / TANH_SCALE)
+            true_tanh = np.tanh(rec['score_cp'] / TANH_SCALE)
 
             sf_tanh_values.append(sf_tanh)
             true_tanh_values.append(true_tanh)
             pred_tanh_values.append(pred_output)
             sf_cp_list.append(sf_cp_capped)
             pred_cp_list.append(pred_cp_capped)
-            true_cp_list.append(pos['score_cp'])
+            true_cp_list.append(rec['score_cp'])
             fen_list.append(fen)
 
         except Exception as e:
@@ -1607,16 +1315,12 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
                         stockfish_path: str = "stockfish", time_limit: float = 2.0,
                         threshold: float = 0.01):
     """
-    Test training data integrity by reconstructing positions from binary shard files
-    and comparing stored scores against Stockfish evaluation.
+    Test training data integrity by comparing stored scores against Stockfish evaluation.
 
-    This test:
-    1. Picks a random shard file from data/{dnn,nnue}/
-    2. Reads N random positions from the shard
-    3. Reconstructs the FEN from sparse features
-    4. Runs Stockfish for 2 seconds on each position
-    5. Compares stored score (STM perspective) against Stockfish score (also STM perspective)
-    6. Flags if difference > threshold in tanh scale
+    Uses diagnostic records (with FEN) from shard files to:
+    1. Get the actual FEN for each position
+    2. Run Stockfish analysis on that FEN
+    3. Compare stored score (STM perspective) against Stockfish score
 
     Args:
         nn_type: "DNN" or "NNUE"
@@ -1629,11 +1333,10 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
     Returns:
         True if all validations pass, False otherwise
     """
-    import glob
-    import struct
     import math
     from pathlib import Path
     import chess.engine
+    from shard_io import ShardReader, find_shards
 
     print("\n" + "=" * 70)
     print(f"{nn_type} Data Integrity Test")
@@ -1649,63 +1352,28 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
         return math.tanh(cp / scale)
 
     # Find shard files
-    nn_type_upper = nn_type.upper()
-    shard_dir = Path(data_dir) / nn_type.lower()
-    shard_files = glob.glob(str(shard_dir / "*.bin.zst"))
+    dnn_shards, nnue_shards = find_shards(data_dir, nn_type)
+    shard_files = dnn_shards if nn_type.upper() == "DNN" else nnue_shards
 
     if not shard_files:
-        print(f"\n❌ ERROR: No shard files found in {shard_dir}")
+        print(f"\n❌ ERROR: No shard files found for {nn_type}")
         return False
 
     # Pick random shard
     shard_path = random.choice(shard_files)
     print(f"\nSelected shard: {shard_path}")
 
-    # Read positions from shard
-    with open(shard_path, 'rb') as f:
-        compressed = f.read()
+    # Read diagnostic records (which have FEN)
+    reader = ShardReader(nn_type)
+    records = reader.read_diagnostic_records(shard_path, max_records=num_positions)
 
-    dctx = zstd.ZstdDecompressor()
-    data = dctx.decompress(compressed)
-    buf = io.BytesIO(data)
+    if not records:
+        print("\n❌ ERROR: No diagnostic records found in shard file")
+        print("Diagnostic records are written every 1000 positions and include FEN.")
+        print("You may need to regenerate shards with the updated prepare_data.py")
+        return False
 
-    positions = []
-    read_limit = num_positions * 10  # Read extra for random sampling
-
-    # DNN format: [score:int16][num_features:uint8][features:uint16[]]
-    # NNUE format: [score:int16][stm:uint8][num_white:uint8][white:uint16[]][num_black:uint8][black:uint16[]]
-
-    while len(positions) < read_limit:
-        try:
-            score_cp = struct.unpack('<h', buf.read(2))[0]
-
-            if nn_type_upper == "DNN":
-                num_features = struct.unpack('<B', buf.read(1))[0]
-                features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_features)]
-                positions.append({
-                    'score_cp': score_cp,
-                    'features': features,
-                    'stm_is_white': True  # DNN data assumes white to move
-                })
-            else:  # NNUE
-                stm = struct.unpack('<B', buf.read(1))[0]
-                num_white = struct.unpack('<B', buf.read(1))[0]
-                white_features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_white)]
-                num_black = struct.unpack('<B', buf.read(1))[0]
-                black_features = [struct.unpack('<H', buf.read(2))[0] for _ in range(num_black)]
-                positions.append({
-                    'score_cp': score_cp,
-                    'stm_is_white': stm == 1,
-                    'white_features': white_features,
-                    'black_features': black_features,
-                })
-        except struct.error:
-            break
-
-    if len(positions) > num_positions:
-        positions = random.sample(positions, num_positions)
-
-    print(f"Read {len(positions)} positions for validation")
+    print(f"Read {len(records)} diagnostic records for validation")
 
     # Initialize Stockfish
     try:
@@ -1714,130 +1382,7 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
         print(f"\n❌ ERROR: Could not initialize Stockfish at '{stockfish_path}': {e}")
         return False
 
-    # Feature decoders
-    # DNN: feature_idx = adj_square * 12 + piece_idx
-    #      piece_idx = type_idx + (0 if friendly else 6)
-    #      type_idx: KING=0, QUEEN=1, ROOK=2, BISHOP=3, KNIGHT=4, PAWN=5
-    TYPE_IDX_TO_PIECE = {0: chess.KING, 1: chess.QUEEN, 2: chess.ROOK,
-                         3: chess.BISHOP, 4: chess.KNIGHT, 5: chess.PAWN}
-
-    flipped_squares = [(7 - (sq // 8)) * 8 + (sq % 8) for sq in range(64)]
-
-    def decode_dnn_features(features, stm_is_white):
-        """Reconstruct board from DNN features."""
-        board = chess.Board(fen=None)
-        board.clear()
-
-        for feat_idx in features:
-            adj_square = feat_idx // 12
-            piece_idx = feat_idx % 12
-            is_friendly = piece_idx < 6
-            type_idx = piece_idx % 6
-            piece_type = TYPE_IDX_TO_PIECE[type_idx]
-
-            if stm_is_white:
-                actual_square = adj_square
-                is_white_piece = is_friendly
-            else:
-                actual_square = flipped_squares[adj_square]
-                is_white_piece = not is_friendly
-
-            color = chess.WHITE if is_white_piece else chess.BLACK
-            board.set_piece_at(actual_square, chess.Piece(piece_type, color))
-
-        board.turn = chess.WHITE if stm_is_white else chess.BLACK
-        board.castling_rights = chess.BB_EMPTY
-
-        # Heuristic castling rights
-        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
-            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_H1
-            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_A1
-        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
-            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_H8
-            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_A8
-
-        board.ep_square = None
-        return board
-
-    def decode_nnue_features(white_features, black_features, stm_is_white):
-        """Reconstruct board from NNUE features."""
-        # NNUE encoding (from nn_inference.py):
-        #   feature_idx = king_sq * 640 + piece_sq * 10 + piece_idx
-        #   piece_idx = type_idx + color_idx * 5
-        #   type_idx = piece_type - 1 (PAWN=0, KNIGHT=1, BISHOP=2, ROOK=3, QUEEN=4)
-        #   color_idx = 1 if is_friendly else 0
-        #
-        # From white perspective: king_sq is white king, friendly = white piece
-        # From black perspective: king_sq is flipped black king, piece_sq is flipped,
-        #                         friendly = black piece (but flip inverts this)
-        NNUE_TYPE_IDX_TO_PIECE = {0: chess.PAWN, 1: chess.KNIGHT, 2: chess.BISHOP,
-                                   3: chess.ROOK, 4: chess.QUEEN}
-
-        board = chess.Board(fen=None)
-        board.clear()
-
-        white_king_sq = None
-        black_king_sq = None
-
-        # Process white perspective features to get white king and all pieces
-        for feat_idx in white_features:
-            king_sq = feat_idx // 640
-            remainder = feat_idx % 640
-            piece_sq = remainder // 10
-            piece_idx = remainder % 10
-
-            color_idx = piece_idx // 5
-            type_idx = piece_idx % 5
-
-            # From white perspective: color_idx=1 means friendly (white piece)
-            is_friendly = (color_idx == 1)
-            piece_type = NNUE_TYPE_IDX_TO_PIECE[type_idx]
-
-            # king_sq is always the white king's square in white perspective features
-            white_king_sq = king_sq
-
-            # Determine piece color: friendly from white perspective = white piece
-            is_white_piece = is_friendly
-            color = chess.WHITE if is_white_piece else chess.BLACK
-            board.set_piece_at(piece_sq, chess.Piece(piece_type, color))
-
-        # Process black perspective features to get black king square
-        # We only need one feature to extract the black king square
-        if black_features:
-            feat_idx = black_features[0]
-            king_sq_flipped = feat_idx // 640
-            # Black perspective features have flipped squares, so flip back
-            black_king_sq = flipped_squares[king_sq_flipped]
-
-        # Place kings
-        if white_king_sq is not None:
-            board.set_piece_at(white_king_sq, chess.Piece(chess.KING, chess.WHITE))
-        if black_king_sq is not None:
-            board.set_piece_at(black_king_sq, chess.Piece(chess.KING, chess.BLACK))
-
-        board.turn = chess.WHITE if stm_is_white else chess.BLACK
-        board.castling_rights = chess.BB_EMPTY
-
-        # Heuristic castling
-        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
-            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_H1
-            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE):
-                board.castling_rights |= chess.BB_A1
-        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
-            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_H8
-            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK):
-                board.castling_rights |= chess.BB_A8
-
-        board.ep_square = None
-        return board
-
-    def get_stockfish_score_stm(board):
+    def get_stockfish_score_stm(fen: str, stm_is_white: bool):
         """
         Get Stockfish score from STM perspective.
 
@@ -1845,6 +1390,7 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
         We convert to STM perspective to match bin.zst format.
         """
         try:
+            board = chess.Board(fen)
             info = engine.analyse(board, chess.engine.Limit(time=time_limit))
             score = info["score"].white()  # White's perspective
 
@@ -1861,7 +1407,7 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
                 score_cp = max(-MAX_NON_MATE_SCORE, min(MAX_NON_MATE_SCORE, score_cp))
 
             # Convert to STM perspective (matching prepare_data.py logic)
-            if not board.turn:  # Black to move
+            if not stm_is_white:  # Black to move
                 score_cp = -score_cp
 
             return score_cp
@@ -1877,29 +1423,18 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
     mismatch_details = []
 
     try:
-        for i, pos in enumerate(positions):
-            # Reconstruct board
-            if nn_type_upper == "DNN":
-                board = decode_dnn_features(pos['features'], pos['stm_is_white'])
-            else:
-                board = decode_nnue_features(pos['white_features'], pos['black_features'],
-                                             pos['stm_is_white'])
-
-            fen = board.fen()
-
-            if not board.is_valid():
-                errors += 1
-                print(f"[{i+1}/{len(positions)}] ERROR: Invalid board reconstructed")
-                continue
+        for i, rec in enumerate(records):
+            fen = rec['fen']
+            stm_is_white = rec['stm'] == 1
 
             # Get Stockfish evaluation
-            sf_score = get_stockfish_score_stm(board)
+            sf_score = get_stockfish_score_stm(fen, stm_is_white)
             if sf_score is None:
                 errors += 1
                 continue
 
             # Compare scores in tanh scale
-            target_cp = pos['score_cp']
+            target_cp = rec['score_cp']
             target_tanh = cp_to_tanh(target_cp)
             sf_tanh = cp_to_tanh(sf_score)
             diff = abs(target_tanh - sf_tanh)
@@ -1914,14 +1449,14 @@ def test_data_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "
                     'sf_cp': sf_score,
                     'diff': diff
                 })
-                print(f"[{i+1}/{len(positions)}] MISMATCH:")
+                print(f"[{i+1}/{len(records)}] MISMATCH:")
                 print(f"  FEN: {fen}")
                 print(f"  Target: {target_cp} cp ({target_tanh:.4f} tanh)")
                 print(f"  Stockfish: {sf_score} cp ({sf_tanh:.4f} tanh)")
                 print(f"  Diff: {diff:.4f} (threshold: {threshold})")
             else:
                 passed += 1
-                print(f"[{i+1}/{len(positions)}] OK: diff={diff:.4f} | {fen[:50]}...")
+                print(f"[{i+1}/{len(records)}] OK: diff={diff:.4f} | {fen[:50]}...")
 
     finally:
         engine.quit()

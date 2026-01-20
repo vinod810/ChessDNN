@@ -346,6 +346,7 @@ cpdef int get_piece_index(int piece_type, bint is_friendly) noexcept nogil:
     if piece_type == 6:  # KING
         return -1
     cdef int type_idx = piece_type - 1
+    # Enemy pieces first
     cdef int color_idx = 1 if is_friendly else 0
     return type_idx + color_idx * 5  # 5 piece types
 
@@ -386,30 +387,29 @@ cpdef int get_dnn_feature_index(
     """
     Calculate DNN feature index (768-dimensional encoding).
     
-    piece_type mapping: KING=0, QUEEN=1, ROOK=2, BISHOP=3, KNIGHT=4, PAWN=5
+    Encoding: feature_idx = piece_idx * 64 + oriented_square
+
+    Piece order (matches NNUE): P=0, N=1, B=2, R=3, Q=4, K=5
+    piece_type from python-chess: PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6
+
+    Planes 0-5: Side-to-move pieces
+    Planes 6-11: Opponent pieces
     """
     cdef int adj_square = square
     cdef int type_idx, piece_idx
-    
+
+    # Flip square for black's perspective
     if not perspective:
         adj_square = flip_square(square)
-    
-    # Map piece type
-    if piece_type == 6:  # KING
-        type_idx = 0
-    elif piece_type == 5:  # QUEEN
-        type_idx = 1
-    elif piece_type == 4:  # ROOK
-        type_idx = 2
-    elif piece_type == 3:  # BISHOP
-        type_idx = 3
-    elif piece_type == 2:  # KNIGHT
-        type_idx = 4
-    else:  # PAWN
-        type_idx = 5
-    
+
+    # Map piece type: piece_type - 1 gives P=0, N=1, B=2, R=3, Q=4, K=5
+    type_idx = piece_type - 1
+
+    # piece_idx: 0-5 for friendly, 6-11 for opponent
     piece_idx = type_idx + (0 if is_friendly else 6)
-    return adj_square * 12 + piece_idx
+
+    # New encoding: piece_idx * 64 + adj_square
+    return piece_idx * 64 + adj_square
 
 
 # =============================================================================

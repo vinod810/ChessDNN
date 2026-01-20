@@ -256,7 +256,16 @@ class ShardReader:
             yield pos
 
     def _read_one_position(self, buf: io.BytesIO, include_fen: bool = False) -> Optional[Dict[str, Any]]:
-        """Read a single position from the buffer."""
+        """Read a single position from the buffer.
+
+        Diagnostic records are identified by:
+        1. First byte is 0xFF (marker)
+        2. For DNN: The byte after score+stm (num_features) must be <= 32
+        3. The record must parse correctly
+
+        For old format shards (without diagnostic records), 0xFF might appear
+        as part of a score value, so we need to validate carefully.
+        """
         first_byte = buf.read(1)
         if len(first_byte) < 1:
             return None
@@ -264,9 +273,132 @@ class ShardReader:
         first_val = struct.unpack('<B', first_byte)[0]
 
         if first_val == DIAGNOSTIC_MARKER:
-            return self._read_diagnostic_record(buf, include_fen)
+            # Might be a diagnostic record - try to validate
+            # Save position in case we need to revert
+            saved_pos = buf.tell()
+
+            try:
+                result = self._try_read_diagnostic_record(buf, include_fen)
+                if result is not None:
+                    return result
+            except Exception:
+                pass
+
+            # Not a valid diagnostic record, revert and read as normal
+            # The 0xFF was actually part of a score
+            buf.seek(saved_pos - 1)  # Go back to re-read first_byte as part of score
+            first_byte = buf.read(1)
+            return self._read_normal_record(buf, first_byte)
         else:
             return self._read_normal_record(buf, first_byte)
+
+    def _try_read_diagnostic_record(self, buf: io.BytesIO, include_fen: bool = False) -> Optional[Dict[str, Any]]:
+        """Try to read a diagnostic record. Returns None if validation fails."""
+        score_cp = struct.unpack('<h', buf.read(2))[0]
+        stm = struct.unpack('<B', buf.read(1))[0]
+
+        # Validate STM (must be 0 or 1)
+        if stm not in (0, 1):
+            return None
+
+        if self.nn_type == "DNN":
+            num_features = struct.unpack('<B', buf.read(1))[0]
+
+            # Validate: chess positions have at most 32 pieces
+            if num_features > 32 or num_features < 2:  # At minimum: 2 kings
+                return None
+
+            features = []
+            for _ in range(num_features):
+                feat = struct.unpack('<H', buf.read(2))[0]
+                # Validate: DNN features must be < 768
+                if feat >= 768:
+                    return None
+                features.append(feat)
+
+            fen_length = struct.unpack('<B', buf.read(1))[0]
+
+            # Validate: FEN strings are typically 20-90 characters
+            if fen_length < 15 or fen_length > 100:
+                return None
+
+            fen_bytes = buf.read(fen_length)
+            if len(fen_bytes) != fen_length:
+                return None
+
+            # Try to decode as UTF-8 and validate it looks like a FEN
+            try:
+                fen = fen_bytes.decode('utf-8')
+                # Basic FEN validation: should contain '/' and space
+                if '/' not in fen or ' ' not in fen:
+                    return None
+            except UnicodeDecodeError:
+                return None
+
+            result = {
+                'score_cp': score_cp,
+                'stm': stm,
+                'features': features,
+                'is_diagnostic': True
+            }
+
+            if include_fen:
+                result['fen'] = fen
+
+            return result
+        else:  # NNUE
+            num_white = struct.unpack('<B', buf.read(1))[0]
+
+            # Validate: at most 15 non-king pieces per side
+            if num_white > 15 or num_white < 0:
+                return None
+
+            white_features = []
+            for _ in range(num_white):
+                feat = struct.unpack('<H', buf.read(2))[0]
+                # Validate: NNUE features must be < 40960
+                if feat >= 40960:
+                    return None
+                white_features.append(feat)
+
+            num_black = struct.unpack('<B', buf.read(1))[0]
+            if num_black > 15 or num_black < 0:
+                return None
+
+            black_features = []
+            for _ in range(num_black):
+                feat = struct.unpack('<H', buf.read(2))[0]
+                if feat >= 40960:
+                    return None
+                black_features.append(feat)
+
+            fen_length = struct.unpack('<B', buf.read(1))[0]
+            if fen_length < 15 or fen_length > 100:
+                return None
+
+            fen_bytes = buf.read(fen_length)
+            if len(fen_bytes) != fen_length:
+                return None
+
+            try:
+                fen = fen_bytes.decode('utf-8')
+                if '/' not in fen or ' ' not in fen:
+                    return None
+            except UnicodeDecodeError:
+                return None
+
+            result = {
+                'score_cp': score_cp,
+                'stm': stm,
+                'white_features': white_features,
+                'black_features': black_features,
+                'is_diagnostic': True
+            }
+
+            if include_fen:
+                result['fen'] = fen
+
+            return result
 
     def _read_normal_record(self, buf: io.BytesIO, first_byte: bytes) -> Optional[Dict[str, Any]]:
         """Read a normal (non-diagnostic) record."""
@@ -307,58 +439,6 @@ class ShardReader:
                 'black_features': black_features,
                 'is_diagnostic': False
             }
-
-    def _read_diagnostic_record(self, buf: io.BytesIO, include_fen: bool = False) -> Dict[str, Any]:
-        """Read a diagnostic record (marker already consumed)."""
-        score_cp = struct.unpack('<h', buf.read(2))[0]
-        stm = struct.unpack('<B', buf.read(1))[0]
-
-        if self.nn_type == "DNN":
-            num_features = struct.unpack('<B', buf.read(1))[0]
-            features = []
-            for _ in range(num_features):
-                features.append(struct.unpack('<H', buf.read(2))[0])
-
-            fen_length = struct.unpack('<B', buf.read(1))[0]
-            fen_bytes = buf.read(fen_length)
-
-            result = {
-                'score_cp': score_cp,
-                'stm': stm,
-                'features': features,
-                'is_diagnostic': True
-            }
-
-            if include_fen:
-                result['fen'] = fen_bytes.decode('utf-8')
-
-            return result
-        else:  # NNUE
-            num_white = struct.unpack('<B', buf.read(1))[0]
-            white_features = []
-            for _ in range(num_white):
-                white_features.append(struct.unpack('<H', buf.read(2))[0])
-
-            num_black = struct.unpack('<B', buf.read(1))[0]
-            black_features = []
-            for _ in range(num_black):
-                black_features.append(struct.unpack('<H', buf.read(2))[0])
-
-            fen_length = struct.unpack('<B', buf.read(1))[0]
-            fen_bytes = buf.read(fen_length)
-
-            result = {
-                'score_cp': score_cp,
-                'stm': stm,
-                'white_features': white_features,
-                'black_features': black_features,
-                'is_diagnostic': True
-            }
-
-            if include_fen:
-                result['fen'] = fen_bytes.decode('utf-8')
-
-            return result
 
 
 def find_shards(base_dir: str = 'data', nn_type: Optional[str] = None) -> Tuple[List[str], List[str]]:
