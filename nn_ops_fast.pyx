@@ -8,6 +8,8 @@ Fast NN Inference Operations - Cython Implementation
 
 This module provides Cython-optimized versions of the hot paths in NN inference:
 - evaluate_incremental (DNN and NNUE)
+- evaluate_incremental_int8 (NNUE with INT8 quantized L1)
+- evaluate_incremental_int16 (NNUE with INT16 quantized L1)
 - update_accumulator
 - clipped_relu_inplace
 
@@ -22,6 +24,8 @@ from libc.math cimport fmax, fmin
 # Type definitions
 DTYPE = np.float32
 ctypedef np.float32_t DTYPE_t
+ctypedef np.int8_t INT8_t
+ctypedef np.int16_t INT16_t
 ctypedef np.int32_t INT32_t
 ctypedef np.int64_t INT64_t
 
@@ -32,7 +36,7 @@ cpdef void clipped_relu_inplace(DTYPE_t[:] x) noexcept nogil:
     """In-place clipped ReLU: x = clip(x, 0, 1)"""
     cdef Py_ssize_t i
     cdef Py_ssize_t n = x.shape[0]
-    
+
     for i in range(n):
         if x[i] < 0.0:
             x[i] = 0.0
@@ -46,7 +50,7 @@ cpdef void clipped_relu_copy(DTYPE_t[:] src, DTYPE_t[:] dst) noexcept nogil:
     """Copy with clipped ReLU: dst = clip(src, 0, 1)"""
     cdef Py_ssize_t i
     cdef Py_ssize_t n = src.shape[0]
-    
+
     for i in range(n):
         if src[i] < 0.0:
             dst[i] = 0.0
@@ -72,9 +76,9 @@ cpdef float dnn_evaluate_incremental(
 ) noexcept:
     """
     Fast DNN incremental evaluation.
-    
+
     Performs: accumulator -> clipped_relu -> L2 -> clipped_relu -> L3 -> clipped_relu -> L4
-    
+
     All intermediate buffers must be pre-allocated.
     """
     cdef Py_ssize_t i, j
@@ -82,7 +86,7 @@ cpdef float dnn_evaluate_incremental(
     cdef Py_ssize_t l2_size = l2_bias.shape[0]
     cdef Py_ssize_t l3_size = l3_bias.shape[0]
     cdef float sum_val, output
-    
+
     # Clipped ReLU on accumulator
     with nogil:
         for i in range(acc_size):
@@ -92,7 +96,7 @@ cpdef float dnn_evaluate_incremental(
                 acc_clipped[i] = 1.0
             else:
                 acc_clipped[i] = accumulator[i]
-        
+
         # L2: acc_clipped @ l2_weight.T + l2_bias
         for i in range(l2_size):
             sum_val = l2_bias[i]
@@ -105,7 +109,7 @@ cpdef float dnn_evaluate_incremental(
                 l2_buf[i] = 1.0
             else:
                 l2_buf[i] = sum_val
-        
+
         # L3: l2_buf @ l3_weight.T + l3_bias
         for i in range(l3_size):
             sum_val = l3_bias[i]
@@ -118,12 +122,12 @@ cpdef float dnn_evaluate_incremental(
                 l3_buf[i] = 1.0
             else:
                 l3_buf[i] = sum_val
-        
+
         # L4: l3_buf @ l4_weight.T + l4_bias (no activation)
         output = l4_bias[0]
         for j in range(l3_size):
             output = output + l3_buf[j] * l4_weight[0, j]
-    
+
     return output
 
 
@@ -147,7 +151,7 @@ cpdef float nnue_evaluate_incremental(
 ) noexcept:
     """
     Fast NNUE incremental evaluation.
-    
+
     Performs perspective-based concatenation and forward pass through layers.
     """
     cdef Py_ssize_t i, j
@@ -156,7 +160,7 @@ cpdef float nnue_evaluate_incremental(
     cdef Py_ssize_t l1_size = l1_bias.shape[0]
     cdef Py_ssize_t l2_size = l2_bias.shape[0]
     cdef float sum_val, output
-    
+
     with nogil:
         # Clipped ReLU on both accumulators
         for i in range(hidden_size):
@@ -166,14 +170,14 @@ cpdef float nnue_evaluate_incremental(
                 white_clipped[i] = 1.0
             else:
                 white_clipped[i] = white_accumulator[i]
-            
+
             if black_accumulator[i] < 0.0:
                 black_clipped[i] = 0.0
             elif black_accumulator[i] > 1.0:
                 black_clipped[i] = 1.0
             else:
                 black_clipped[i] = black_accumulator[i]
-        
+
         # Concatenate based on perspective
         if stm:  # White to move
             for i in range(hidden_size):
@@ -183,7 +187,7 @@ cpdef float nnue_evaluate_incremental(
             for i in range(hidden_size):
                 hidden_buf[i] = black_clipped[i]
                 hidden_buf[hidden_size + i] = white_clipped[i]
-        
+
         # L1: hidden_buf @ l1_weight.T + l1_bias
         for i in range(l1_size):
             sum_val = l1_bias[i]
@@ -195,7 +199,7 @@ cpdef float nnue_evaluate_incremental(
                 l1_buf[i] = 1.0
             else:
                 l1_buf[i] = sum_val
-        
+
         # L2: l1_buf @ l2_weight.T + l2_bias
         for i in range(l2_size):
             sum_val = l2_bias[i]
@@ -207,12 +211,242 @@ cpdef float nnue_evaluate_incremental(
                 l2_buf[i] = 1.0
             else:
                 l2_buf[i] = sum_val
-        
+
         # L3: l2_buf @ l3_weight.T + l3_bias (no activation)
         output = l3_bias[0]
         for j in range(l2_size):
             output = output + l2_buf[j] * l3_weight[0, j]
-    
+
+    return output
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef float nnue_evaluate_incremental_int8(
+    DTYPE_t[:] white_accumulator,
+    DTYPE_t[:] black_accumulator,
+    bint stm,  # True = white to move
+    INT8_t[:, :] l1_weight_q,  # INT8 quantized weights
+    DTYPE_t[:] l1_bias,
+    float l1_combined_scale,  # Pre-computed scale: input_scale * weight_scale
+    DTYPE_t[:, :] l2_weight,
+    DTYPE_t[:] l2_bias,
+    DTYPE_t[:, :] l3_weight,
+    DTYPE_t[:] l3_bias,
+    DTYPE_t[:] hidden_buf,    # FP32 buffer for clipped values
+    INT8_t[:] hidden_buf_q,   # INT8 buffer for quantized input
+    DTYPE_t[:] l1_buf,
+    DTYPE_t[:] l2_buf,
+    DTYPE_t[:] white_clipped,
+    DTYPE_t[:] black_clipped
+) noexcept:
+    """
+    NNUE incremental evaluation with INT8 quantized L1 layer.
+
+    Quantization scheme:
+    - Input (hidden_buf) is in [0, 1], quantized to [0, 127] as INT8
+    - Weights are pre-quantized to [-127, 127] as INT8
+    - Accumulation is done in INT32 to prevent overflow
+    - Result is dequantized using pre-computed combined scale
+
+    # TODO: add actual SIMD intrinsics via cython.parallel or direct C calls
+    """
+    # TODO: store accumulators in quantized form for additional speedup
+
+    cdef Py_ssize_t i, j
+    cdef Py_ssize_t hidden_size = white_accumulator.shape[0]
+    cdef Py_ssize_t concat_size = hidden_size * 2
+    cdef Py_ssize_t l1_size = l1_bias.shape[0]
+    cdef Py_ssize_t l2_size = l2_bias.shape[0]
+    cdef INT32_t sum_q
+    cdef float sum_val, output, val
+
+    with nogil:
+        # Clipped ReLU on both accumulators
+        for i in range(hidden_size):
+            if white_accumulator[i] < 0.0:
+                white_clipped[i] = 0.0
+            elif white_accumulator[i] > 1.0:
+                white_clipped[i] = 1.0
+            else:
+                white_clipped[i] = white_accumulator[i]
+
+            if black_accumulator[i] < 0.0:
+                black_clipped[i] = 0.0
+            elif black_accumulator[i] > 1.0:
+                black_clipped[i] = 1.0
+            else:
+                black_clipped[i] = black_accumulator[i]
+
+        # Concatenate based on perspective and quantize to INT8
+        if stm:  # White to move
+            for i in range(hidden_size):
+                hidden_buf[i] = white_clipped[i]
+                hidden_buf[hidden_size + i] = black_clipped[i]
+        else:  # Black to move
+            for i in range(hidden_size):
+                hidden_buf[i] = black_clipped[i]
+                hidden_buf[hidden_size + i] = white_clipped[i]
+
+        # Quantize input: [0, 1] -> [0, 127]
+        for i in range(concat_size):
+            val = hidden_buf[i] * 127.0
+            if val < 0.0:
+                hidden_buf_q[i] = 0
+            elif val > 127.0:
+                hidden_buf_q[i] = 127
+            else:
+                hidden_buf_q[i] = <INT8_t>(val + 0.5)  # Round to nearest
+
+        # L1: Quantized matmul with INT32 accumulation
+        for i in range(l1_size):
+            sum_q = 0
+            for j in range(concat_size):
+                sum_q = sum_q + <INT32_t>hidden_buf_q[j] * <INT32_t>l1_weight_q[i, j]
+
+            # Dequantize and add bias
+            sum_val = <float>sum_q * l1_combined_scale + l1_bias[i]
+
+            # Clipped ReLU
+            if sum_val < 0.0:
+                l1_buf[i] = 0.0
+            elif sum_val > 1.0:
+                l1_buf[i] = 1.0
+            else:
+                l1_buf[i] = sum_val
+
+        # L2: l1_buf @ l2_weight.T + l2_bias (FP32)
+        for i in range(l2_size):
+            sum_val = l2_bias[i]
+            for j in range(l1_size):
+                sum_val = sum_val + l1_buf[j] * l2_weight[i, j]
+            if sum_val < 0.0:
+                l2_buf[i] = 0.0
+            elif sum_val > 1.0:
+                l2_buf[i] = 1.0
+            else:
+                l2_buf[i] = sum_val
+
+        # L3: l2_buf @ l3_weight.T + l3_bias (no activation)
+        output = l3_bias[0]
+        for j in range(l2_size):
+            output = output + l2_buf[j] * l3_weight[0, j]
+
+    return output
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef float nnue_evaluate_incremental_int16(
+    DTYPE_t[:] white_accumulator,
+    DTYPE_t[:] black_accumulator,
+    bint stm,  # True = white to move
+    INT16_t[:, :] l1_weight_q,  # INT16 quantized weights
+    DTYPE_t[:] l1_bias,
+    float l1_combined_scale,  # Pre-computed scale: input_scale * weight_scale
+    DTYPE_t[:, :] l2_weight,
+    DTYPE_t[:] l2_bias,
+    DTYPE_t[:, :] l3_weight,
+    DTYPE_t[:] l3_bias,
+    DTYPE_t[:] hidden_buf,     # FP32 buffer for clipped values
+    INT16_t[:] hidden_buf_q,   # INT16 buffer for quantized input
+    DTYPE_t[:] l1_buf,
+    DTYPE_t[:] l2_buf,
+    DTYPE_t[:] white_clipped,
+    DTYPE_t[:] black_clipped
+) noexcept:
+    """
+    NNUE incremental evaluation with INT16 quantized L1 layer.
+
+    Quantization scheme:
+    - Input (hidden_buf) is in [0, 1], quantized to [0, 32767] as INT16
+    - Weights are pre-quantized to [-32767, 32767] as INT16
+    - Accumulation is done in INT32 to prevent overflow
+    - Result is dequantized using pre-computed combined scale
+
+    # TODO: add actual SIMD intrinsics via cython.parallel or direct C calls
+    """
+    # TODO: store accumulators in quantized form for additional speedup
+
+    cdef Py_ssize_t i, j
+    cdef Py_ssize_t hidden_size = white_accumulator.shape[0]
+    cdef Py_ssize_t concat_size = hidden_size * 2
+    cdef Py_ssize_t l1_size = l1_bias.shape[0]
+    cdef Py_ssize_t l2_size = l2_bias.shape[0]
+    cdef INT32_t sum_q
+    cdef float sum_val, output, val
+
+    with nogil:
+        # Clipped ReLU on both accumulators
+        for i in range(hidden_size):
+            if white_accumulator[i] < 0.0:
+                white_clipped[i] = 0.0
+            elif white_accumulator[i] > 1.0:
+                white_clipped[i] = 1.0
+            else:
+                white_clipped[i] = white_accumulator[i]
+
+            if black_accumulator[i] < 0.0:
+                black_clipped[i] = 0.0
+            elif black_accumulator[i] > 1.0:
+                black_clipped[i] = 1.0
+            else:
+                black_clipped[i] = black_accumulator[i]
+
+        # Concatenate based on perspective
+        if stm:  # White to move
+            for i in range(hidden_size):
+                hidden_buf[i] = white_clipped[i]
+                hidden_buf[hidden_size + i] = black_clipped[i]
+        else:  # Black to move
+            for i in range(hidden_size):
+                hidden_buf[i] = black_clipped[i]
+                hidden_buf[hidden_size + i] = white_clipped[i]
+
+        # Quantize input: [0, 1] -> [0, 32767]
+        for i in range(concat_size):
+            val = hidden_buf[i] * 32767.0
+            if val < 0.0:
+                hidden_buf_q[i] = 0
+            elif val > 32767.0:
+                hidden_buf_q[i] = 32767
+            else:
+                hidden_buf_q[i] = <INT16_t>(val + 0.5)  # Round to nearest
+
+        # L1: Quantized matmul with INT32 accumulation
+        for i in range(l1_size):
+            sum_q = 0
+            for j in range(concat_size):
+                sum_q = sum_q + <INT32_t>hidden_buf_q[j] * <INT32_t>l1_weight_q[i, j]
+
+            # Dequantize and add bias
+            sum_val = <float>sum_q * l1_combined_scale + l1_bias[i]
+
+            # Clipped ReLU
+            if sum_val < 0.0:
+                l1_buf[i] = 0.0
+            elif sum_val > 1.0:
+                l1_buf[i] = 1.0
+            else:
+                l1_buf[i] = sum_val
+
+        # L2: l1_buf @ l2_weight.T + l2_bias (FP32)
+        for i in range(l2_size):
+            sum_val = l2_bias[i]
+            for j in range(l1_size):
+                sum_val = sum_val + l1_buf[j] * l2_weight[i, j]
+            if sum_val < 0.0:
+                l2_buf[i] = 0.0
+            elif sum_val > 1.0:
+                l2_buf[i] = 1.0
+            else:
+                l2_buf[i] = sum_val
+
+        # L3: l2_buf @ l3_weight.T + l3_bias (no activation)
+        output = l3_bias[0]
+        for j in range(l2_size):
+            output = output + l2_buf[j] * l3_weight[0, j]
+
     return output
 
 
@@ -228,7 +462,7 @@ cpdef void accumulator_add_features(
     cdef Py_ssize_t i, j, f
     cdef Py_ssize_t n_features = features.shape[0]
     cdef Py_ssize_t acc_size = accumulator.shape[0]
-    
+
     with nogil:
         for i in range(n_features):
             f = features[i]
@@ -249,7 +483,7 @@ cpdef void accumulator_remove_features(
     cdef Py_ssize_t i, j, f
     cdef Py_ssize_t n_features = features.shape[0]
     cdef Py_ssize_t acc_size = accumulator.shape[0]
-    
+
     with nogil:
         for i in range(n_features):
             f = features[i]
@@ -274,16 +508,16 @@ cpdef void dnn_update_accumulator(
     cdef Py_ssize_t i, j, f
     cdef Py_ssize_t acc_size = accumulator.shape[0]
     cdef list added_list, removed_list
-    
+
     # Convert sets to lists for iteration
     added_list = [f for f in added_features if 0 <= f < max_feature]
     removed_list = [f for f in removed_features if 0 <= f < max_feature]
-    
+
     # Add features
     for f in added_list:
         for j in range(acc_size):
             accumulator[j] = accumulator[j] + weights[j, f]
-    
+
     # Remove features
     for f in removed_list:
         for j in range(acc_size):
@@ -308,13 +542,13 @@ cpdef void nnue_update_accumulator(
     cdef Py_ssize_t j, f
     cdef Py_ssize_t acc_size = white_accumulator.shape[0]
     cdef list aw_list, rw_list, ab_list, rb_list
-    
+
     # Convert sets to lists
     aw_list = [f for f in added_white if 0 <= f < max_feature]
     rw_list = [f for f in removed_white if 0 <= f < max_feature]
     ab_list = [f for f in added_black if 0 <= f < max_feature]
     rb_list = [f for f in removed_black if 0 <= f < max_feature]
-    
+
     # White accumulator updates
     for f in aw_list:
         for j in range(acc_size):
@@ -322,7 +556,7 @@ cpdef void nnue_update_accumulator(
     for f in rw_list:
         for j in range(acc_size):
             white_accumulator[j] = white_accumulator[j] - weights[j, f]
-    
+
     # Black accumulator updates
     for f in ab_list:
         for j in range(acc_size):
@@ -386,7 +620,7 @@ cpdef int get_dnn_feature_index(
 ) noexcept nogil:
     """
     Calculate DNN feature index (768-dimensional encoding).
-    
+
     Encoding: feature_idx = piece_idx * 64 + oriented_square
 
     Piece order (matches NNUE): P=0, N=1, B=2, R=3, Q=4, K=5

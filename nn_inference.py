@@ -23,6 +23,8 @@ try:
     from nn_ops_fast import (
         dnn_evaluate_incremental as _cy_dnn_eval,
         nnue_evaluate_incremental as _cy_nnue_eval,
+        nnue_evaluate_incremental_int8 as _cy_nnue_eval_int8,
+        nnue_evaluate_incremental_int16 as _cy_nnue_eval_int16,
         dnn_update_accumulator as _cy_dnn_update,
         nnue_update_accumulator as _cy_nnue_update,
         clipped_relu_inplace,
@@ -34,10 +36,12 @@ try:
     )
     HAS_CYTHON = True
     print("✓ Using Cython-accelerated NN operations")
-except ImportError:
+except ImportError as e:
     from nn_ops_fallback import (
         dnn_evaluate_incremental as _cy_dnn_eval,
         nnue_evaluate_incremental as _cy_nnue_eval,
+        nnue_evaluate_incremental_int8 as _cy_nnue_eval_int8,
+        nnue_evaluate_incremental_int16 as _cy_nnue_eval_int16,
         dnn_update_accumulator as _cy_dnn_update,
         nnue_update_accumulator as _cy_nnue_update,
         clipped_relu_inplace,
@@ -49,8 +53,10 @@ except ImportError:
     )
     HAS_CYTHON = False
     #print("! Cython not available, using pure Python fallback")
+    print(e)
     print("\033[91m! Cython not available, using pure Python fallback\033[0m")
 
+L1_QUANTIZATION = "NONE" # Options: "NONE" (FP32), "INT8", "INT16"
 
 KING_SQUARES = 64
 PIECE_SQUARES = 64
@@ -599,6 +605,8 @@ class NNUEInference:
     """
     PHASE 2 OPTIMIZED: Numpy-based inference engine for NNUE.
     Uses Cython-accelerated operations when available.
+
+    Supports L1 layer quantization (INT8/INT16) controlled by L1_QUANTIZATION global.
     """
 
     def __init__(self, model: NNUENetwork):
@@ -624,6 +632,57 @@ class NNUEInference:
         self._white_clipped = np.empty(self.hidden_size, dtype=np.float32)
         self._black_clipped = np.empty(self.hidden_size, dtype=np.float32)
         self._max_feature_idx = self.ft_weight.shape[1]
+
+        # L1 Quantization setup
+        self._quantization_mode = L1_QUANTIZATION
+        self._l1_weight_q = None
+        self._l1_combined_scale = None
+        self._hidden_buf_q = None
+
+        if L1_QUANTIZATION == "INT8":
+            self._setup_int8_quantization()
+        elif L1_QUANTIZATION == "INT16":
+            self._setup_int16_quantization()
+
+    def _setup_int8_quantization(self):
+        """Initialize INT8 quantization for L1 layer."""
+        # Quantize L1 weights: symmetric quantization to [-127, 127]
+        weight_abs_max = np.max(np.abs(self.l1_weight))
+        weight_scale = weight_abs_max / 127.0 if weight_abs_max > 0 else 1.0
+        self._l1_weight_q = np.clip(
+            np.round(self.l1_weight / weight_scale), -127, 127
+        ).astype(np.int8)
+
+        # Input scale: hidden_buf is in [0, 1], scale to [0, 127]
+        input_scale = 1.0 / 127.0
+
+        # Pre-compute combined scale for dequantization
+        self._l1_combined_scale = np.float32(input_scale * weight_scale)
+
+        # Pre-allocate quantized input buffer
+        self._hidden_buf_q = np.empty(self.hidden_size * 2, dtype=np.int8)
+
+        print(f"  L1 INT8 quantization: weight_scale={weight_scale:.6f}, combined_scale={self._l1_combined_scale:.8f}")
+
+    def _setup_int16_quantization(self):
+        """Initialize INT16 quantization for L1 layer."""
+        # Quantize L1 weights: symmetric quantization to [-32767, 32767]
+        weight_abs_max = np.max(np.abs(self.l1_weight))
+        weight_scale = weight_abs_max / 32767.0 if weight_abs_max > 0 else 1.0
+        self._l1_weight_q = np.clip(
+            np.round(self.l1_weight / weight_scale), -32767, 32767
+        ).astype(np.int16)
+
+        # Input scale: hidden_buf is in [0, 1], scale to [0, 32767]
+        input_scale = 1.0 / 32767.0
+
+        # Pre-compute combined scale for dequantization
+        self._l1_combined_scale = np.float32(input_scale * weight_scale)
+
+        # Pre-allocate quantized input buffer
+        self._hidden_buf_q = np.empty(self.hidden_size * 2, dtype=np.int16)
+
+        print(f"  L1 INT16 quantization: weight_scale={weight_scale:.6f}, combined_scale={self._l1_combined_scale:.10f}")
 
     def evaluate_full(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
         white_input = np.zeros(self.ft_weight.shape[1], dtype=np.float32)
@@ -651,26 +710,71 @@ class NNUEInference:
         return output[0]
 
     def evaluate_incremental(self, stm: bool) -> float:
-        """PHASE 2: Uses Cython-accelerated evaluation when available."""
+        """PHASE 2: Uses Cython-accelerated evaluation when available.
+
+        Supports L1 quantization modes based on L1_QUANTIZATION setting.
+        """
         if self.white_accumulator is None or self.black_accumulator is None:
             raise RuntimeError("Accumulators not initialized.")
 
-        return _cy_nnue_eval(
-            self.white_accumulator,
-            self.black_accumulator,
-            stm,
-            self.l1_weight,
-            self.l1_bias,
-            self.l2_weight,
-            self.l2_bias,
-            self.l3_weight,
-            self.l3_bias,
-            self._hidden_buf,
-            self._l1_buf,
-            self._l2_buf,
-            self._white_clipped,
-            self._black_clipped
-        )
+        # TODO: store accumulators in quantized form for additional speedup
+
+        if self._quantization_mode == "INT8":
+            return _cy_nnue_eval_int8(
+                self.white_accumulator,
+                self.black_accumulator,
+                stm,
+                self._l1_weight_q,
+                self.l1_bias,
+                self._l1_combined_scale,
+                self.l2_weight,
+                self.l2_bias,
+                self.l3_weight,
+                self.l3_bias,
+                self._hidden_buf,
+                self._hidden_buf_q,
+                self._l1_buf,
+                self._l2_buf,
+                self._white_clipped,
+                self._black_clipped
+            )
+        elif self._quantization_mode == "INT16":
+            return _cy_nnue_eval_int16(
+                self.white_accumulator,
+                self.black_accumulator,
+                stm,
+                self._l1_weight_q,
+                self.l1_bias,
+                self._l1_combined_scale,
+                self.l2_weight,
+                self.l2_bias,
+                self.l3_weight,
+                self.l3_bias,
+                self._hidden_buf,
+                self._hidden_buf_q,
+                self._l1_buf,
+                self._l2_buf,
+                self._white_clipped,
+                self._black_clipped
+            )
+        else:
+            # FP32 path (original)
+            return _cy_nnue_eval(
+                self.white_accumulator,
+                self.black_accumulator,
+                stm,
+                self.l1_weight,
+                self.l1_bias,
+                self.l2_weight,
+                self.l2_bias,
+                self.l3_weight,
+                self.l3_bias,
+                self._hidden_buf,
+                self._l1_buf,
+                self._l2_buf,
+                self._white_clipped,
+                self._black_clipped
+            )
 
     def refresh_accumulator(self, white_features: List[int], black_features: List[int]):
         self.white_accumulator = self.ft_bias.copy()
@@ -852,3 +956,5 @@ def load_model(model_path: str, nn_type: str):
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+

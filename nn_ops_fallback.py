@@ -42,19 +42,19 @@ def dnn_evaluate_incremental(
     np.copyto(acc_clipped, accumulator)
     np.maximum(acc_clipped, 0, out=acc_clipped)
     np.minimum(acc_clipped, 1, out=acc_clipped)
-    
+
     # L2
     np.dot(acc_clipped, l2_weight.T, out=l2_buf)
     l2_buf += l2_bias
     np.maximum(l2_buf, 0, out=l2_buf)
     np.minimum(l2_buf, 1, out=l2_buf)
-    
+
     # L3
     np.dot(l2_buf, l3_weight.T, out=l3_buf)
     l3_buf += l3_bias
     np.maximum(l3_buf, 0, out=l3_buf)
     np.minimum(l3_buf, 1, out=l3_buf)
-    
+
     # L4 (no activation)
     return float(np.dot(l3_buf, l4_weight.T) + l4_bias)
 
@@ -77,11 +77,11 @@ def nnue_evaluate_incremental(
 ) -> float:
     """Fast NNUE incremental evaluation."""
     hidden_size = white_accumulator.shape[0]
-    
+
     # Clipped ReLU on both accumulators
     clipped_relu_copy(white_accumulator, white_clipped)
     clipped_relu_copy(black_accumulator, black_clipped)
-    
+
     # Concatenate based on perspective
     if stm:
         hidden_buf[:hidden_size] = white_clipped
@@ -89,19 +89,154 @@ def nnue_evaluate_incremental(
     else:
         hidden_buf[:hidden_size] = black_clipped
         hidden_buf[hidden_size:] = white_clipped
-    
+
     # L1
     np.dot(hidden_buf, l1_weight.T, out=l1_buf)
     l1_buf += l1_bias
     np.maximum(l1_buf, 0, out=l1_buf)
     np.minimum(l1_buf, 1, out=l1_buf)
-    
+
     # L2
     np.dot(l1_buf, l2_weight.T, out=l2_buf)
     l2_buf += l2_bias
     np.maximum(l2_buf, 0, out=l2_buf)
     np.minimum(l2_buf, 1, out=l2_buf)
-    
+
+    # L3 (no activation)
+    return float(np.dot(l2_buf, l3_weight.T) + l3_bias)
+
+
+def nnue_evaluate_incremental_int8(
+    white_accumulator: np.ndarray,
+    black_accumulator: np.ndarray,
+    stm: bool,
+    l1_weight_q: np.ndarray,  # INT8 quantized weights
+    l1_bias: np.ndarray,       # FP32 bias
+    l1_combined_scale: float,  # Pre-computed scale: input_scale * weight_scale
+    l2_weight: np.ndarray,
+    l2_bias: np.ndarray,
+    l3_weight: np.ndarray,
+    l3_bias: np.ndarray,
+    hidden_buf: np.ndarray,    # FP32 buffer for clipped values
+    hidden_buf_q: np.ndarray,  # INT8 buffer for quantized input
+    l1_buf: np.ndarray,
+    l2_buf: np.ndarray,
+    white_clipped: np.ndarray,
+    black_clipped: np.ndarray
+) -> float:
+    """
+    NNUE incremental evaluation with INT8 quantized L1 layer.
+
+    Quantization scheme:
+    - Input (hidden_buf) is in [0, 1], quantized to [0, 127] as INT8
+    - Weights are pre-quantized to [-127, 127] as INT8
+    - Accumulation is done in INT32 to prevent overflow
+    - Result is dequantized using pre-computed combined scale
+    """
+    # TODO: store accumulators in quantized form for additional speedup
+
+    hidden_size = white_accumulator.shape[0]
+
+    # Clipped ReLU on both accumulators
+    clipped_relu_copy(white_accumulator, white_clipped)
+    clipped_relu_copy(black_accumulator, black_clipped)
+
+    # Concatenate based on perspective
+    if stm:
+        hidden_buf[:hidden_size] = white_clipped
+        hidden_buf[hidden_size:] = black_clipped
+    else:
+        hidden_buf[:hidden_size] = black_clipped
+        hidden_buf[hidden_size:] = white_clipped
+
+    # Quantize input: [0, 1] -> [0, 127]
+    np.clip(np.round(hidden_buf * 127.0), 0, 127, out=hidden_buf)
+    hidden_buf_q[:] = hidden_buf.astype(np.int8)
+
+    # L1: Quantized matmul with INT32 accumulation
+    # result = hidden_buf_q @ l1_weight_q.T (accumulated in INT32)
+    result_q = np.dot(hidden_buf_q.astype(np.int32), l1_weight_q.T.astype(np.int32))
+
+    # Dequantize and add bias
+    l1_buf[:] = result_q.astype(np.float32) * l1_combined_scale + l1_bias
+
+    # Clipped ReLU
+    np.maximum(l1_buf, 0, out=l1_buf)
+    np.minimum(l1_buf, 1, out=l1_buf)
+
+    # L2 (FP32)
+    np.dot(l1_buf, l2_weight.T, out=l2_buf)
+    l2_buf += l2_bias
+    np.maximum(l2_buf, 0, out=l2_buf)
+    np.minimum(l2_buf, 1, out=l2_buf)
+
+    # L3 (no activation)
+    return float(np.dot(l2_buf, l3_weight.T) + l3_bias)
+
+
+def nnue_evaluate_incremental_int16(
+    white_accumulator: np.ndarray,
+    black_accumulator: np.ndarray,
+    stm: bool,
+    l1_weight_q: np.ndarray,  # INT16 quantized weights
+    l1_bias: np.ndarray,       # FP32 bias
+    l1_combined_scale: float,  # Pre-computed scale: input_scale * weight_scale
+    l2_weight: np.ndarray,
+    l2_bias: np.ndarray,
+    l3_weight: np.ndarray,
+    l3_bias: np.ndarray,
+    hidden_buf: np.ndarray,    # FP32 buffer for clipped values
+    hidden_buf_q: np.ndarray,  # INT16 buffer for quantized input
+    l1_buf: np.ndarray,
+    l2_buf: np.ndarray,
+    white_clipped: np.ndarray,
+    black_clipped: np.ndarray
+) -> float:
+    """
+    NNUE incremental evaluation with INT16 quantized L1 layer.
+
+    Quantization scheme:
+    - Input (hidden_buf) is in [0, 1], quantized to [0, 32767] as INT16
+    - Weights are pre-quantized to [-32767, 32767] as INT16
+    - Accumulation is done in INT32 to prevent overflow
+    - Result is dequantized using pre-computed combined scale
+    """
+    # TODO: store accumulators in quantized form for additional speedup
+
+    hidden_size = white_accumulator.shape[0]
+
+    # Clipped ReLU on both accumulators
+    clipped_relu_copy(white_accumulator, white_clipped)
+    clipped_relu_copy(black_accumulator, black_clipped)
+
+    # Concatenate based on perspective
+    if stm:
+        hidden_buf[:hidden_size] = white_clipped
+        hidden_buf[hidden_size:] = black_clipped
+    else:
+        hidden_buf[:hidden_size] = black_clipped
+        hidden_buf[hidden_size:] = white_clipped
+
+    # Quantize input: [0, 1] -> [0, 32767]
+    np.clip(np.round(hidden_buf * 32767.0), 0, 32767, out=hidden_buf)
+    hidden_buf_q[:] = hidden_buf.astype(np.int16)
+
+    # L1: Quantized matmul with INT32 accumulation
+    result_q = np.dot(hidden_buf_q.astype(np.int32), l1_weight_q.T.astype(np.int32))
+
+    # Dequantize and add bias
+    l1_buf[:] = result_q.astype(np.float32) * l1_combined_scale + l1_bias
+
+    # Clipped ReLU
+    np.maximum(l1_buf, 0, out=l1_buf)
+    np.minimum(l1_buf, 1, out=l1_buf)
+
+    # L2 (FP32)
+    np.dot(l1_buf, l2_weight.T, out=l2_buf)
+    l2_buf += l2_bias
+    np.maximum(l2_buf, 0, out=l2_buf)
+    np.minimum(l2_buf, 1, out=l2_buf)
+
     # L3 (no activation)
     return float(np.dot(l2_buf, l3_weight.T) + l3_bias)
 
@@ -140,7 +275,7 @@ def dnn_update_accumulator(
     """Update DNN accumulator with added/removed features."""
     valid_added = [f for f in added_features if 0 <= f < max_feature]
     valid_removed = [f for f in removed_features if 0 <= f < max_feature]
-    
+
     if valid_added:
         accumulator += weights[:, valid_added].sum(axis=1)
     if valid_removed:
@@ -165,7 +300,7 @@ def nnue_update_accumulator(
         white_accumulator += weights[:, valid_aw].sum(axis=1)
     if valid_rw:
         white_accumulator -= weights[:, valid_rw].sum(axis=1)
-    
+
     # Black accumulator
     valid_ab = [f for f in added_black if 0 <= f < max_feature]
     valid_rb = [f for f in removed_black if 0 <= f < max_feature]
@@ -202,10 +337,10 @@ def flip_square(square: int) -> int:
 def get_dnn_feature_index(square: int, piece_type: int, is_friendly: bool, perspective: bool) -> int:
     """Calculate DNN feature index (768-dimensional encoding)."""
     adj_square = square if perspective else flip_square(square)
-    
+
     type_map = {6: 0, 5: 1, 4: 2, 3: 3, 2: 4, 1: 5}
     type_idx = type_map.get(piece_type, 5)
-    
+
     piece_idx = type_idx + (0 if is_friendly else 6)
     return adj_square * 12 + piece_idx
 

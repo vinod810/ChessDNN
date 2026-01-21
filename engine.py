@@ -51,10 +51,9 @@ MAX_DEFAULT_TIME = 30
 MAX_TABLE_SIZE = 200_000
 
 IS_BLAS_ENABLED = False
-
 IS_NN_ENABLED = True
-NN_TYPE = "DNN"
-FULL_NN_EVAL_FREQ = 3000 # Increase to 50_000 after initi
+NN_TYPE = "NNUE"
+FULL_NN_EVAL_FREQ = 3000 # Increase to 50_000 after initial testing
 DNN_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'dnn.pt'
 NNUE_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'nnue.pt'
 
@@ -1321,3 +1320,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

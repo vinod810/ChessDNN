@@ -52,3 +52,10 @@ True, True, True - 213
 True, False, False - 225
 False, True, False - 238
 False, False, True - 206
+
+Quantization (TODO Need to rest when no other work in progress)
+Type, Nodes, NPS, SF-MSE, Better, SF-CP, WAC, 10K-full-time, 10K-incr-time, Accumulator-Correctness
+NONE, TBS, 4222, 0.017535, NN, 22.46, 218/300
+INT16, TBD, 3921, 0.017535, NN, 22.46, 218/300
+INT8, TBD, 3637, 0.017535, NN, 22.46, 224/300
+
