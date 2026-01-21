@@ -669,7 +669,8 @@ def main():
                     print(f"Falling back to {args.positions} synthetic positions...")
                     positions = generate_synthetic_positions(args.positions)
         else:
-            print(f"\nGenerating {args.positions} synthetic test positions...")
+            #print(f"\nData dir not specified, generating {args.positions} synthetic test positions...")
+            print(f"\033[91m\nData dir not specified, generating {args.positions} synthetic test positions...\033[00m")
             positions = generate_synthetic_positions(args.positions)
 
         accuracy_results = evaluate_accuracy(weights, positions)

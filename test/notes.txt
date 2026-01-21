@@ -29,8 +29,8 @@ DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 
 NNUE -
 
 NN Training (01/1025)
-Type,Batch-Size, EPOCH-Size, LR, Epochs, Val-Loss, MSE(Test-100_000 pos)
-DNN, 8192,10M, 0.001
+Type,Batch-Size, EPOCH-Size, LR, Epochs, Val-Loss, MSE(Test-100k pos), SF-MSE, Better, SF-CP
+DNN, 8192,10M, 0.001, 64, 0.047056, 0.043821, 0.017535, NN, 22.46
 NNUE, 2048, 10M, 0.001
 
 Loss Expectations Revised

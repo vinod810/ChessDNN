@@ -49,6 +49,7 @@ DNN, accumulator to enable incremental evaluation - 1954
 Replacing Python chess.Baord with C++ - 2070
 Cython for critical methods - 2251
 NNUE (2x40960-2x256-32-32-1) - 
+Quantization - 
 Parameter turning -
 Pondering during opponent's turn -
 Multiprocessing (6 cores)
@@ -64,6 +65,8 @@ Multiprocessing (6 cores)
 | `nn_ops_fallback.py` | Pure Python fallback (same interface as Cython) |
 | `setup.py` | Build script for Cython extension |
 
+## Interesting Stuff
+Better accuracy than stockfish
 ## Future work
 768 input parameters. Stockfish NNE style overparmterization of input and use accumelators instead of matrix multiple at the first hidden layer.
 Cython for improving performance

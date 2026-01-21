@@ -4,8 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Cached stockfish NNUE evals">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Quantization benchmark">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/quantize_analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/quantize_analysis.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -278,14 +282,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00117" summary="Stockfish data for training">
-      <option name="closed" value="true" />
-      <created>1768537374254</created>
-      <option name="number" value="00117" />
-      <option name="presentableId" value="LOCAL-00117" />
-      <option name="project" value="LOCAL" />
-      <updated>1768537374254</updated>
-    </task>
     <task id="LOCAL-00118" summary="nn_train.py optimized for speed">
       <option name="closed" value="true" />
       <created>1768573524649</created>
@@ -494,7 +490,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768957831146</updated>
     </task>
-    <option name="localTasksCounter" value="144" />
+    <task id="LOCAL-00144" summary="Quantization benchmark">
+      <option name="closed" value="true" />
+      <created>1768959387326</created>
+      <option name="number" value="00144" />
+      <option name="presentableId" value="LOCAL-00144" />
+      <option name="project" value="LOCAL" />
+      <updated>1768959387327</updated>
+    </task>
+    <option name="localTasksCounter" value="145" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -509,7 +513,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Moved common code to nn_inference.py" />
     <MESSAGE value="More refactoring" />
     <MESSAGE value="Moved ProcessGameWithValidation back to nn_train.py" />
     <MESSAGE value="Made chess.Board RO in Inference" />
@@ -534,7 +537,8 @@
     <MESSAGE value="NNUE and DNN converging well." />
     <MESSAGE value="Removed multiple is_game_over()" />
     <MESSAGE value="Cached stockfish NNUE evals" />
-    <option name="LAST_COMMIT_MESSAGE" value="Cached stockfish NNUE evals" />
+    <MESSAGE value="Quantization benchmark" />
+    <option name="LAST_COMMIT_MESSAGE" value="Quantization benchmark" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

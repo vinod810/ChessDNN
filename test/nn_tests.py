@@ -37,6 +37,8 @@ from nn_inference import (
 from nn_evaluator import NNEvaluator, DNNEvaluator, NNUEEvaluator
 from shard_io import ShardReader, find_shards
 
+CP_ERROR_CLIP = 100 # Keep low to make the average more sense.
+
 # Configuration
 VALID_TEST_TYPES = {
     0: "Interactive-FEN",
@@ -62,7 +64,7 @@ def get_model_path(nn_type: str) -> str:
 
 def output_to_centipawns(output: float) -> float:
     """Convert linear network output (tanh space) to centipawns."""
-    output = np.clip(output, -0.99, 0.99)
+    output = np.clip(output, -0.9999, 0.9999)
     return np.arctanh(output) * TANH_SCALE
 
 
@@ -482,7 +484,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
 
     # Centipawn metrics (with capped values)
     cp_diff = pred_cp_values - true_cp_values
-    cp_diff_capped = np.clip(cp_diff, -MAX_SCORE, MAX_SCORE)
+    cp_diff_capped = np.clip(cp_diff, -CP_ERROR_CLIP, CP_ERROR_CLIP)
     mse_cp = np.mean(cp_diff_capped ** 2)
     rmse_cp = np.sqrt(mse_cp)
     mae_cp = np.mean(np.abs(cp_diff_capped))
@@ -499,7 +501,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
     print(f"  RMSE: {rmse:.6f}")
     print(f"  MAE:  {mae:.6f}")
     print()
-    print("Centipawn Space (capped at +/-{:,}):".format(MAX_SCORE))
+    print("Centipawn Space (Error capped at +/-{:,}):".format(CP_ERROR_CLIP))
     print(f"  MSE:  {mse_cp:.2f}")
     print(f"  RMSE: {rmse_cp:.2f} cp")
     print(f"  MAE:  {mae_cp:.2f} cp")
@@ -666,8 +668,13 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     rmse = np.sqrt(mse)
     mean_delta_error = np.mean(nn_error_values - sf_error_values)
 
-    mean_delta_error_cp = np.arctanh(np.clip(mean_delta_error, -0.99999, 0.99999)) * TANH_SCALE
-    mean_delta_error_cp = np.clip(mean_delta_error_cp, -MAX_SCORE, MAX_SCORE)
+    #mean_delta_error_cp = np.arctanh(np.clip(mean_delta_error, -0.99999, 0.99999)) * TANH_SCALE
+    #mean_delta_error_cp = np.clip(mean_delta_error_cp, -MAX_SCORE, MAX_SCORE)
+    nn_error_values_cp = np.arctanh(np.clip(nn_error_values, -0.99999, 0.99999)) * TANH_SCALE
+    sf_error_values_cp = np.arctanh(np.clip(sf_error_values, -0.99999, 0.99999)) * TANH_SCALE
+    nn_error_values_cp = np.abs(np.clip(nn_error_values_cp, -CP_ERROR_CLIP, CP_ERROR_CLIP))
+    sf_error_values_cp = np.abs(np.clip(sf_error_values_cp, -CP_ERROR_CLIP, CP_ERROR_CLIP))
+    mean_delta_error_cp = np.mean(np.abs(nn_error_values_cp - sf_error_values_cp))
 
     # Results
     print("\n" + "─" * 70)
@@ -679,9 +686,10 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     print("Tanh Space (network output space):")
     print(f"  MSE:  {mse:.6f}")
     print(f"  RMSE: {rmse:.6f}")
-    print(f"  Mean Delta Error:  {mean_delta_error:.6f} {'NN is better than SF' if mean_delta_error <= 0 else 'SF is better than NN' }")
+    print(f"  Mean Delta Error:  {mean_delta_error:.6f} {'NN is better than SF' \
+        if mean_delta_error <= 0 else 'SF is better than NN' }")
     print()
-    print("Centipawn Space (capped at +/-{:,}):".format(MAX_SCORE))
+    print("Centipawn Space (Error capped at +/-{:,}):".format(CP_ERROR_CLIP))
     print(f"  Mean Delta Error:  {mean_delta_error_cp:.2f} cp")
 
     # Sample predictions
