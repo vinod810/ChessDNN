@@ -4,12 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="NNUE and DNN converging well.">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Removed multiple is_game_over()">
+      <change afterPath="$PROJECT_DIR$/test/build_sf_static_eval.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/utils/quantize_analysis.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -281,14 +282,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00115" summary="Moved ProcessGameWithValidation back to nn_train.py">
-      <option name="closed" value="true" />
-      <created>1768484508867</created>
-      <option name="number" value="00115" />
-      <option name="presentableId" value="LOCAL-00115" />
-      <option name="project" value="LOCAL" />
-      <updated>1768484508869</updated>
-    </task>
     <task id="LOCAL-00116" summary="Made chess.Board RO in Inference">
       <option name="closed" value="true" />
       <created>1768496957290</created>
@@ -497,7 +490,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768889324764</updated>
     </task>
-    <option name="localTasksCounter" value="142" />
+    <task id="LOCAL-00142" summary="Removed multiple is_game_over()">
+      <option name="closed" value="true" />
+      <created>1768921922667</created>
+      <option name="number" value="00142" />
+      <option name="presentableId" value="LOCAL-00142" />
+      <option name="project" value="LOCAL" />
+      <updated>1768921922667</updated>
+    </task>
+    <option name="localTasksCounter" value="143" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -512,7 +513,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Test position from pgn.zst. Positions : 100000&#10;  MSE:  0.041909&#10;  MAE:  0.113207" />
     <MESSAGE value="Code clean up" />
     <MESSAGE value="Moved common code to nn_inference.py" />
     <MESSAGE value="More refactoring" />
@@ -537,7 +537,8 @@
     <MESSAGE value="Fixed bugs in DNN data. Refactoring. Partially tested code." />
     <MESSAGE value="Builds work. Convergence not yet verified." />
     <MESSAGE value="NNUE and DNN converging well." />
-    <option name="LAST_COMMIT_MESSAGE" value="NNUE and DNN converging well." />
+    <MESSAGE value="Removed multiple is_game_over()" />
+    <option name="LAST_COMMIT_MESSAGE" value="Removed multiple is_game_over()" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

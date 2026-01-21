@@ -60,18 +60,20 @@ from nn_inference import (
     TANH_SCALE, MAX_SCORE
 )
 
+# TODO explore quantization for the first HL of NNUE.
+
 # Training configuration
-VALIDATION_SPLIT_RATIO = 0.05  # FIXME 0.02
-BATCH_SIZE = 16384 // 2  # TODO match stockfish (use integer division)
-LEARNING_RATE = 0.001
+VALIDATION_SPLIT_RATIO = 0.02
+BATCH_SIZE = 16384 // 2  # SF 16384
+LEARNING_RATE = 0.001 # SF 8.75e-4
 
 # Embedding mode: True = use EmbeddingBag (sparse), False = use one-hot dense vectors
 EMBEDDING_BAG = False
 # Adjusted learning rate for dense mode (one-hot vectors may need different tuning)
-LEARNING_RATE_DENSE = 0.001  # TODO try 0.0005
-POSITIONS_PER_EPOCH = 10_000_000  # FIXME 100_000_000  # 100M positions per epoch
-VALIDATION_SIZE = POSITIONS_PER_EPOCH // 20  # 10_000_000  # 10M positions for validation (10% of epoch)
-EPOCHS = 500
+LEARNING_RATE_DENSE = 0.001  # SF 8.75e-4
+POSITIONS_PER_EPOCH = 10_000_000  # FIXME SF 100_000_000
+VALIDATION_SIZE = 1_000_000  # SF 1_000_000
+EPOCHS = 500 # SF 600
 EARLY_STOPPING_PATIENCE = 10
 LR_PATIENCE = 3
 

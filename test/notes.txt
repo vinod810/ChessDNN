@@ -24,9 +24,14 @@ DNN1024 - +181.7 +/-113.2
 DNN1024 vs. DNN512
 DNN512 +6.9 ELO / 50 games
 
-NN Training
+NN Training (Old)
 DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 91-epochs( 10M)
 NNUE -
+
+NN Training (01/1025)
+Type,Batch-Size, EPOCH-Size, LR, Epochs, Val-Loss, MSE(Test-100_000 pos)
+DNN, 8192,10M, 0.001
+NNUE, 2048, 10M, 0.001
 
 Loss Expectations Revised
 Given your data statistics (std=0.6, many extreme targets):
