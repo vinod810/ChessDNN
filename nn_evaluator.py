@@ -87,7 +87,7 @@ class NNEvaluator(ABC):
         pass
 
     @abstractmethod
-    def evaluate(self, board: CachedBoard) -> float:
+    def _evaluate(self, board: CachedBoard) -> float:
         """
         Evaluate current position using incremental evaluation.
         Requires proper push/pop state management.
@@ -101,7 +101,7 @@ class NNEvaluator(ABC):
         pass
 
     @abstractmethod
-    def evaluate_full(self, board: CachedBoard) -> float:
+    def _evaluate_full(self, board: CachedBoard) -> float:
         """
         Evaluate position using full matrix multiplication.
         Does not use or affect incremental state.
@@ -124,7 +124,7 @@ class NNEvaluator(ABC):
                 return int(-MAX_SCORE + board.ply())
             return 0
         # Normal positions: convert raw NN output to centipawns
-        return int(self.evaluate(board) * 400)
+        return int(self._evaluate(board) * 400)
 
     def evaluate_full_centipawns(self, board: CachedBoard) -> int:
         """Evaluate using full method and convert to centipawns."""
@@ -134,7 +134,7 @@ class NNEvaluator(ABC):
                 return int(-MAX_SCORE + board.ply())
             return 0
         # Normal positions: convert raw NN output to centipawns
-        return int(self.evaluate_full(board) * 400)
+        return int(self._evaluate_full(board) * 400)
 
     def validate_incremental(self, board: CachedBoard, tolerance: float = 1e-5) -> bool:
         """
@@ -144,8 +144,8 @@ class NNEvaluator(ABC):
         Returns:
             True if evaluations match within tolerance
         """
-        inc_eval = self.evaluate(board)
-        full_eval = self.evaluate_full(board)
+        inc_eval = self._evaluate(board)
+        full_eval = self._evaluate_full(board)
         return abs(inc_eval - full_eval) < tolerance
 
     @staticmethod
@@ -230,7 +230,7 @@ class DNNEvaluator(NNEvaluator):
             False
         )
 
-    def evaluate(self, board: CachedBoard) -> float:
+    def _evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators."""
         #if board.is_game_over():
         #    if board.is_checkmate():
@@ -240,7 +240,7 @@ class DNNEvaluator(NNEvaluator):
         perspective = board.turn == chess.WHITE
         return self.inference.evaluate_incremental(perspective)
 
-    def evaluate_full(self, board: CachedBoard) -> float:
+    def _evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
         #if board.is_game_over():
         #    if board.is_checkmate():
@@ -388,7 +388,7 @@ class NNUEEvaluator(NNEvaluator):
                 change_record['black_added']
             )
 
-    def evaluate(self, board: CachedBoard) -> float:
+    def _evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators."""
         #if board.is_game_over():
         #    if board.is_checkmate():
@@ -398,7 +398,7 @@ class NNUEEvaluator(NNEvaluator):
         stm = board.turn == chess.WHITE
         return self.inference.evaluate_incremental(stm)
 
-    def evaluate_full(self, board: CachedBoard) -> float:
+    def _evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
         #if board.is_game_over():
         #    if board.is_checkmate():

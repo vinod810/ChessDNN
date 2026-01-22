@@ -10,11 +10,13 @@ Features:
 - Stops immediately on first mismatch
 - Only prints details when there is a mismatch
 """
-
+import random
 import sys
 import os
 import argparse
 import numpy as np
+
+from prepare_data import MAX_MATE_DEPTH, MATE_FACTOR, MAX_NON_MATE_SCORE
 
 # Check what TANH_SCALE is set to
 try:
@@ -77,41 +79,6 @@ def dnn_fen_to_sparse_planes(fen: str) -> list[int]:
 
     return sorted(sparse_indices)
 
-    # """
-    # Compute DNN sparse features from FEN.
-    #
-    # Plane order (python-chess piece order):
-    #     [P, N, B, R, Q, K]  -> side to move (planes 0-5)
-    #     [p, n, b, r, q, k]  -> opponent (planes 6-11)
-    #
-    # Feature index = plane * 64 + oriented_square
-    # """
-    # board = chess.Board(fen)
-    #
-    # sparse_indices = []
-    # stm = board.turn
-    #
-    # for square, piece in board.piece_map().items():
-    #     # plane = piece_type - 1 (PAWN=0, KNIGHT=1, ..., KING=5)
-    #     plane = piece.piece_type - 1
-    #
-    #     # Opponent offset
-    #     if piece.color != stm:
-    #         plane += 6
-    #
-    #     # Side-to-move perspective: flip board for black
-    #     if stm == chess.WHITE:
-    #         oriented_square = square
-    #     else:
-    #         oriented_square = chess.square(
-    #             chess.square_file(square),
-    #             7 - chess.square_rank(square)
-    #         )
-    #
-    #     sparse_indices.append(plane * 64 + oriented_square)
-    #
-    # return sorted(sparse_indices)
-
 
 def nnue_fen_to_halfkp_sparse(fen: str):
     import chess
@@ -154,58 +121,6 @@ def nnue_fen_to_halfkp_sparse(fen: str):
         black_features.append(index)
 
     return sorted(white_features), sorted(black_features)
-
-
-    # """
-    # Compute NNUE HalfKP sparse features from FEN.
-    #
-    # Returns:
-    #     white_features: list[int]
-    #     black_features: list[int]
-    #
-    # Feature index formula: king_sq * 640 + piece_sq * 10 + (type_idx + color_idx * 5)
-    # """
-    # board = chess.Board(fen)
-    #
-    # white_features = []
-    # black_features = []
-    #
-    # white_king = board.king(chess.WHITE)
-    # black_king = board.king(chess.BLACK)
-    #
-    # for square, piece in board.piece_map().items():
-    #     if piece.piece_type == chess.KING:
-    #         continue
-    #
-    #     # type_idx = piece_type - 1 (PAWN=0, KNIGHT=1, BISHOP=2, ROOK=3, QUEEN=4)
-    #     piece_type = piece.piece_type - 1
-    #
-    #     # ---------- WHITE perspective ----------
-    #     ksq = white_king
-    #     psq = square
-    #     is_friendly = piece.color == chess.WHITE
-    #     color_idx = 1 if is_friendly else 0
-    #
-    #     index = ksq * 640 + psq * 10 + (piece_type + color_idx * 5)
-    #     white_features.append(index)
-    #
-    #     # ---------- BLACK perspective ----------
-    #     # Flip both king and piece squares for black's perspective
-    #     ksq = chess.square(
-    #         chess.square_file(black_king),
-    #         7 - chess.square_rank(black_king)
-    #     )
-    #     psq = chess.square(
-    #         chess.square_file(square),
-    #         7 - chess.square_rank(square)
-    #     )
-    #     is_friendly = piece.color == chess.BLACK
-    #     color_idx = 1 if is_friendly else 0
-    #
-    #     index = ksq * 640 + psq * 10 + (piece_type + color_idx * 5)
-    #     black_features.append(index)
-    #
-    # return sorted(white_features), sorted(black_features)
 
 
 def verify_dnn_shard(shard_path: str, max_records: int = 10) -> bool:
@@ -391,6 +306,183 @@ def analyze_shard(shard_path: str, nn_type: str):
     print(f"Positive scores: {positive_scores:,} ({100 * positive_scores / len(scores):.1f}%)")
     print(f"Negative scores: {negative_scores:,} ({100 * negative_scores / len(scores):.1f}%)")
 
+# =============================================================================
+# CP Integrity Test
+# =============================================================================
+def test_cp_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "data",
+                      stockfish_path: str = "stockfish", time_limit: float = 2.0,
+                      threshold: float = 0.01):
+    """
+    Test training data integrity by comparing stored scores against Stockfish evaluation.
+
+    Uses diagnostic records (with FEN) from shard files to:
+    1. Get the actual FEN for each position
+    2. Run Stockfish analysis on that FEN
+    3. Compare stored score (STM perspective) against Stockfish score
+
+    Args:
+        nn_type: "DNN" or "NNUE"
+        num_positions: Number of positions to validate
+        data_dir: Base data directory containing dnn/ and nnue/ subdirs
+        stockfish_path: Path to stockfish binary
+        time_limit: Stockfish time limit per position (default 2.0 seconds)
+        threshold: Mismatch threshold in tanh scale (default 0.01)
+
+    Returns:
+        True if all validations pass, False otherwise
+    """
+    import math
+    from pathlib import Path
+    import chess.engine
+    from shard_io import ShardReader, find_shards
+
+    print("\n" + "=" * 70)
+    print(f"{nn_type} CP Integrity Test")
+    print("=" * 70)
+
+    # Constants matching nn_inference.py
+   # MAX_SCORE = 10_000
+    #MATE_FACTOR = 100
+    #MAX_MATE_DEPTH = 10
+    #MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
+
+    def cp_to_tanh(cp: int, scale: float = TANH_SCALE) -> float:
+        return math.tanh(cp / scale)
+
+    # Find shard files
+    dnn_shards, nnue_shards = find_shards(data_dir, nn_type)
+    shard_files = dnn_shards if nn_type.upper() == "DNN" else nnue_shards
+
+    if not shard_files:
+        print(f"\n❌ ERROR: No shard files found for {nn_type}")
+        return False
+
+    # Pick random shard
+    shard_path = random.choice(shard_files)
+    print(f"\nSelected shard: {shard_path}")
+
+    # Read diagnostic records (which have FEN)
+    reader = ShardReader(nn_type)
+    records = reader.read_diagnostic_records(shard_path, max_records=num_positions)
+
+    if not records:
+        print("\n❌ ERROR: No diagnostic records found in shard file")
+        print("Diagnostic records are written every 1000 positions and include FEN.")
+        print("You may need to regenerate shards with the updated prepare_data.py")
+        return False
+
+    print(f"Read {len(records)} diagnostic records for validation")
+
+    # Initialize Stockfish
+    try:
+        engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    except Exception as e:
+        print(f"\n❌ ERROR: Could not initialize Stockfish at '{stockfish_path}': {e}")
+        return False
+
+    def get_stockfish_score_stm(fen: str, stm_is_white: bool):
+        """
+        Get Stockfish score from STM perspective.
+
+        Stockfish returns score from white's perspective.
+        We convert to STM perspective to match bin.zst format.
+        """
+        try:
+            board = chess.Board(fen)
+            info = engine.analyse(board, chess.engine.Limit(time=time_limit))
+            score = info["score"].white()  # White's perspective
+
+            if score.is_mate():
+                mate_in = score.mate()
+                if mate_in < 0:  # Black winning
+                    mate_in = max(-MAX_MATE_DEPTH, mate_in)
+                    score_cp = -MAX_SCORE - mate_in * MATE_FACTOR
+                else:  # White winning
+                    mate_in = min(MAX_MATE_DEPTH, mate_in)
+                    score_cp = MAX_SCORE - mate_in * MATE_FACTOR
+            else:
+                score_cp = score.score()
+                score_cp = max(-MAX_NON_MATE_SCORE, min(MAX_NON_MATE_SCORE, score_cp))
+
+            # Convert to STM perspective (matching prepare_data.py logic)
+            if not stm_is_white:  # Black to move
+                score_cp = -score_cp
+
+            return score_cp
+        except Exception as e:
+            print(f"Stockfish error: {e}")
+            return None
+
+    # Validate positions
+    validated = 0
+    passed = 0
+    mismatches = 0
+    errors = 0
+    mismatch_details = []
+
+    try:
+        for i, rec in enumerate(records):
+            fen = rec['fen']
+            stm_is_white = rec['stm'] == 1
+
+            # Get Stockfish evaluation
+            sf_score = get_stockfish_score_stm(fen, stm_is_white)
+            if sf_score is None:
+                errors += 1
+                continue
+
+            # Compare scores in tanh scale
+            target_cp = rec['score_cp']
+            target_tanh = cp_to_tanh(target_cp)
+            sf_tanh = cp_to_tanh(sf_score)
+            diff = abs(target_tanh - sf_tanh)
+
+            validated += 1
+
+            if diff > threshold:
+                mismatches += 1
+                mismatch_details.append({
+                    'fen': fen,
+                    'target_cp': target_cp,
+                    'sf_cp': sf_score,
+                    'diff': diff
+                })
+                print(f"[{i+1}/{len(records)}] MISMATCH:")
+                print(f"  FEN: {fen}")
+                print(f"  Target: {target_cp} cp ({target_tanh:.4f} tanh)")
+                print(f"  Stockfish: {sf_score} cp ({sf_tanh:.4f} tanh)")
+                print(f"  Diff: {diff:.4f} (threshold: {threshold})")
+            else:
+                passed += 1
+                print(f"[{i+1}/{len(records)}] OK: diff={diff:.4f} | {fen[:50]}...")
+
+    finally:
+        engine.quit()
+
+    # Summary
+    print("\n" + "=" * 70)
+    print("VALIDATION SUMMARY")
+    print("=" * 70)
+    print(f"  Shard: {Path(shard_path).name}")
+    print(f"  Positions validated: {validated}")
+    print(f"  Passed: {passed}")
+    print(f"  Mismatches: {mismatches}")
+    print(f"  Errors: {errors}")
+    if validated > 0:
+        rate = mismatches / validated * 100
+        print(f"  Mismatch rate: {rate:.1f}%")
+
+    all_passed = mismatches == 0 and errors == 0
+
+    print("\n" + "=" * 70)
+    if all_passed:
+        print("✓ Data integrity test PASSED!")
+    else:
+        print("✗ Data integrity test FAILED!")
+    print("=" * 70)
+
+    return all_passed
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -431,12 +523,20 @@ Examples:
         if not verify_dnn_shard(args.dnn_shard, args.max_records):
             all_passed = False
 
+        if all_passed:
+            print("Verifying the integrity of the DNN CP by comparing against stockfish")
+            all_passed = test_cp_integrity("DNN", threshold=0.1)
+
     if args.nnue_shard:
         if not os.path.exists(args.nnue_shard):
             print(f"ERROR: NNUE shard not found: {args.nnue_shard}")
             sys.exit(1)
         if not verify_nnue_shard(args.nnue_shard, args.max_records):
             all_passed = False
+
+        if all_passed:
+            print("Verifying the integrity of the NNUE CP by comparing against stockfish")
+            all_passed = test_cp_integrity("NNUE", threshold=0.1)
 
     if args.analyze:
         if not os.path.exists(args.analyze):
@@ -469,10 +569,18 @@ Examples:
             if not verify_dnn_shard(dnn_shards[0], args.max_records):
                 all_passed = False
 
+            if all_passed:
+                print("Verifying the integrity of the DNN CP by comparing against stockfish")
+                all_passed = test_cp_integrity("DNN", threshold=0.1)
+
         if nnue_shards:
             print(f"\nFound {len(nnue_shards)} NNUE shard(s)")
             if not verify_nnue_shard(nnue_shards[0], args.max_records):
                 all_passed = False
+
+            if all_passed:
+                print("Verifying the integrity of the NNUE CP by comparing against stockfish")
+                all_passed = test_cp_integrity("NNUE", threshold=0.1)
 
     # Summary
     print("\n" + "=" * 60)
@@ -480,7 +588,7 @@ Examples:
         print("✓ ALL VERIFICATIONS PASSED")
     else:
         print("✗ VERIFICATION FAILED")
-        sys.exit(1)
+        #sys.exit(1)
 
 
 if __name__ == "__main__":

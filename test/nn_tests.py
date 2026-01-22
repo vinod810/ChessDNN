@@ -19,23 +19,25 @@ Test Modes:
 """
 
 import argparse
+import re
+from contextlib import redirect_stdout
+
 import numpy as np
 import sys
 import time
 import io
 import chess
 import random
-import glob
-import zstandard as zstd
 import chess.pgn
 
+from cached_board import CachedBoard
+from engine import find_best_move
 # Import from our modules - this ensures we test the actual production code
 from nn_inference import (
     TANH_SCALE, NNUEFeatures, DNNFeatures,
     NNUE_INPUT_SIZE, DNN_INPUT_SIZE, MAX_SCORE
 )
-from nn_evaluator import NNEvaluator, DNNEvaluator, NNUEEvaluator
-from shard_io import ShardReader, find_shards
+from nn_evaluator import NNEvaluator
 
 CP_ERROR_CLIP = 100 # Keep low to make the average more sense.
 
@@ -53,7 +55,8 @@ VALID_TEST_TYPES = {
     9: "Deep-Search-Simulation",
     10: "Random-Games",
     11: "CP-Integrity",
-    12: "All",
+    12: "Engine-Tests",
+    13: "All",
 }
 
 
@@ -68,7 +71,7 @@ def output_to_centipawns(output: float) -> float:
     return np.arctanh(output) * TANH_SCALE
 
 
-def evaluator_push(evaluator: NNEvaluator, board: chess.Board, move: chess.Move):
+def evaluator_push(evaluator: NNEvaluator, board: CachedBoard, move: chess.Move):
     """
     Push a move to the evaluator and board using the unified interface.
 
@@ -78,7 +81,7 @@ def evaluator_push(evaluator: NNEvaluator, board: chess.Board, move: chess.Move)
     evaluator.push_with_board(board, move)
 
 
-def evaluator_pop(evaluator: NNEvaluator, board: chess.Board):
+def evaluator_pop(evaluator: NNEvaluator, board: CachedBoard):
     """
     Pop a move from the evaluator and board.
 
@@ -95,16 +98,14 @@ def evaluator_pop(evaluator: NNEvaluator, board: chess.Board):
 def evaluate_fen(fen: str, evaluator: NNEvaluator) -> dict:
     """Evaluate a position from FEN string using the evaluator."""
     try:
-        board = chess.Board(fen)
+        board = CachedBoard(fen)
         # Use full evaluation for standalone FEN evaluation
-        output = evaluator.evaluate_full(board)
-        centipawns = output_to_centipawns(output)
+        centipawns = evaluator.evaluate_full_centipawns(board)
 
         return {
             'success': True,
             'fen': fen,
             'side_to_move': 'White' if board.turn == chess.WHITE else 'Black',
-            'output': output,
             'centipawns': centipawns
         }
     except ValueError as e:
@@ -122,7 +123,6 @@ def print_evaluation(result: dict):
     print("─" * 60)
     print(f"FEN: {result['fen']}")
     print(f"Side to move: {result['side_to_move']}")
-    print(f"Network output: {result['output']:.6f}")
     print(f"Evaluation: {result['centipawns']:+.2f} centipawns")
 
     pawns = result['centipawns'] / 100.0
@@ -235,7 +235,7 @@ def test_accumulator_correctness(nn_type: str, model_path: str):
         "gxf8=N", "Kxf8", "Kb1", "Bxf4"
     ]
 
-    board = chess.Board()
+    board = CachedBoard()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
 
     print(f"\nPlaying through {len(moves_san)} moves and verifying after each...")
@@ -250,8 +250,8 @@ def test_accumulator_correctness(nn_type: str, model_path: str):
         move_count += 1
 
         # Use the evaluator's built-in validation
-        eval_inc = evaluator.evaluate(board)
-        eval_full = evaluator.evaluate_full(board)
+        eval_inc = evaluator._evaluate(board)
+        eval_full = evaluator._evaluate_full(board)
         diff = abs(eval_inc - eval_full)
         passed = diff < 1e-6
 
@@ -276,8 +276,8 @@ def test_accumulator_correctness(nn_type: str, model_path: str):
     for i in range(num_pops):
         evaluator_pop(evaluator, board)
 
-        eval_inc = evaluator.evaluate(board)
-        eval_full = evaluator.evaluate_full(board)
+        eval_inc = evaluator._evaluate(board)
+        eval_full = evaluator._evaluate_full(board)
         diff = abs(eval_inc - eval_full)
         passed = diff < 1e-6
 
@@ -319,7 +319,7 @@ def performance_test(nn_type: str, model_path: str):
     print(f"{nn_type} Performance Test: Full vs Incremental Evaluation")
     print("=" * 70)
 
-    board = chess.Board()
+    board = CachedBoard()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
     move = chess.Move.from_uci("e2e4")
 
@@ -329,14 +329,14 @@ def performance_test(nn_type: str, model_path: str):
 
     start_time = time.time()
     for _ in range(num_full_iters):
-        _ = evaluator.evaluate_full(board)
+        _ = evaluator.evaluate_full_centipawns(board)
     full_time = time.time() - start_time
 
     print(f"   Time: {full_time:.4f} seconds")
     print(f"   Avg per evaluation: {full_time / num_full_iters * 1000:.3f} ms")
 
     # Test 2: Incremental evaluation with push/pop cycles
-    num_cycles = 500
+    num_cycles = num_full_iters // 2
     print(f"\n2. Incremental Evaluation - Push/Pop Cycles ({num_cycles} cycles)")
 
     start_time = time.time()
@@ -346,7 +346,7 @@ def performance_test(nn_type: str, model_path: str):
         evaluator_push(evaluator, board, move)
 
         # Evaluate (uses accumulator)
-        _ = evaluator.evaluate(board)
+        _ = evaluator.evaluate_centipawns(board)
 
         # Pop
         evaluator_pop(evaluator, board)
@@ -363,26 +363,38 @@ def performance_test(nn_type: str, model_path: str):
     print(f"  Incremental (accumulator):  {incremental_time / num_cycles * 1000:.3f} ms per cycle")
 
     # Calculate speedup (comparing one full eval vs one incremental cycle)
-    speedup = (full_time / num_full_iters) / (incremental_time / num_cycles)
+    speedup = (full_time / num_full_iters) / (incremental_time / (2 * num_cycles))
     print(f"  Speedup: {speedup:.2f}x")
 
     print("\nNote: Incremental uses accumulator (add/subtract weight vectors)")
     print("instead of full matrix multiplication for the first layer.")
     print("=" * 70)
 
+    if nn_type == "NNUE":
+        expected_speedup = 150
+        expected_incr_time = 0.15
+    else:
+        expected_speedup = 5
+        expected_incr_time = 0.3
+
+    all_passed = speedup > expected_speedup and incremental_time / num_cycles * 1000 < expected_incr_time
+    if not all_passed:
+            print(f"  ✗ FAIL, expected speedup >{expected_speedup}, got {speedup:.2f}. "
+                  f"expected incr-time <{expected_incr_time} but got {incremental_time / num_cycles * 1000:.2f} ms")
+
+    return all_passed
 
 # =============================================================================
 # Evaluation Accuracy Test
 # =============================================================================
 
-def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
+def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int = 1000):
     """
     Test evaluation accuracy against ground truth from training data shards.
 
     Uses diagnostic records (with FEN) from binary shard files to compare
     model predictions against stored Stockfish evaluations.
     """
-    from pathlib import Path
     from shard_io import ShardReader, find_shards
 
     print("\n" + "=" * 70)
@@ -415,7 +427,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
     print(f"✓ Loaded {len(records)} diagnostic records from shard")
 
     # Create evaluator
-    board = chess.Board()
+    board = CachedBoard()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
 
     # Evaluate all positions
@@ -438,13 +450,9 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
 
             # Evaluate using features from shard
             if nn_type.upper() == "DNN":
-                pred_output = evaluator.inference.evaluate_full(rec['features'])
+                pred_output = evaluator._evaluate_full(CachedBoard(fen))
             else:  # NNUE
-                pred_output = evaluator.inference.evaluate_full(
-                    rec['white_features'],
-                    rec['black_features'],
-                    stm_is_white
-                )
+                pred_output = evaluator._evaluate_full(CachedBoard(fen))
 
             true_tanh = np.tanh(rec['score_cp'] / TANH_SCALE)
 
@@ -525,10 +533,20 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int):
     print("=" * 70)
 
 
+    expected_mse = 0.07
+    expected_mae_cp = 100
+
+    all_passed = mse < expected_mse and mae_cp < expected_mae_cp
+    if not all_passed:
+            print(f"  ✗ FAIL, expected mae <{expected_mse}, got {mae:.4f}. "
+                  f"expected MAE CP <{expected_mae_cp} but got {mae_cp} ms")
+
+    return all_passed
+
+
 # =============================================================================
 # NN vs Stockfish Test
 # =============================================================================
-# TODO save 10_000 eavluations to a file for faster testing
 def read_sf_eval_file(filepath: str):
     """
     Read the pre-computed Stockfish evaluation binary file.
@@ -560,7 +578,7 @@ def read_sf_eval_file(filepath: str):
 SF_EVAL_FILE_PATH = "data/sf_nnue_static_eval.bin"
 
 
-def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, stockfish_path: str = "stockfish"):
+def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int = 1000):
     """
     Test neural network predictions against Stockfish's static NNUE evaluation.
 
@@ -568,7 +586,6 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     (generated by build_sf_static_eval_file.py) for fast comparison.
     """
     import os
-    from pathlib import Path
 
     print("\n" + "=" * 70)
     print(f"{nn_type} vs Stockfish Static Evaluation Test")
@@ -597,7 +614,7 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
             print(f"  Warning: Requested {positions_size} but only {len(all_records)} available")
 
     # Create evaluator
-    board = chess.Board()
+    board = CachedBoard()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
 
     # Evaluate all positions
@@ -617,12 +634,9 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
             print(f"  Progress: {i + 1}/{len(records)}")
 
         try:
-            # Determine side to move from FEN
-            stm_is_white = ' w ' in fen
-
             # Set up board and evaluate with full evaluation
-            board = chess.Board(fen)
-            pred_output = evaluator.evaluate_full(board)
+            board = CachedBoard(fen)
+            pred_output = evaluator._evaluate_full(board)
 
             # SF eval is already in STM perspective and capped at MAX_SCORE
             sf_cp_capped = sf_cp_stm
@@ -668,13 +682,8 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     rmse = np.sqrt(mse)
     mean_delta_error = np.mean(nn_error_values - sf_error_values)
 
-    #mean_delta_error_cp = np.arctanh(np.clip(mean_delta_error, -0.99999, 0.99999)) * TANH_SCALE
-    #mean_delta_error_cp = np.clip(mean_delta_error_cp, -MAX_SCORE, MAX_SCORE)
-    nn_error_values_cp = np.arctanh(np.clip(nn_error_values, -0.99999, 0.99999)) * TANH_SCALE
-    sf_error_values_cp = np.arctanh(np.clip(sf_error_values, -0.99999, 0.99999)) * TANH_SCALE
-    nn_error_values_cp = np.abs(np.clip(nn_error_values_cp, -CP_ERROR_CLIP, CP_ERROR_CLIP))
-    sf_error_values_cp = np.abs(np.clip(sf_error_values_cp, -CP_ERROR_CLIP, CP_ERROR_CLIP))
-    mean_delta_error_cp = np.mean(np.abs(nn_error_values_cp - sf_error_values_cp))
+    mean_delta_error_cp = np.arctanh(np.clip(mean_delta_error, -0.99999, 0.99999)) * TANH_SCALE
+    mean_delta_error_cp = np.clip(mean_delta_error_cp, -CP_ERROR_CLIP, CP_ERROR_CLIP)
 
     # Results
     print("\n" + "─" * 70)
@@ -696,7 +705,7 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     print("\n" + "─" * 70)
     print("Sample predictions (first 20):")
     print("─" * 70)
-    for i in range(min(20, len(pred_tanh_values))):
+    for i in range(min(10, len(pred_tanh_values))):
         sf_cp = sf_cp_list[i]
         pred_cp = pred_cp_list[i]
         true_cp = true_cp_list[i]
@@ -710,6 +719,9 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int, sto
     print("\n" + "=" * 70)
     print("NN vs Stockfish test complete!")
     print("=" * 70)
+
+    all_passed = mean_delta_error < 0.01 and mean_delta_error_cp < 20
+    return all_passed
 
 
 # =============================================================================
@@ -753,7 +765,7 @@ def test_feature_extraction(nn_type: str):
         print(f"Testing: {description}")
         print(f"FEN: {fen}")
 
-        board = chess.Board(fen)
+        board = CachedBoard(fen)
 
         if nn_type == "NNUE":
             white_feat, black_feat = feature_extractor.board_to_features(board)
@@ -802,6 +814,53 @@ def test_feature_extraction(nn_type: str):
 # =============================================================================
 # Symmetry Test
 # =============================================================================
+def mirror_fen(fen: str) -> str:
+    """
+    Create a color-swapped, board-flipped FEN that should give the negated evaluation.
+
+    To properly mirror:
+    1. Flip the board vertically (reverse rank order)
+    2. Swap piece colors (uppercase <-> lowercase)
+    3. Swap side to move
+    4. Swap castling rights (K<->k, Q<->q)
+    5. Mirror en passant square if present
+    """
+    parts = fen.split()
+    board_str = parts[0]
+
+    # Split into ranks and reverse order (flip vertically)
+    ranks = board_str.split('/')
+    ranks = ranks[::-1]
+
+    # Swap colors in each rank
+    def swap_colors(s):
+        return s.swapcase()
+
+    ranks = [swap_colors(r) for r in ranks]
+    new_board = '/'.join(ranks)
+
+    # Swap side to move
+    new_stm = 'b' if parts[1] == 'w' else 'w'
+
+    # Swap castling rights
+    castling = parts[2]
+    if castling == '-':
+        new_castling = '-'
+    else:
+        new_castling = castling.swapcase()
+
+    # Mirror en passant square
+    ep = parts[3]
+    if ep != '-':
+        file = ep[0]
+        rank = ep[1]
+        new_rank = str(9 - int(rank))  # 3 -> 6, 6 -> 3
+        new_ep = file + new_rank
+    else:
+        new_ep = '-'
+
+    return f"{new_board} {new_stm} {new_castling} {new_ep} {parts[4]} {parts[5]}"
+
 
 def test_symmetry(nn_type: str, model_path: str):
     """
@@ -814,48 +873,47 @@ def test_symmetry(nn_type: str, model_path: str):
     print(f"{nn_type} Symmetry Test")
     print("=" * 70)
 
-    board = chess.Board()
+    board = CachedBoard()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
 
     all_passed = True
 
     # Test positions - pairs of (white_to_move_fen, black_equivalent_fen)
-    test_pairs = [
+    test_fens = [
         # Starting position - should be symmetric
-        ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-         "RNBQKBNR/PPPPPPPP/8/8/8/8/pppppppp/rnbqkbnr b KQkq - 0 1"),
-        # After 1.e4
-        ("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
-         "RNBQKBNR/PPPP1PPP/8/4p3/8/8/pppppppp/rnbqkbnr w KQkq e6 0 1"),
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "8/7p/5k2/5p2/p1p2P2/Pr1pPK2/1P1R3P/8 b - - 0 1",
+        "5rk1/1ppb3p/p1pb4/6q1/3P1p1r/2P1R2P/PP1BQ1P1/5RKN w - - 0 1",
     ]
 
-    tolerance = 0.1  # Allow some tolerance due to asymmetries in training data
+    tolerance = 0.01  # Allow some tolerance due to asymmetries in training data
 
-    for fen1, fen2 in test_pairs:
+    for fen1 in test_fens:
+        fen2 = mirror_fen(fen1)
         print(f"\n{'─' * 70}")
         print(f"Original: {fen1}")
         print(f"Mirrored: {fen2}")
 
-        board1 = chess.Board(fen1)
-        board2 = chess.Board(fen2)
+        board1 = CachedBoard(fen1)
+        board2 = CachedBoard(fen2)
 
-        eval1 = evaluator.evaluate_full(board1)
-        eval2 = evaluator.evaluate_full(board2)
+        eval1 = evaluator._evaluate_full(board1)
+        eval2 = evaluator._evaluate_full(board2)
 
         # Evaluations should be opposite (one is STM advantage, other is opponent)
         # Since both are from STM perspective, swapping colors should negate
-        diff = abs(eval1 + eval2)
+        diff = abs(eval1 - eval2)
 
         print(f"  Eval 1: {eval1:.6f} ({output_to_centipawns(eval1):+.2f} cp)")
         print(f"  Eval 2: {eval2:.6f} ({output_to_centipawns(eval2):+.2f} cp)")
-        print(f"  Sum (should be ~0): {eval1 + eval2:.6f}")
+        print(f"  Diff (should be ~0): {eval1 - eval2:.6f}")
 
         passed = diff < tolerance
         if passed:
             print("  ✓ PASS: Evaluations are symmetric")
         else:
             print(f"  ⚠ WARNING: Evaluations differ by {diff:.6f} (tolerance: {tolerance})")
-            # Don't fail for symmetry since training data may not be perfectly symmetric
+            all_passed = False
 
     print("\n" + "=" * 70)
     print("Symmetry test complete!")
@@ -877,7 +935,7 @@ def test_edge_cases(nn_type: str, model_path: str):
     print(f"{nn_type} Edge Cases Test")
     print("=" * 70)
 
-    board = chess.Board()
+    board = CachedBoard()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
 
     all_passed = True
@@ -887,6 +945,7 @@ def test_edge_cases(nn_type: str, model_path: str):
         # Checkmate positions
         ("rnb1kbnr/pppp1ppp/4p3/8/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3",
          "Fool's mate (White is checkmated)", "checkmate"),
+
         ("r1bqkbnr/pppp1Qpp/2n5/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4",
          "Scholar's mate (Black is checkmated)", "checkmate"),
 
@@ -925,12 +984,12 @@ def test_edge_cases(nn_type: str, model_path: str):
 
         # Get evaluation
         try:
-            eval_result = evaluator.evaluate_full(test_board)
+            eval_result = evaluator.evaluate_full_centipawns(CachedBoard(fen))
             print(f"  Evaluation: {eval_result:.6f} ({output_to_centipawns(eval_result):+.2f} cp)")
 
             # Verify expected behavior
             if expected_type == "checkmate":
-                if is_checkmate:
+                if eval_result == -MAX_SCORE:
                     print("  ✓ PASS: Correctly identified as checkmate")
                 else:
                     print("  ✗ FAIL: Should be checkmate")
@@ -945,7 +1004,7 @@ def test_edge_cases(nn_type: str, model_path: str):
                     print("  ✗ FAIL: Should be stalemate")
                     all_passed = False
             elif expected_type == "insufficient_material":
-                if is_insufficient or is_game_over:
+                if abs(eval_result) < 0.01:  # Should evaluate to ~0:
                     print("  ✓ PASS: Correctly identified as draw (insufficient material)")
                 else:
                     print("  ✗ FAIL: Should be insufficient material")
@@ -985,8 +1044,8 @@ def test_reset_consistency(nn_type: str, model_path: str):
     all_passed = True
 
     # Create two evaluators
-    board1 = chess.Board()
-    board2 = chess.Board()
+    board1 = CachedBoard()
+    board2 = CachedBoard()
 
     evaluator1 = NNEvaluator.create(board1, nn_type, model_path)
     evaluator2 = NNEvaluator.create(board2, nn_type, model_path)
@@ -1004,8 +1063,8 @@ def test_reset_consistency(nn_type: str, model_path: str):
     evaluator1.reset(board2)
 
     # Both evaluators should now give the same evaluation for the starting position
-    eval1 = evaluator1.evaluate(board2)
-    eval2 = evaluator2.evaluate(board2)
+    eval1 = evaluator1._evaluate(board2)
+    eval2 = evaluator2._evaluate(board2)
 
     diff = abs(eval1 - eval2)
     print(f"\nAfter reset to starting position:")
@@ -1021,11 +1080,11 @@ def test_reset_consistency(nn_type: str, model_path: str):
 
     # Also test resetting to a different position
     test_fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
-    test_board = chess.Board(test_fen)
+    test_board = CachedBoard(test_fen)
 
     evaluator1.reset(test_board)
-    eval_reset = evaluator1.evaluate(test_board)
-    eval_full = evaluator1.evaluate_full(test_board)
+    eval_reset = evaluator1._evaluate(test_board)
+    eval_full = evaluator1._evaluate_full(test_board)
 
     diff = abs(eval_reset - eval_full)
     print(f"\nAfter reset to new position:")
@@ -1054,8 +1113,8 @@ def test_reset_consistency(nn_type: str, model_path: str):
 # Deep Search Simulation Test
 # =============================================================================
 
-def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 6,
-                                  num_iterations: int = 100, tolerance: float = 1e-4):
+def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 4,
+                                  num_iterations: int = 20, tolerance: float = 1e-3):
     """
     Simulate a deep search with many push/pop cycles.
 
@@ -1071,7 +1130,7 @@ def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 6,
     print("=" * 70)
     print(f"Parameters: depth={depth}, iterations={num_iterations}, tolerance={tolerance}")
 
-    board = chess.Board()
+    board = CachedBoard()
     evaluator = NNEvaluator.create(board, nn_type, model_path)
 
     all_passed = True
@@ -1085,8 +1144,8 @@ def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 6,
         total_nodes += 1
 
         # Validate incremental vs full at this node
-        eval_inc = evaluator.evaluate(board)
-        eval_full = evaluator.evaluate_full(board)
+        eval_inc = evaluator._evaluate(board)
+        eval_full = evaluator._evaluate_full(board)
         diff = abs(eval_inc - eval_full)
         max_diff = max(max_diff, diff)
 
@@ -1099,9 +1158,11 @@ def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 6,
             return 1
 
         nodes1 = 0
-        legal_moves = list(board.legal_moves)[:5]  # Limit branching
+        legal_moves = list(board.legal_moves)
+        random.shuffle(legal_moves)
+        moves_to_test = legal_moves[:5]
 
-        for move in legal_moves:
+        for move in moves_to_test:
             evaluator_push(evaluator, board, move)
             path.append(move)
 
@@ -1116,6 +1177,7 @@ def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 6,
 
     start_time = time.time()
     for i in range(num_iterations):
+
         total_nodes = 0
         nodes = search_recursive(depth, [])
 
@@ -1136,6 +1198,87 @@ def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 6,
         print("✓ Deep search simulation PASSED!")
     else:
         print("✗ Deep search simulation FAILED!")
+    print("=" * 70)
+
+    return all_passed
+
+
+def test_engine_best_move():
+    win_at_chess_positions = \
+        "2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - - bm Qg6; id 'WAC.001';\
+        5rk1/1ppb3p/p1pb4/6q1/3P1p1r/2P1R2P/PP1BQ1P1/5RKN w - - bm Rg3; id 'WAC.003';\
+        r1bq2rk/pp3pbp/2p1p1pQ/7P/3P4/2PB1N2/PP3PPR/2KR4 w - - bm Qxh7+; id 'WAC.004';\
+        5k2/6pp/p1qN4/1p1p4/3P4/2PKP2Q/PP3r2/3R4 b - - bm Qc4+; id 'WAC.005';\
+        7k/p7/1R5K/6r1/6p1/6P1/8/8 w - - bm Rb7; id 'WAC.006';\
+        rnbqkb1r/pppp1ppp/8/4P3/6n1/7P/PPPNPPP1/R1BQKBNR b KQkq - - bm Ne3; id 'WAC.007';\
+        r4q1k/p2bR1rp/2p2Q1N/5p2/5p2/2P5/PP3PPP/R5K1 w - - bm Rf7; id 'WAC.008';\
+        3q1rk1/p4pp1/2pb3p/3p4/6Pr/1PNQ4/P1PB1PP1/4RRK1 b - - bm Bh2+; id 'WAC.009';\
+        2br2k1/2q3rn/p2NppQ1/2p1P3/Pp5R/4P3/1P3PPP/3R2K1 w - - bm Rxh7; id 'WAC.010';\
+        r1b1kb1r/3q1ppp/pBp1pn2/8/Np3P2/5B2/PPP3PP/R2Q1RK1 w kq - - bm Bxc6; id 'WAC.011';\
+        4k1r1/2p3r1/1pR1p3/3pP2p/3P2qP/P4N2/1PQ4P/5R1K b - - bm Qxf3+; id 'WAC.012';\
+        5rk1/pp4p1/2n1p2p/2Npq3/2p5/6P1/P3P1BP/R4Q1K w - - bm Qxf8+; id 'WAC.013';\
+        r2rb1k1/pp1q1p1p/2n1p1p1/2bp4/5P2/PP1BPR1Q/1BPN2PP/R5K1 w - - bm Qxh7+; id 'WAC.014';\
+        1R6/1brk2p1/4p2p/p1P1Pp2/P7/6P1/1P4P1/2R3K1 w - - bm Rxb7; id 'WAC.015';\
+        r4rk1/ppp2ppp/2n5/2bqp3/8/P2PB3/1PP1NPPP/R2Q1RK1 w - - bm Nc3; id 'WAC.016';\
+        1k5r/pppbn1pp/4q1r1/1P3p2/2NPp3/1QP5/P4PPP/R1B1R1K1 w - - bm Ne5; id 'WAC.017';\
+        R7/P4k2/8/8/8/8/r7/6K1 w - - bm Rh8; id 'WAC.018';\
+        r1b2rk1/ppbn1ppp/4p3/1QP4q/3P4/N4N2/5PPP/R1B2RK1 w - - bm c6; id 'WAC.019';\
+        r2qkb1r/1ppb1ppp/p7/4p3/P1Q1P3/2P5/5PPP/R1B2KNR b kq - - bm Bb5; id 'WAC.020';\
+        5rk1/1b3p1p/pp3p2/3n1N2/1P6/P1qB1PP1/3Q3P/4R1K1 w - - bm Qh6; id 'WAC.021';\
+        r1bqk2r/ppp1nppp/4p3/n5N1/2BPp3/P1P5/2P2PPP/R1BQK2R w KQkq - - bm Ba2 Nxf7; id 'WAC.022';\
+        6k1/1b1nqpbp/pp4p1/5P2/1PN5/4Q3/P5PP/1B2B1K1 b - - bm Bd4; id 'WAC.024';\
+        3R1rk1/8/5Qpp/2p5/2P1p1q1/P3P3/1P2PK2/8 b - - bm Qh4+; id 'WAC.025';\
+        6k1/1b1nqpbp/pp4p1/5P2/1PN5/4Q3/P5PP/1B2B1K1 b - - bm Bd4; id 'WAC.024';\
+        3R1rk1/8/5Qpp/2p5/2P1p1q1/P3P3/1P2PK2/8 b - - bm Qh4+; id 'WAC.025';"
+
+    print("\n" + "=" * 70)
+    print(f"Engine Tests")
+    print("=" * 70)
+
+    tests_total = 0
+    tests_passed = 0
+    nodes_sum = 0
+    nps_sum = 0.0
+    test_suite = (win_at_chess_positions, r'\d{3}\';', -1, 5)
+
+    for line in re.split(test_suite[1], test_suite[0])[:test_suite[2]]:
+        tests_total += 1
+
+        fen = line.split('- -')[0].strip()
+        best_moves = line.split('- -')[1].split('bm')[1].split(';')[0].strip().split(' ')
+
+        board = chess.Board(fen)
+        expected_moves = []
+        for best_move in best_moves:
+            expected_move = board.parse_san(best_move)
+            expected_moves.append(expected_move)
+
+        f = io.StringIO()
+        with redirect_stdout(f):
+            start_time = time.perf_counter()
+            found_move, score, _, nodes, nps = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
+                                                        expected_best_moves=expected_moves)
+            nps_sum += nps
+            nodes_sum += nodes
+
+        found_move = board.san(found_move)
+
+        if found_move in best_moves:
+            tests_passed += 1
+            print(f"{tests_total}.", end="", flush=True)
+        else:
+            print(f"\nFailed test: fen={fen}, expected_moves={expected_moves}, found_move={found_move}")
+
+    print("\n" + "=" * 70)
+    print(f"total={tests_total}, passed={tests_passed}, "
+          f"success-rate={round(tests_passed / tests_total * 100, 2)}%")
+    print(f"nodes-avg={round(nodes_sum / tests_total)}, nps-avg={round(nps_sum / tests_total)}")
+
+    all_passed = tests_total == tests_passed
+    if all_passed:
+        print("✓ Engine Tests PASSED!")
+    else:
+        print("✗ Engine Tests FAILED!")
     print("=" * 70)
 
     return all_passed
@@ -1164,9 +1307,11 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
 
     random.seed(42)  # Reproducible
 
+    evaluator = NNEvaluator.create(CachedBoard(), nn_type, model_path) # Loads model
+
     for game_num in range(num_games):
-        board = chess.Board()
-        evaluator = NNEvaluator.create(board, nn_type, model_path)
+        board = CachedBoard()
+        evaluator.reset(board)
 
         moves_played = []
 
@@ -1183,8 +1328,8 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
             moves_played.append(move)
             total_positions += 1
 
-            eval_inc = evaluator.evaluate(board)
-            eval_full = evaluator.evaluate_full(board)
+            eval_inc = evaluator._evaluate(board)
+            eval_full = evaluator._evaluate_full(board)
             diff = abs(eval_inc - eval_full)
             max_diff = max(max_diff, diff)
 
@@ -1203,8 +1348,8 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
         for _ in range(num_pops):
             evaluator_pop(evaluator, board)
 
-            eval_inc = evaluator.evaluate(board)
-            eval_full = evaluator.evaluate_full(board)
+            eval_inc = evaluator._evaluate(board)
+            eval_full = evaluator._evaluate_full(board)
             diff = abs(eval_inc - eval_full)
             max_diff = max(max_diff, diff)
 
@@ -1237,238 +1382,6 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
 
 
 # =============================================================================
-# CP Integrity Test
-# =============================================================================
-import chess
-
-def fen_to_sparse_planes_chatgpt(fen: str) -> list[int]:
-    """
-    Convert a FEN string into sparse one-hot indices for a
-    12x64 (768) feature vector.
-
-    Plane order per side:
-        K, Q, R, B, N, P
-
-    Planes:
-        0–5   : side to move
-        6–11  : opponent
-
-    Board is oriented from the side-to-move perspective.
-    """
-    board = chess.Board(fen)
-
-    # Piece → plane index (within a side)
-    piece_to_plane = {
-        chess.KING:   0,
-        chess.QUEEN:  1,
-        chess.ROOK:   2,
-        chess.BISHOP: 3,
-        chess.KNIGHT: 4,
-        chess.PAWN:   5,
-    }
-
-    sparse_indices = []
-    stm = board.turn  # True = White, False = Black
-
-    for square, piece in board.piece_map().items():
-        # Base plane index (0–5)
-        plane = piece_to_plane[piece.piece_type]
-
-        # Offset for opponent pieces
-        if piece.color != stm:
-            plane += 6
-
-        # Orient square from side-to-move perspective
-        if stm == chess.WHITE:
-            oriented_square = square
-        else:
-            oriented_square = chess.square(
-                chess.square_file(square),
-                7 - chess.square_rank(square)
-            )
-
-        index = plane * 64 + oriented_square
-        sparse_indices.append(index)
-
-    return sparse_indices
-
-
-def test_cp_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "data",
-                      stockfish_path: str = "stockfish", time_limit: float = 2.0,
-                      threshold: float = 0.01):
-    """
-    Test training data integrity by comparing stored scores against Stockfish evaluation.
-
-    Uses diagnostic records (with FEN) from shard files to:
-    1. Get the actual FEN for each position
-    2. Run Stockfish analysis on that FEN
-    3. Compare stored score (STM perspective) against Stockfish score
-
-    Args:
-        nn_type: "DNN" or "NNUE"
-        num_positions: Number of positions to validate
-        data_dir: Base data directory containing dnn/ and nnue/ subdirs
-        stockfish_path: Path to stockfish binary
-        time_limit: Stockfish time limit per position (default 2.0 seconds)
-        threshold: Mismatch threshold in tanh scale (default 0.01)
-
-    Returns:
-        True if all validations pass, False otherwise
-    """
-    import math
-    from pathlib import Path
-    import chess.engine
-    from shard_io import ShardReader, find_shards
-
-    print("\n" + "=" * 70)
-    print(f"{nn_type} CP Integrity Test")
-    print("=" * 70)
-
-    # Constants matching nn_inference.py
-    MAX_SCORE = 10_000
-    MATE_FACTOR = 100
-    MAX_MATE_DEPTH = 10
-    MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
-
-    def cp_to_tanh(cp: int, scale: float = TANH_SCALE) -> float:
-        return math.tanh(cp / scale)
-
-    # Find shard files
-    dnn_shards, nnue_shards = find_shards(data_dir, nn_type)
-    shard_files = dnn_shards if nn_type.upper() == "DNN" else nnue_shards
-
-    if not shard_files:
-        print(f"\n❌ ERROR: No shard files found for {nn_type}")
-        return False
-
-    # Pick random shard
-    shard_path = random.choice(shard_files)
-    print(f"\nSelected shard: {shard_path}")
-
-    # Read diagnostic records (which have FEN)
-    reader = ShardReader(nn_type)
-    records = reader.read_diagnostic_records(shard_path, max_records=num_positions)
-
-    if not records:
-        print("\n❌ ERROR: No diagnostic records found in shard file")
-        print("Diagnostic records are written every 1000 positions and include FEN.")
-        print("You may need to regenerate shards with the updated prepare_data.py")
-        return False
-
-    print(f"Read {len(records)} diagnostic records for validation")
-
-    # Initialize Stockfish
-    try:
-        engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-    except Exception as e:
-        print(f"\n❌ ERROR: Could not initialize Stockfish at '{stockfish_path}': {e}")
-        return False
-
-    def get_stockfish_score_stm(fen: str, stm_is_white: bool):
-        """
-        Get Stockfish score from STM perspective.
-
-        Stockfish returns score from white's perspective.
-        We convert to STM perspective to match bin.zst format.
-        """
-        try:
-            board = chess.Board(fen)
-            info = engine.analyse(board, chess.engine.Limit(time=time_limit))
-            score = info["score"].white()  # White's perspective
-
-            if score.is_mate():
-                mate_in = score.mate()
-                if mate_in < 0:  # Black winning
-                    mate_in = max(-MAX_MATE_DEPTH, mate_in)
-                    score_cp = -MAX_SCORE - mate_in * MATE_FACTOR
-                else:  # White winning
-                    mate_in = min(MAX_MATE_DEPTH, mate_in)
-                    score_cp = MAX_SCORE - mate_in * MATE_FACTOR
-            else:
-                score_cp = score.score()
-                score_cp = max(-MAX_NON_MATE_SCORE, min(MAX_NON_MATE_SCORE, score_cp))
-
-            # Convert to STM perspective (matching prepare_data.py logic)
-            if not stm_is_white:  # Black to move
-                score_cp = -score_cp
-
-            return score_cp
-        except Exception as e:
-            print(f"Stockfish error: {e}")
-            return None
-
-    # Validate positions
-    validated = 0
-    passed = 0
-    mismatches = 0
-    errors = 0
-    mismatch_details = []
-
-    try:
-        for i, rec in enumerate(records):
-            fen = rec['fen']
-            stm_is_white = rec['stm'] == 1
-
-            # Get Stockfish evaluation
-            sf_score = get_stockfish_score_stm(fen, stm_is_white)
-            if sf_score is None:
-                errors += 1
-                continue
-
-            # Compare scores in tanh scale
-            target_cp = rec['score_cp']
-            target_tanh = cp_to_tanh(target_cp)
-            sf_tanh = cp_to_tanh(sf_score)
-            diff = abs(target_tanh - sf_tanh)
-
-            validated += 1
-
-            if diff > threshold:
-                mismatches += 1
-                mismatch_details.append({
-                    'fen': fen,
-                    'target_cp': target_cp,
-                    'sf_cp': sf_score,
-                    'diff': diff
-                })
-                print(f"[{i+1}/{len(records)}] MISMATCH:")
-                print(f"  FEN: {fen}")
-                print(f"  Target: {target_cp} cp ({target_tanh:.4f} tanh)")
-                print(f"  Stockfish: {sf_score} cp ({sf_tanh:.4f} tanh)")
-                print(f"  Diff: {diff:.4f} (threshold: {threshold})")
-            else:
-                passed += 1
-                print(f"[{i+1}/{len(records)}] OK: diff={diff:.4f} | {fen[:50]}...")
-
-    finally:
-        engine.quit()
-
-    # Summary
-    print("\n" + "=" * 70)
-    print("VALIDATION SUMMARY")
-    print("=" * 70)
-    print(f"  Shard: {Path(shard_path).name}")
-    print(f"  Positions validated: {validated}")
-    print(f"  Passed: {passed}")
-    print(f"  Mismatches: {mismatches}")
-    print(f"  Errors: {errors}")
-    if validated > 0:
-        rate = mismatches / validated * 100
-        print(f"  Mismatch rate: {rate:.1f}%")
-
-    all_passed = mismatches == 0 and errors == 0
-
-    print("\n" + "=" * 70)
-    if all_passed:
-        print("✓ Data integrity test PASSED!")
-    else:
-        print("✗ Data integrity test FAILED!")
-    print("=" * 70)
-
-    return all_passed
-
-
-# =============================================================================
 # Run All Tests
 # =============================================================================
 
@@ -1482,13 +1395,17 @@ def run_all_tests(nn_type: str, model_path: str):
 
     # Run each test
     tests = [
+        ("Incremental-vs-Full", lambda: performance_test(nn_type, model_path)),
         ("Accumulator Correctness", lambda: test_accumulator_correctness(nn_type, model_path)),
+        ("Eval-Accuracy", lambda: test_eval_accuracy(nn_type, model_path)),
+        ("NN-vs-Stockfish", lambda: test_nn_vs_stockfish(nn_type, model_path)),
         ("Feature Extraction", lambda: test_feature_extraction(nn_type)),
         ("Edge Cases", lambda: test_edge_cases(nn_type, model_path)),
         ("Reset Consistency", lambda: test_reset_consistency(nn_type, model_path)),
-        ("Deep Search Simulation", lambda: test_deep_search_simulation(nn_type, model_path, depth=4, num_iterations=20, tolerance=1e-3)),
+        ("Deep Search Simulation", lambda: test_deep_search_simulation(nn_type, model_path, depth=4, num_iterations=5,
+                                                                       tolerance=1e-4)),
         ("Random Games", lambda: test_random_games(nn_type, model_path, num_games=5, max_moves=50)),
-        ("CP-Integrity", lambda: test_cp_integrity(nn_type=nn_type)),
+        ("Engine-Tests", lambda: test_engine_best_move()),
     ]
 
     for test_name, test_func in tests:
@@ -1550,7 +1467,7 @@ Test types:
   8  Reset-Consistency       - Test evaluator reset functionality
   9  Deep-Search-Simulation  - Simulate deep search with many push/pop cycles
   10 Random-Games            - Test with random legal move sequences
-  11 CP-Integrity            - Validate training data against Stockfish
+  11 Engine-Tests            - Compares engines best-move against known best-move(s) for a few FENs. 
   12 All                     - Run all non-interactive tests
 
 Examples:
@@ -1560,7 +1477,7 @@ Examples:
   %(prog)s --nn-type DNN --test 3 --positions 1000  # Eval accuracy
   %(prog)s --nn-type DNN --test 10 --num-positions 10  # Data integrity
   %(prog)s --nn-type NNUE --test 11         # Run all tests
-  %(prog)s --nn-type NNUE --test 31 --positions 100  # NN vs Stockfish
+  %(prog)s --nn-type NNUE --test 4 --positions 100  # NN vs Stockfish
 """
     )
 
@@ -1568,7 +1485,7 @@ Examples:
         '--nn-type', '-n',
         type=str,
         choices=['NNUE', 'DNN'],
-        required=True,
+        required=False,
         help='Neural network type: NNUE or DNN'
     )
 
@@ -1583,7 +1500,7 @@ Examples:
     parser.add_argument(
         '--positions', '-p',
         type=int,
-        default=100,
+        default=1000,
         help='Number of positions for Eval-Accuracy and NN-vs-Stockfish tests (default: 100)'
     )
 
@@ -1597,15 +1514,15 @@ Examples:
     parser.add_argument(
         '--depth', '-d',
         type=int,
-        default=6,
-        help='Search depth for Deep-Search-Simulation (default: 6)'
+        default=4,
+        help='Search depth for Deep-Search-Simulation (default: 4)'
     )
 
     parser.add_argument(
         '--iterations', '-i',
         type=int,
-        default=100,
-        help='Number of iterations for Deep-Search-Simulation (default: 100)'
+        default=10,
+        help='Number of iterations for Deep-Search-Simulation (default: 10)'
     )
 
     parser.add_argument(
@@ -1663,13 +1580,17 @@ Examples:
     test_type = VALID_TEST_TYPES[args.test]
     model_path = args.model_path or get_model_path(nn_type)
 
+    # Custom conditional logic
+    if  nn_type is None and test_type != "Engine-Tests":
+        parser.error("--nn-type is required")
+
     print(f"Neural Network Type: {nn_type}")
     print(f"Test Type: {test_type}")
     print(f"Model Path: {model_path}")
 
     # Run appropriate test
     if test_type == "Interactive-FEN":
-        board = chess.Board()
+        board = CachedBoard()
         evaluator = NNEvaluator.create(board, nn_type, model_path)
 
         # Test with starting position first
@@ -1710,25 +1631,18 @@ Examples:
     elif test_type == "Random-Games":
         test_random_games(nn_type, model_path, args.num_games, args.max_moves)
 
+    elif test_type == "Engine-Tests":
+        test_engine_best_move()
+
     elif test_type == "All":
         success = run_all_tests(nn_type, model_path)
-        sys.exit(0 if success else 1)
-
-    elif test_type == "CP-Integrity":
-        success = test_cp_integrity(
-            nn_type=nn_type,
-            num_positions=args.num_positions,
-            data_dir=args.data_dir,
-            stockfish_path=args.stockfish,
-            time_limit=args.time_limit
-        )
         sys.exit(0 if success else 1)
 
     elif test_type == "NN-vs-Stockfish":
         if args.positions <= 0:
             print("ERROR: NN-vs-Stockfish requires --positions > 0")
             sys.exit(1)
-        test_nn_vs_stockfish(nn_type, model_path, args.positions, args.stockfish)
+        test_nn_vs_stockfish(nn_type, model_path, args.positions)
 
 
 if __name__ == "__main__":

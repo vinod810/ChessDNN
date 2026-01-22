@@ -138,7 +138,11 @@ kpi = {
 # Track positions seen in the current game (cleared on ucinewgame)
 game_position_history: dict[int, int] = {}  # zobrist_hash -> count
 
-nn_evaluator: DNNEvaluator | NNUEEvaluator | None = None
+#nn_evaluator: DNNEvaluator | NNUEEvaluator | None = None
+if NN_TYPE == "DNN":
+    nn_evaluator = DNNEvaluator.create(CachedBoard(), NN_TYPE, MODEL_PATH) # Loads model
+else:
+    nn_evaluator = NNUEEvaluator.create(CachedBoard(), NN_TYPE, MODEL_PATH)
 
 PIECE_VALUES = {
     chess.PAWN: 100,
@@ -929,7 +933,7 @@ def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
 
 
 def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_best_moves=None) -> Tuple[
-    Optional[chess.Move], int, List[chess.Move]]:
+    Optional[chess.Move], int, List[chess.Move], int, float]:
     """
     Finds the best move for a given FEN using iterative deepening negamax with alpha-beta pruning,
     aspiration windows, TT, quiescence, null-move pruning, LMR, singular extensions, and heuristics.
@@ -943,6 +947,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     TimeControl.stop_search = False
     TimeControl.soft_stop = False  # Reset soft stop
     TimeControl.start_time = time.perf_counter()
+    nodes_start = kpi['nodes']
+    nps = 0
 
     # -------- Clear search tables & heuristics --------
     for i in range(len(killer_moves)):
@@ -954,11 +960,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
     board = CachedBoard(fen)
-    global nn_evaluator
-    if NN_TYPE == "DNN":
-        nn_evaluator = DNNEvaluator.create(board, NN_TYPE, MODEL_PATH)
-    else:
-        nn_evaluator = NNUEEvaluator.create(board, NN_TYPE, MODEL_PATH)
+    nn_evaluator.reset(board)
 
     best_move = None
     best_score = 0
@@ -1136,7 +1138,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
             # Print progress with PV only if depth completed
             if depth_completed and best_pv:
                 elapsed = time.perf_counter() - TimeControl.start_time
-                nps = int(kpi['nodes'] / elapsed) if elapsed > 0 else 0
+                nps = int((kpi['nodes'] - nodes_start) / elapsed) if elapsed > 0 else 0
                 print(
                     f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {' '.join(m.uci() for m in best_pv)}",
                     flush=True)
@@ -1162,7 +1164,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
             best_score = evaluate_material(board)
             best_pv = []
 
-    return best_move, best_score, best_pv
+    return best_move, best_score, best_pv, kpi['nodes'] - nodes_start, nps
 
 
 def push_move(board: CachedBoard, move, evaluator: NNEvaluator):
@@ -1283,7 +1285,7 @@ def main():
 
             # Start timer
             start_time = time.perf_counter()
-            move, score, pv = find_best_move(fen, max_depth=20, time_limit=30)
+            move, score, pv, _, _ = find_best_move(fen, max_depth=20, time_limit=30)
             end_time = time.perf_counter()
 
             # Record cache sizes and time

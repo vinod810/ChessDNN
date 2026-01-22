@@ -176,7 +176,7 @@ def uci_loop():
                     # Reset nodes counter before search
                     kpi['nodes'] = 0
 
-                    best_move, score, pv = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
+                    best_move, score, pv, _, _ = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
 
                     # Check for resign condition
                     should_resign = False

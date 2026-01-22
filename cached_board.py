@@ -172,51 +172,112 @@ def int_to_move(key: int) -> chess.Move:
 
 class MoveAdapter:
     """OPTIMIZED: Adapter with move caching to reduce object creation."""
-    
+
     _to_py_cache: Dict[tuple, chess.Move] = {}
     _to_cpp_cache: Dict[tuple, Any] = {}
     _MAX_CACHE_SIZE = 50000
-    
+
     @classmethod
     def to_chess_move(cls, cpp_move: Any) -> chess.Move:
+        """Convert C++ move to python-chess Move, normalizing castling representation.
+
+        The C++ backend represents castling as king-to-rook-square:
+        - Kingside: e1->h1 (white) or e8->h8 (black)
+        - Queenside: e1->a1 (white) or e8->a8 (black)
+
+        python-chess represents castling as king-to-destination:
+        - Kingside: e1->g1 (white) or e8->g8 (black)
+        - Queenside: e1->c1 (white) or e8->c1 (black)
+        """
         if not HAS_CPP_BACKEND:
             return cpp_move
-        
-        key = (cpp_move.from_square, cpp_move.to_square, cpp_move.promotion)
+
+        from_sq = cpp_move.from_square
+        to_sq = cpp_move.to_square
+        promo = cpp_move.promotion if cpp_move.promotion > 0 else None
+
+        # Detect and convert C++ castling moves to python-chess convention
+        # C++ uses king-to-rook-square, python-chess uses king-to-destination
+
+        # White castling (king starts on e1 = square 4)
+        if from_sq == chess.E1 and promo is None:
+            if to_sq == chess.H1:  # C++ kingside castling
+                to_sq = chess.G1  # Convert to python-chess convention
+            elif to_sq == chess.A1:  # C++ queenside castling
+                to_sq = chess.C1  # Convert to python-chess convention
+
+        # Black castling (king starts on e8 = square 60)
+        elif from_sq == chess.E8 and promo is None:
+            if to_sq == chess.H8:  # C++ kingside castling
+                to_sq = chess.G8  # Convert to python-chess convention
+            elif to_sq == chess.A8:  # C++ queenside castling
+                to_sq = chess.C8  # Convert to python-chess convention
+
+        # Use cache with the CONVERTED coordinates
+        key = (from_sq, to_sq, promo if promo else 0)
         cached = cls._to_py_cache.get(key)
         if cached is not None:
             return cached
-        
-        py_move = chess.Move(
-            cpp_move.from_square,
-            cpp_move.to_square,
-            cpp_move.promotion if cpp_move.promotion > 0 else None
-        )
-        
+
+        py_move = chess.Move(from_sq, to_sq, promo)
+
         if len(cls._to_py_cache) < cls._MAX_CACHE_SIZE:
             cls._to_py_cache[key] = py_move
-        
+
         return py_move
-    
+
     @classmethod
-    def from_chess_move(cls, py_move: chess.Move) -> Any:
+    def from_chess_move(cls, py_move: chess.Move, is_castling: bool = None) -> Any:
+        """Convert python-chess Move to C++ move.
+
+        For castling moves, we need to convert from python-chess convention
+        (king-to-destination) to C++ convention (king-to-rook-square).
+
+        Args:
+            py_move: The python-chess Move object
+            is_castling: If True, apply castling conversion. If False, don't convert.
+                        If None (default), auto-detect based on move pattern (legacy behavior,
+                        but may incorrectly convert non-castling moves from e1/e8).
+        """
         if not HAS_CPP_BACKEND:
             return py_move
-        
+
+        from_sq = py_move.from_square
+        to_sq = py_move.to_square
         promo = py_move.promotion if py_move.promotion else 0
-        key = (py_move.from_square, py_move.to_square, promo)
-        
+
+        # Only apply castling conversion if explicitly told it's castling,
+        # or if is_castling is None and move pattern matches castling
+        apply_conversion = is_castling if is_castling is not None else True
+
+        if apply_conversion and promo == 0:
+            # White castling (king starts on e1 = square 4)
+            if from_sq == chess.E1:
+                if to_sq == chess.G1:  # Python-chess kingside castling (e1->g1)
+                    to_sq = chess.H1  # Convert to C++ convention (e1->h1)
+                elif to_sq == chess.C1:  # Python-chess queenside castling (e1->c1)
+                    to_sq = chess.A1  # Convert to C++ convention (e1->a1)
+
+            # Black castling (king starts on e8 = square 60)
+            elif from_sq == chess.E8:
+                if to_sq == chess.G8:  # Python-chess kingside castling (e8->g8)
+                    to_sq = chess.H8  # Convert to C++ convention (e8->h8)
+                elif to_sq == chess.C8:  # Python-chess queenside castling (e8->c8)
+                    to_sq = chess.A8  # Convert to C++ convention (e8->a8)
+
+        key = (from_sq, to_sq, promo)
+
         cached = cls._to_cpp_cache.get(key)
         if cached is not None:
             return cached
-        
-        cpp_move = chess_cpp.Move(py_move.from_square, py_move.to_square, promo)
-        
+
+        cpp_move = chess_cpp.Move(from_sq, to_sq, promo)
+
         if len(cls._to_cpp_cache) < cls._MAX_CACHE_SIZE:
             cls._to_cpp_cache[key] = cpp_move
-        
+
         return cpp_move
-    
+
     @classmethod
     def clear_cache(cls):
         cls._to_py_cache.clear()
@@ -226,7 +287,7 @@ class MoveAdapter:
 class CachedBoard:
     """
     PHASE 2 OPTIMIZED: Chess board wrapper with inlined cache access.
-    
+
     Key optimization: All _cache property access is now inlined as _cache_stack[-1]
     to eliminate 2.8M+ property call overhead.
     """
@@ -327,7 +388,8 @@ class CachedBoard:
                     temp_board.push(move)
                     self._board.set_fen(temp_board.fen())
                 else:
-                    self._board.push(MoveAdapter.from_chess_move(move))
+                    # Only apply castling conversion if this is actually a castling move
+                    self._board.push(MoveAdapter.from_chess_move(move, is_castling=move_info.was_castling))
                 self._py_board_dirty = True
             else:
                 self._board.push(move)
@@ -356,7 +418,7 @@ class CachedBoard:
                     self._move_info_stack.pop()
 
                 self._board.set_fen(self._initial_fen)
-                for m in self._move_stack:
+                for idx, m in enumerate(self._move_stack):
                     m_is_null = (m.from_square == m.to_square == 0 and m.promotion is None)
                     if m_is_null:
                         parts = self._board.fen().split(' ')
@@ -364,7 +426,11 @@ class CachedBoard:
                         parts[3] = '-'
                         self._board.set_fen(' '.join(parts))
                     else:
-                        self._board.push(MoveAdapter.from_chess_move(m))
+                        # Use the stored was_castling info if available
+                        was_castling = False
+                        if idx < len(self._move_info_stack):
+                            was_castling = self._move_info_stack[idx].was_castling
+                        self._board.push(MoveAdapter.from_chess_move(m, is_castling=was_castling))
 
                 self._cpp_stack_dirty = any(
                     m.from_square == m.to_square == 0 and m.promotion is None
@@ -429,7 +495,8 @@ class CachedBoard:
 
     def san(self, move: chess.Move) -> str:
         if self._use_cpp:
-            return self._board.san(MoveAdapter.from_chess_move(move))
+            is_castling_move = self.is_castling(move)
+            return self._board.san(MoveAdapter.from_chess_move(move, is_castling=is_castling_move))
         return self._board.san(move)
 
     def parse_san(self, san: str) -> chess.Move:
@@ -439,17 +506,41 @@ class CachedBoard:
 
     def is_en_passant(self, move: chess.Move) -> bool:
         if self._use_cpp:
-            return self._board.is_en_passant(MoveAdapter.from_chess_move(move))
+            # En passant detection doesn't need castling conversion
+            return self._board.is_en_passant(MoveAdapter.from_chess_move(move, is_castling=False))
         return self._board.is_en_passant(move)
 
     def is_castling(self, move: chess.Move) -> bool:
-        if self._use_cpp:
-            return self._board.is_castling(MoveAdapter.from_chess_move(move))
-        return self._board.is_castling(move)
+        """Check if a move is castling.
+
+        For the C++ backend, we detect castling by checking if:
+        1. A king is on the from_square
+        2. The move goes from e1/e8 to c1/g1 or c8/g8 (python-chess format)
+
+        This avoids the circular dependency with from_chess_move().
+        """
+        piece = self.piece_at(move.from_square)
+        if piece is None or piece.piece_type != chess.KING:
+            return False
+
+        # Python-chess castling destinations
+        from_sq = move.from_square
+        to_sq = move.to_square
+
+        # White castling: e1 -> c1 or g1
+        if from_sq == chess.E1 and to_sq in (chess.C1, chess.G1):
+            return True
+        # Black castling: e8 -> c8 or g8
+        if from_sq == chess.E8 and to_sq in (chess.C8, chess.G8):
+            return True
+
+        return False
 
     def is_capture(self, move: chess.Move) -> bool:
         if self._use_cpp:
-            return self._board.is_capture(MoveAdapter.from_chess_move(move))
+            # Capture detection doesn't need castling conversion
+            is_castling_move = self.is_castling(move)
+            return self._board.is_capture(MoveAdapter.from_chess_move(move, is_castling=is_castling_move))
         return self._board.is_capture(move)
 
     def is_repetition(self, count: int = 3) -> bool:
@@ -545,7 +636,8 @@ class CachedBoard:
             cache.move_is_capture[move] = is_cap
 
             if self._use_cpp:
-                cache.move_gives_check[move] = self._board.gives_check(MoveAdapter.from_chess_move(move))
+                is_castling_move = self.is_castling(move)
+                cache.move_gives_check[move] = self._board.gives_check(MoveAdapter.from_chess_move(move, is_castling=is_castling_move))
             else:
                 cache.move_gives_check[move] = self._board.gives_check(move)
 
@@ -575,7 +667,8 @@ class CachedBoard:
         if result is not None:
             return result
         if self._use_cpp:
-            return self._board.gives_check(MoveAdapter.from_chess_move(move))
+            is_castling_move = self.is_castling(move)
+            return self._board.gives_check(MoveAdapter.from_chess_move(move, is_castling=is_castling_move))
         return self._board.gives_check(move)
 
     def get_victim_type(self, move: chess.Move) -> Optional[int]:
