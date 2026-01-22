@@ -178,7 +178,7 @@ class MoveAdapter:
     _MAX_CACHE_SIZE = 50000
 
     @classmethod
-    def to_chess_move(cls, cpp_move: Any) -> chess.Move:
+    def to_chess_move(cls, cpp_move: Any, is_castling: bool = False) -> chess.Move:
         """Convert C++ move to python-chess Move, normalizing castling representation.
 
         The C++ backend represents castling as king-to-rook-square:
@@ -187,7 +187,12 @@ class MoveAdapter:
 
         python-chess represents castling as king-to-destination:
         - Kingside: e1->g1 (white) or e8->g8 (black)
-        - Queenside: e1->c1 (white) or e8->c1 (black)
+        - Queenside: e1->c1 (white) or e8->c8 (black)
+
+        Args:
+            cpp_move: The C++ move object
+            is_castling: If True, apply castling conversion. This should be determined
+                        by calling board.is_castling(cpp_move) before conversion.
         """
         if not HAS_CPP_BACKEND:
             return cpp_move
@@ -196,22 +201,21 @@ class MoveAdapter:
         to_sq = cpp_move.to_square
         promo = cpp_move.promotion if cpp_move.promotion > 0 else None
 
-        # Detect and convert C++ castling moves to python-chess convention
-        # C++ uses king-to-rook-square, python-chess uses king-to-destination
+        # Only convert if explicitly told this is a castling move
+        if is_castling and promo is None:
+            # White castling (king starts on e1 = square 4)
+            if from_sq == chess.E1:
+                if to_sq == chess.H1:  # C++ kingside castling
+                    to_sq = chess.G1  # Convert to python-chess convention
+                elif to_sq == chess.A1:  # C++ queenside castling
+                    to_sq = chess.C1  # Convert to python-chess convention
 
-        # White castling (king starts on e1 = square 4)
-        if from_sq == chess.E1 and promo is None:
-            if to_sq == chess.H1:  # C++ kingside castling
-                to_sq = chess.G1  # Convert to python-chess convention
-            elif to_sq == chess.A1:  # C++ queenside castling
-                to_sq = chess.C1  # Convert to python-chess convention
-
-        # Black castling (king starts on e8 = square 60)
-        elif from_sq == chess.E8 and promo is None:
-            if to_sq == chess.H8:  # C++ kingside castling
-                to_sq = chess.G8  # Convert to python-chess convention
-            elif to_sq == chess.A8:  # C++ queenside castling
-                to_sq = chess.C8  # Convert to python-chess convention
+            # Black castling (king starts on e8 = square 60)
+            elif from_sq == chess.E8:
+                if to_sq == chess.H8:  # C++ kingside castling
+                    to_sq = chess.G8  # Convert to python-chess convention
+                elif to_sq == chess.A8:  # C++ queenside castling
+                    to_sq = chess.C8  # Convert to python-chess convention
 
         # Use cache with the CONVERTED coordinates
         key = (from_sq, to_sq, promo if promo else 0)
@@ -439,8 +443,8 @@ class CachedBoard:
                 self._py_board_dirty = True
                 return move
             else:
-                cpp_move = self._board.pop()
-                move = MoveAdapter.to_chess_move(cpp_move)
+                self._board.pop()  # Pop from C++ board but don't use its return value
+                # Use the move already stored in _move_stack (it's in python-chess format)
                 self._py_board_dirty = True
         else:
             move = self._board.pop()
@@ -501,7 +505,9 @@ class CachedBoard:
 
     def parse_san(self, san: str) -> chess.Move:
         if self._use_cpp:
-            return MoveAdapter.to_chess_move(self._board.parse_san(san))
+            cpp_move = self._board.parse_san(san)
+            is_castling_move = self._board.is_castling(cpp_move)
+            return MoveAdapter.to_chess_move(cpp_move, is_castling=is_castling_move)
         return self._board.parse_san(san)
 
     def is_en_passant(self, move: chess.Move) -> bool:
@@ -578,7 +584,11 @@ class CachedBoard:
         cache = self._cache_stack[-1]  # Inlined
         if cache.legal_moves is None:
             if self._use_cpp:
-                cache.legal_moves = [MoveAdapter.to_chess_move(m) for m in self._board.legal_moves()]
+                # Check each move with is_castling before converting
+                cache.legal_moves = [
+                    MoveAdapter.to_chess_move(m, is_castling=self._board.is_castling(m))
+                    for m in self._board.legal_moves()
+                ]
             else:
                 cache.legal_moves = list(self._board.legal_moves)
         return cache.legal_moves
