@@ -6,8 +6,10 @@ import chess
 import chess.polyglot
 
 from engine import (find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache,
-                    clear_game_history, game_position_history, HOME_DIR, kpi)
+                    clear_game_history, game_position_history, HOME_DIR, kpi,
+                    MAX_MP_CORES, IS_SHARED_TT_MP)
 from book_move import init_opening_book, get_book_move
+import mp_search
 
 # Resign settings
 RESIGN_THRESHOLD = -500  # centipawns
@@ -15,7 +17,7 @@ RESIGN_CONSECUTIVE_MOVES = 3  # must be losing for this many moves
 resign_counter = 0
 
 # Pondering settings
-IS_PONDERING_ENABLED = False
+IS_PONDERING_ENABLED = True
 PONDER_TIME_LIMIT = 600  # Maximum time for ponder search (safety cap)
 
 CURR_DIR = Path(__file__).resolve().parent
@@ -76,6 +78,8 @@ def uci_loop():
             print(f"option name ResignThreshold type spin default {RESIGN_THRESHOLD} min -10000 max 0")
             print(f"option name ResignMoves type spin default {RESIGN_CONSECUTIVE_MOVES} min 1 max 10")
             print("option name Ponder type check default true")
+            print(f"option name Threads type spin default {mp_search.MAX_MP_CORES} min 1 max 64")
+            print(f"option name SharedTT type check default {'true' if mp_search.IS_SHARED_TT_MP else 'false'}")
             print("uciok", flush=True)
 
         elif command == "isready":
@@ -102,6 +106,11 @@ def uci_loop():
                     RESIGN_CONSECUTIVE_MOVES = int(value)
                 elif name.lower() == "ponder":
                     use_ponder = value.lower() == "true"
+                elif name.lower() == "threads":
+                    cores = int(value)
+                    mp_search.set_mp_cores(cores)
+                elif name.lower() == "sharedtt":
+                    mp_search.set_shared_tt(value.lower() == "true")
 
         elif command == "ucinewgame":
             board.reset()
@@ -111,6 +120,7 @@ def uci_loop():
             is_pondering = False
             ponder_fen = None
             ponder_hit_pending = False
+            mp_search.clear_shared_tables()  # Clear shared TT if MP enabled
 
         elif command.startswith("position"):
             # Stop any ongoing search (including ponder) before processing new position
@@ -220,7 +230,15 @@ def uci_loop():
                     # Reset nodes counter before search
                     kpi['nodes'] = 0
 
-                    best_move, score, pv, _, _ = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
+                    # Use parallel search if MP enabled, otherwise single-threaded
+                    if mp_search.is_mp_enabled():
+                        best_move, score, pv, nodes, nps = mp_search.parallel_find_best_move(
+                            fen, max_depth=max_depth, time_limit=movetime)
+                        # Print final info line for MP search
+                        if pv:
+                            print(f"info depth {len(pv)} score cp {score} nodes {nodes} nps {nps} pv {' '.join(m.uci() for m in pv)}", flush=True)
+                    else:
+                        best_move, score, pv, _, _ = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
 
                     # If ponderhit was received, suppress output (ponderhit search will output)
                     # But on regular stop (ponder miss), we MUST output bestmove
@@ -299,9 +317,15 @@ def uci_loop():
                         # Search with warm TT (clear_tt=False)
                         # Use a reasonable default time since we don't have clock info
                         # The GUI should ideally send new go command with time
-                        best_move, score, pv, _, _ = find_best_move(
-                            fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=10.0, clear_tt=False
-                        )
+                        if mp_search.is_mp_enabled():
+                            best_move, score, pv, nodes, nps = mp_search.parallel_find_best_move(
+                                fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=10.0, clear_tt=False)
+                            if pv:
+                                print(f"info depth {len(pv)} score cp {score} nodes {nodes} nps {nps} pv {' '.join(m.uci() for m in pv)}", flush=True)
+                        else:
+                            best_move, score, pv, _, _ = find_best_move(
+                                fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=10.0, clear_tt=False
+                            )
 
                         # Check for resign condition
                         should_resign = False
@@ -338,6 +362,7 @@ def uci_loop():
 
         elif command == "stop":
             TimeControl.stop_search = True
+            mp_search.stop_parallel_search()  # Signal MP workers to stop
             if search_thread and search_thread.is_alive():
                 search_thread.join()
             # On ponder miss (stop during pondering), the search thread outputs bestmove
@@ -347,8 +372,10 @@ def uci_loop():
 
         elif command == "quit":
             TimeControl.stop_search = True
+            mp_search.stop_parallel_search()
             if search_thread and search_thread.is_alive():
                 search_thread.join()
+            mp_search.shutdown_worker_pool()  # Clean shutdown of workers
             break
 
 

@@ -30,8 +30,10 @@ import chess
 import random
 import chess.pgn
 
+import mp_search
 from cached_board import CachedBoard
 from engine import find_best_move
+from mp_search import parallel_find_best_move
 # Import from our modules - this ensures we test the actual production code
 from nn_inference import (
     TANH_SCALE, NNUEFeatures, DNNFeatures,
@@ -1241,6 +1243,9 @@ def test_engine_best_move():
     nps_sum = 0.0
     test_suite = (win_at_chess_positions, r'\d{3}\';', -1, 5)
 
+    mp_search.set_mp_cores(mp_search.MAX_MP_CORES)
+    mp_search.set_shared_tt(mp_search.IS_SHARED_TT_MP)
+
     for line in re.split(test_suite[1], test_suite[0])[:test_suite[2]]:
         tests_total += 1
 
@@ -1254,12 +1259,13 @@ def test_engine_best_move():
             expected_moves.append(expected_move)
 
         f = io.StringIO()
-        with redirect_stdout(f):
-            start_time = time.perf_counter()
-            found_move, score, _, nodes, nps = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
-                                                        expected_best_moves=expected_moves)
-            nps_sum += nps
-            nodes_sum += nodes
+        #with redirect_stdout(f):
+        mp_search.clear_shared_tables()
+        found_move, score, _, nodes, nps = mp_search.parallel_find_best_move(fen, max_depth=30,
+                                                                             time_limit=test_suite[3])#,
+                                                                             #expected_best_moves=expected_moves)
+        nps_sum += nps
+        nodes_sum += nodes
 
         found_move = board.san(found_move)
 

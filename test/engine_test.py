@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 import chess
 
 from engine import find_best_move, TimeControl, dump_parameters
+from mp_search import parallel_find_best_move
 
 # https://www.chessprogramming.org/Test-Positions
 win_at_chess_positions = \
@@ -454,7 +455,8 @@ def run_engine_tests(test_suite):
         f = io.StringIO()
         with redirect_stdout(f):
             start_time = time.perf_counter()
-            found_move, score, _, _, _ = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
+            FIX ME - need initialization etc
+            found_move, score, _, _, _ = parallel_find_best_move(fen, max_depth=30, time_limit=test_suite[3],
                                                   expected_best_moves=expected_moves)
             end_time = time.perf_counter()
             time_exec = end_time - start_time

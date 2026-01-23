@@ -43,13 +43,16 @@ CURR_DIR = Path(__file__).resolve().parent
 # Start with Lazy SMP + independent caches first. Get that working (~60-80 Elo gain). Add shared TT later for the
 # remaining ~20 Elo. This splits the complexity into two manageable steps.
 
-# TODO move all config variables to config.py inside a data class.
 
 HOME_DIR = "ChessDNN"
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
 MAX_NEGAMAX_DEPTH = 20
 MAX_DEFAULT_TIME = 30
 MAX_TABLE_SIZE = 200_000
+
+# Multiprocessing configuration
+MAX_MP_CORES = 1  # 1 or less disables multiprocessing, UCI option "Threads"
+IS_SHARED_TT_MP = True  # Whether to share TT across workers in MP mode
 
 IS_BLAS_ENABLED = False
 IS_NN_ENABLED = True
