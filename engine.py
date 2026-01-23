@@ -43,6 +43,7 @@ CURR_DIR = Path(__file__).resolve().parent
 # Start with Lazy SMP + independent caches first. Get that working (~60-80 Elo gain). Add shared TT later for the
 # remaining ~20 Elo. This splits the complexity into two manageable steps.
 
+# TODO move all config variables to config.py inside a data class.
 
 HOME_DIR = "ChessDNN"
 MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
@@ -464,7 +465,8 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     best_pv = []
     best_score = -MAX_SCORE  # ✅ Track best score separately
 
-    # -------- Stand pat (not valid when in check) --------
+    # Stand-pat is not valid when in check. It is likely that there will wil a move that is better
+    # than stand-pat
     if not is_check:
         is_dnn_eval = False
         if IS_NN_ENABLED and q_depth <= QS_DEPTH_MIN_NN_EVAL:
@@ -932,14 +934,22 @@ def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
     return " ".join(san_moves)
 
 
-def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_best_moves=None) -> Tuple[
+def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_best_moves=None, clear_tt=True) -> Tuple[
     Optional[chess.Move], int, List[chess.Move], int, float]:
     """
     Finds the best move for a given FEN using iterative deepening negamax with alpha-beta pruning,
     aspiration windows, TT, quiescence, null-move pruning, LMR, singular extensions, and heuristics.
 
+    Args:
+        fen: FEN string of the position
+        max_depth: Maximum search depth
+        time_limit: Time limit in seconds (None for no limit)
+        expected_best_moves: For testing - stop early if best move matches
+        clear_tt: If True, clear transposition tables before search. Set to False
+                  on ponderhit to benefit from warm TT.
+
     Returns:
-        Tuple of (best_move, score, pv)
+        Tuple of (best_move, score, pv, nodes, nps)
     """
 
     # -------- Initialize time control --------
@@ -954,8 +964,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_b
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
     history_heuristic.clear()
-    transposition_table.clear()
-    qs_transposition_table.clear()
+
+    # Only clear TT if requested (preserve on ponderhit for warm cache)
+    if clear_tt:
+        transposition_table.clear()
+        qs_transposition_table.clear()
 
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
@@ -1322,4 +1335,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

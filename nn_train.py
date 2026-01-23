@@ -60,20 +60,17 @@ from nn_inference import (
     TANH_SCALE, MAX_SCORE
 )
 
-# TODO explore quantization for the first HL of NNUE.
-
 # Training configuration
-VALIDATION_SPLIT_RATIO = 0.02
-BATCH_SIZE = 16384 // 2  # SF 16384
-LEARNING_RATE = 0.001 # SF 8.75e-4
-
+VALIDATION_SPLIT_RATIO = 0.01
+BATCH_SIZE = 16384 # SF 16384
+LEARNING_RATE_DENSE = 8.75e-4  # SF 8.75e-4
+LEARNING_RATE = 8.75e-4 # SF 8.75e-4
 # Embedding mode: True = use EmbeddingBag (sparse), False = use one-hot dense vectors
 EMBEDDING_BAG = False
 # Adjusted learning rate for dense mode (one-hot vectors may need different tuning)
-LEARNING_RATE_DENSE = 0.001  # SF 8.75e-4
-POSITIONS_PER_EPOCH = 10_000_000  # FIXME SF 100_000_000
+POSITIONS_PER_EPOCH = 100_000_000  # SF 100_000_000
 VALIDATION_SIZE = 1_000_000  # SF 1_000_000
-EPOCHS = 500 # SF 600
+EPOCHS = 600 # SF 600
 EARLY_STOPPING_PATIENCE = 10
 LR_PATIENCE = 3
 
@@ -90,7 +87,6 @@ GC_INTERVAL = 500  # Run GC every N batches (more frequent)
 
 # Maximum features per position (for padding)
 MAX_FEATURES_PER_POSITION = 32  # Chess has max 30 non-king pieces
-
 
 # =============================================================================
 # Sparse-Efficient Network Implementations for Training

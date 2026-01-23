@@ -35,7 +35,7 @@ try:
         get_dnn_feature_index as _cy_get_dnn_feature_index,
     )
     HAS_CYTHON = True
-    print("✓ Using Cython-accelerated NN operations")
+    print("✓ Using Cython-accelerated NN operations", file=sys.stderr)
 except ImportError as e:
     from nn_ops_fallback import (
         dnn_evaluate_incremental as _cy_dnn_eval,
@@ -913,7 +913,7 @@ class DNNInference:
 
 def load_model(model_path: str, nn_type: str):
     """Load trained model from checkpoint file"""
-    print(f"Loading {nn_type} model from {model_path}...")
+    print(f"Loading {nn_type} model from {model_path}...", file=sys.stderr)
 
     try:
         checkpoint = torch.load(model_path, map_location='cpu')
@@ -929,7 +929,7 @@ def load_model(model_path: str, nn_type: str):
             if 'model_state_dict' in checkpoint:
                 state_dict = checkpoint['model_state_dict']
                 print(f"  Checkpoint info: Epoch {checkpoint.get('epoch', 'unknown')}, "
-                      f"Val loss: {checkpoint.get('val_loss', 'unknown'):.6f}")
+                      f"Val loss: {checkpoint.get('val_loss', 'unknown'):.6f}", file=sys.stderr)
             elif 'state_dict' in checkpoint:
                 state_dict = checkpoint['state_dict']
             else:
@@ -945,7 +945,7 @@ def load_model(model_path: str, nn_type: str):
         else:
             inference = DNNInference(model)
 
-        print(f"✓ Model loaded successfully")
+        print(f"✓ Model loaded successfully", file=sys.stderr)
         return inference
 
     except FileNotFoundError:

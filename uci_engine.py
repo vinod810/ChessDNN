@@ -14,11 +14,21 @@ RESIGN_THRESHOLD = -500  # centipawns
 RESIGN_CONSECUTIVE_MOVES = 3  # must be losing for this many moves
 resign_counter = 0
 
+# Pondering settings
+IS_PONDERING_ENABLED = False
+PONDER_TIME_LIMIT = 600  # Maximum time for ponder search (safety cap)
+
 CURR_DIR = Path(__file__).resolve().parent
 DEFAULT_BOOK_PATH = CURR_DIR / f"../{HOME_DIR}" / 'book' / 'komodo.bin'
 
 search_thread = None
 use_book = True
+use_ponder = True  # UCI Ponder option (can be disabled by GUI)
+
+# Pondering state
+is_pondering = False       # True when engine is in ponder mode
+ponder_fen = None          # FEN of the position being pondered
+ponder_hit_pending = False # True when ponderhit received, suppresses ponder output
 
 
 # TODO support behind the screen pondering
@@ -44,7 +54,8 @@ def record_position_hash(board: chess.Board):
 
 
 def uci_loop():
-    global search_thread, use_book, RESIGN_THRESHOLD, RESIGN_CONSECUTIVE_MOVES, resign_counter
+    global search_thread, use_book, use_ponder, RESIGN_THRESHOLD, RESIGN_CONSECUTIVE_MOVES, resign_counter
+    global is_pondering, ponder_fen, ponder_hit_pending
     board = chess.Board()
     book_path = DEFAULT_BOOK_PATH
 
@@ -64,6 +75,7 @@ def uci_loop():
             print("option name BookPath type string default " + str(DEFAULT_BOOK_PATH))
             print(f"option name ResignThreshold type spin default {RESIGN_THRESHOLD} min -10000 max 0")
             print(f"option name ResignMoves type spin default {RESIGN_CONSECUTIVE_MOVES} min 1 max 10")
+            print("option name Ponder type check default true")
             print("uciok", flush=True)
 
         elif command == "isready":
@@ -88,14 +100,27 @@ def uci_loop():
                     RESIGN_THRESHOLD = int(value)
                 elif name.lower() == "resignmoves":
                     RESIGN_CONSECUTIVE_MOVES = int(value)
+                elif name.lower() == "ponder":
+                    use_ponder = value.lower() == "true"
 
         elif command == "ucinewgame":
             board.reset()
             dnn_eval_cache.clear()
             clear_game_history()
             resign_counter = 0
+            is_pondering = False
+            ponder_fen = None
+            ponder_hit_pending = False
 
         elif command.startswith("position"):
+            # Stop any ongoing search (including ponder) before processing new position
+            if search_thread and search_thread.is_alive():
+                TimeControl.stop_search = True
+                search_thread.join()
+            is_pondering = False
+            ponder_fen = None
+            ponder_hit_pending = False
+
             tokens = command.split()
             if len(tokens) < 2:
                 continue
@@ -125,11 +150,22 @@ def uci_loop():
             tokens = command.split()
             movetime = None
             max_depth = MAX_NEGAMAX_DEPTH
+            go_ponder = "ponder" in tokens
+
+            # If pondering is disabled or this is a ponder command but pondering not supported
+            if go_ponder and (not IS_PONDERING_ENABLED or not use_ponder):
+                # Ignore ponder request, just wait
+                continue
 
             if "depth" in tokens:
                 max_depth = int(tokens[tokens.index("depth") + 1])
 
-            if "infinite" in tokens:
+            if go_ponder:
+                # Ponder search - use safety time limit
+                movetime = PONDER_TIME_LIMIT
+                is_pondering = True
+                ponder_fen = board.fen()
+            elif "infinite" in tokens:
                 movetime = None
             elif "movetime" in tokens:
                 movetime = int(tokens[tokens.index("movetime") + 1]) / 1000.0
@@ -159,52 +195,155 @@ def uci_loop():
 
             TimeControl.stop_search = False
 
-            # Try book move first
+            # Try book move first (but not when pondering - GUI already set up the position)
             book_move = None
-            if use_book:
+            if use_book and not go_ponder:
                 book_move = get_book_move(board, min_weight=1, temperature=1.0)
 
             if book_move:
                 print(f"info string Book move: {book_move.uci()}", flush=True)
-                print(f"bestmove {book_move.uci()}", flush=True)
+                # Try to get a ponder move from the book
+                board.push(book_move)
+                ponder_book_move = get_book_move(board, min_weight=1, temperature=1.0) if use_ponder else None
+                board.pop()
+
+                if ponder_book_move:
+                    print(f"bestmove {book_move.uci()} ponder {ponder_book_move.uci()}", flush=True)
+                else:
+                    print(f"bestmove {book_move.uci()}", flush=True)
             else:
                 fen = board.fen()
 
                 def search_and_report():
-                    global resign_counter
+                    global resign_counter, is_pondering
 
                     # Reset nodes counter before search
                     kpi['nodes'] = 0
 
                     best_move, score, pv, _, _ = find_best_move(fen, max_depth=max_depth, time_limit=movetime)
 
-                    # Check for resign condition
+                    # If ponderhit was received, suppress output (ponderhit search will output)
+                    # But on regular stop (ponder miss), we MUST output bestmove
+                    if ponder_hit_pending:
+                        return
+
+                    # Check for resign condition (not when pondering)
                     should_resign = False
-                    if score <= RESIGN_THRESHOLD:
-                        resign_counter += 1
-                        if resign_counter >= RESIGN_CONSECUTIVE_MOVES:
-                            should_resign = True
-                            print(f"info string Resigning (score {score} cp for {resign_counter} moves)", flush=True)
-                    else:
-                        resign_counter = 0
+                    if not is_pondering:
+                        if score <= RESIGN_THRESHOLD:
+                            resign_counter += 1
+                            if resign_counter >= RESIGN_CONSECUTIVE_MOVES:
+                                should_resign = True
+                                print(f"info string Resigning (score {score} cp for {resign_counter} moves)", flush=True)
+                        else:
+                            resign_counter = 0
+
+                    # Extract ponder move from PV if available
+                    ponder_move = None
+                    if use_ponder and len(pv) >= 2:
+                        ponder_move = pv[1]
 
                     if best_move is None or best_move == chess.Move.null():
                         print("bestmove 0000", flush=True)
                     elif should_resign:
                         # Output bestmove with resign indication
                         # Some GUIs recognize "info string resign", others need manual handling
-                        print(f"bestmove {best_move.uci()}", flush=True)
+                        if ponder_move:
+                            print(f"bestmove {best_move.uci()} ponder {ponder_move.uci()}", flush=True)
+                        else:
+                            print(f"bestmove {best_move.uci()}", flush=True)
                         print("info string resign", flush=True)
                     else:
-                        print(f"bestmove {best_move.uci()}", flush=True)
+                        if ponder_move:
+                            print(f"bestmove {best_move.uci()} ponder {ponder_move.uci()}", flush=True)
+                        else:
+                            print(f"bestmove {best_move.uci()}", flush=True)
+
+                    is_pondering = False
 
                 search_thread = threading.Thread(target=search_and_report)
                 search_thread.start()
+
+        elif command == "ponderhit":
+            # Ponder hit - the opponent played the move we were pondering on
+            if is_pondering and search_thread and search_thread.is_alive():
+                # Set flag to suppress ponder search output
+                ponder_hit_pending = True
+
+                # Stop the ponder search
+                TimeControl.stop_search = True
+                search_thread.join()
+
+                # Reset flags
+                ponder_hit_pending = False
+                is_pondering = False
+
+                # We need to recalculate time - but we don't have the time info here
+                # UCI protocol expects the GUI to send a new "go" command after ponderhit
+                # with the actual time constraints. Some GUIs do this, some don't.
+                #
+                # Standard behavior: just output the best move we found during pondering
+                # The GUI should send a new "go" if it wants a fresh search.
+                #
+                # However, some engines continue searching. For simplicity, we'll
+                # start a new search with a default time limit using the warm TT.
+
+                if ponder_fen:
+                    fen = ponder_fen
+
+                    def ponderhit_search():
+                        global resign_counter
+
+                        kpi['nodes'] = 0
+
+                        # Search with warm TT (clear_tt=False)
+                        # Use a reasonable default time since we don't have clock info
+                        # The GUI should ideally send new go command with time
+                        best_move, score, pv, _, _ = find_best_move(
+                            fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=10.0, clear_tt=False
+                        )
+
+                        # Check for resign condition
+                        should_resign = False
+                        if score <= RESIGN_THRESHOLD:
+                            resign_counter += 1
+                            if resign_counter >= RESIGN_CONSECUTIVE_MOVES:
+                                should_resign = True
+                                print(f"info string Resigning (score {score} cp for {resign_counter} moves)", flush=True)
+                        else:
+                            resign_counter = 0
+
+                        # Extract ponder move from PV if available
+                        ponder_move = None
+                        if use_ponder and len(pv) >= 2:
+                            ponder_move = pv[1]
+
+                        if best_move is None or best_move == chess.Move.null():
+                            print("bestmove 0000", flush=True)
+                        elif should_resign:
+                            if ponder_move:
+                                print(f"bestmove {best_move.uci()} ponder {ponder_move.uci()}", flush=True)
+                            else:
+                                print(f"bestmove {best_move.uci()}", flush=True)
+                            print("info string resign", flush=True)
+                        else:
+                            if ponder_move:
+                                print(f"bestmove {best_move.uci()} ponder {ponder_move.uci()}", flush=True)
+                            else:
+                                print(f"bestmove {best_move.uci()}", flush=True)
+
+                    TimeControl.stop_search = False
+                    search_thread = threading.Thread(target=ponderhit_search)
+                    search_thread.start()
 
         elif command == "stop":
             TimeControl.stop_search = True
             if search_thread and search_thread.is_alive():
                 search_thread.join()
+            # On ponder miss (stop during pondering), the search thread outputs bestmove
+            # Reset all ponder state
+            is_pondering = False
+            ponder_hit_pending = False
 
         elif command == "quit":
             TimeControl.stop_search = True

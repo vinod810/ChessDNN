@@ -17,7 +17,7 @@ from dataclasses import dataclass
 try:
     import chess_cpp
     HAS_CPP_BACKEND = True
-    print("✓ Using fast C++ chess backend (chess_cpp)")
+    print("✓ Using fast C++ chess backend (chess_cpp)", file=sys.stderr)
 except ImportError:
     HAS_CPP_BACKEND = False
     print("! C++ backend not available, using python-chess (slower)")

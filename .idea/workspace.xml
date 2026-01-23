@@ -4,9 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Fixed nn_tests.py">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Fixed cached_board.py to handle C++ board">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci_engine.sh" beforeDir="false" afterPath="$PROJECT_DIR$/uci_engine.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -304,14 +310,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00121" summary="code clean up">
-      <option name="closed" value="true" />
-      <created>1768607390763</created>
-      <option name="number" value="00121" />
-      <option name="presentableId" value="LOCAL-00121" />
-      <option name="project" value="LOCAL" />
-      <updated>1768607390763</updated>
-    </task>
     <task id="LOCAL-00122" summary="code clean up">
       <option name="closed" value="true" />
       <created>1768609996014</created>
@@ -520,7 +518,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769098325659</updated>
     </task>
-    <option name="localTasksCounter" value="148" />
+    <task id="LOCAL-00148" summary="Fixed cached_board.py to handle C++ board">
+      <option name="closed" value="true" />
+      <created>1769098980616</created>
+      <option name="number" value="00148" />
+      <option name="presentableId" value="LOCAL-00148" />
+      <option name="project" value="LOCAL" />
+      <updated>1769098980617</updated>
+    </task>
+    <option name="localTasksCounter" value="149" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -535,7 +541,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Stockfish data for training" />
     <MESSAGE value="nn_train.py optimized for speed" />
     <MESSAGE value="nn_train.py added 7 more tests" />
     <MESSAGE value="code clean up" />
@@ -560,7 +565,8 @@
     <MESSAGE value="Before quantization" />
     <MESSAGE value="Quantization, functional test ok, performance test - TBD" />
     <MESSAGE value="Fixed nn_tests.py" />
-    <option name="LAST_COMMIT_MESSAGE" value="Fixed nn_tests.py" />
+    <MESSAGE value="Fixed cached_board.py to handle C++ board" />
+    <option name="LAST_COMMIT_MESSAGE" value="Fixed cached_board.py to handle C++ board" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
