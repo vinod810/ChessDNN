@@ -95,7 +95,7 @@ def collect_diagnostic_fens(data_dir: str, reader: ShardReader, target_count: in
         # Try without nn_type subdirectory
         import glob
         pattern = os.path.join(data_dir, "*.bin.zst")
-        shards = sorted(glob.glob(pattern))
+        shards = sorted(glob.glob(pattern), reverse=True)  # Use the last shards for testing
 
     if not shards:
         raise FileNotFoundError(f"No shard files found in {data_dir}")
@@ -103,15 +103,15 @@ def collect_diagnostic_fens(data_dir: str, reader: ShardReader, target_count: in
     print(f"Found {len(shards)} shard files in {data_dir}")
 
     # Shuffle shards for random sampling across different shards
-    shuffled_shards = shards.copy()
-    random.shuffle(shuffled_shards)
+    #shards_reversed = shards.copy()
+    #random.shuffle(shards_reversed)
 
     # Collect with early stopping - aim for 2x target to allow for deduplication
     collection_target = target_count * 2
     seen_fens = set()
     unique_records = []
 
-    pbar = tqdm(shuffled_shards, desc="Scanning shards for diagnostic records")
+    pbar = tqdm(shards, desc="Scanning shards for diagnostic records")
     for shard_path in pbar:
         records = reader.read_diagnostic_records(shard_path, max_records=10000)
         for rec in records:

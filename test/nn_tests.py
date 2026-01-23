@@ -1500,8 +1500,8 @@ Examples:
     parser.add_argument(
         '--positions', '-p',
         type=int,
-        default=1000,
-        help='Number of positions for Eval-Accuracy and NN-vs-Stockfish tests (default: 100)'
+        default=10000,
+        help='Number of positions for Eval-Accuracy and NN-vs-Stockfish tests (default: 10000)'
     )
 
     parser.add_argument(

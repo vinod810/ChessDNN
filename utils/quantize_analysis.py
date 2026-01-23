@@ -170,7 +170,7 @@ def load_positions_from_shards(data_dir: str, max_positions: int = 10000) -> Lis
 
     for shard_path in shards:
         try:
-            shard_positions = reader.read_all_positions(shard_path, include_fen=False)
+            shard_positions = reader.read_all_positions(shard_path, include_fen=False, skip_diagnostic=True)
             positions.extend(shard_positions)
             print(f"  Loaded {len(shard_positions)} from {os.path.basename(shard_path)}, total: {len(positions)}")
 

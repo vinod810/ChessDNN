@@ -576,7 +576,7 @@ class ShardReader:
             DNNPositionArray or NNUEPositionArray depending on nn_type
         """
         # Use shard_io to read positions (handles diagnostic records properly)
-        positions = self._base_reader.read_all_positions(shard_path, include_fen=False)
+        positions = self._base_reader.read_all_positions(shard_path, include_fen=False, skip_diagnostic=True)
 
         if self.nn_type == "DNN":
             return self._convert_dnn_positions(positions)

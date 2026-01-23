@@ -268,7 +268,7 @@ def analyze_shard(shard_path: str, nn_type: str):
     print(f"\n=== Shard Analysis: {shard_path} ===")
 
     reader = ShardReader(nn_type)
-    positions = reader.read_all_positions(shard_path, include_fen=False)
+    positions = reader.read_all_positions(shard_path, include_fen=False, skip_diagnostic=False)
 
     if not positions:
         print("  No positions found")

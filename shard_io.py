@@ -186,7 +186,8 @@ class ShardReader:
             reader.close()
         return io.BytesIO(data)
 
-    def read_all_positions(self, shard_path: str, include_fen: bool = False) -> List[Dict[str, Any]]:
+    def read_all_positions(self, shard_path: str, include_fen: bool = False,  skip_diagnostic = True) -> \
+            List[Dict[str, Any]]:
         """
         Read all positions from a shard file.
 
@@ -196,6 +197,9 @@ class ShardReader:
 
         Returns:
             List of position dicts
+            :param include_fen:
+            :param shard_path:
+            :param skip_diagnostic:
         """
         buf = self._decompress_shard(shard_path)
         positions = []
@@ -204,6 +208,10 @@ class ShardReader:
             pos = self._read_one_position(buf, include_fen)
             if pos is None:
                 break
+
+            if skip_diagnostic and pos.get('is_diagnostic', True): # diagnostic records are reserved for testing
+                continue
+
             positions.append(pos)
 
         return positions
@@ -236,7 +244,8 @@ class ShardReader:
 
         return records
 
-    def iter_positions(self, shard_path: str, include_fen: bool = False) -> Iterator[Dict[str, Any]]:
+    def iter_positions(self, shard_path: str, include_fen: bool = False, skip_diagnostic = True) -> \
+            Iterator[Dict[str, Any]]:
         """
         Iterate over positions in a shard file (memory efficient).
 
@@ -246,6 +255,9 @@ class ShardReader:
 
         Yields:
             Position dicts one at a time
+            :param include_fen:
+            :param shard_path:
+            :param skip_diagnostic:
         """
         buf = self._decompress_shard(shard_path)
 
@@ -253,6 +265,10 @@ class ShardReader:
             pos = self._read_one_position(buf, include_fen)
             if pos is None:
                 break
+
+            if skip_diagnostic and pos.get('is_diagnostic', True): # diagnostic records are reserved for testing
+                continue
+
             yield pos
 
     def _read_one_position(self, buf: io.BytesIO, include_fen: bool = False) -> Optional[Dict[str, Any]]:
