@@ -16,8 +16,8 @@ echo "PGN File: $OUTFILE"
 python -c 'from engine import dump_parameters; dump_parameters()'
 
 ~/Temp/cutechess/build/cutechess-cli \
--engine cmd="$CMD_DIR"/../uci_engine.sh name="$1"  \
--engine cmd="$CMD_DIR"/../../oldfish/uci_engine.sh name="$2" \
+-engine cmd="$CMD_DIR"/../uci.sh name="$1"  \
+-engine cmd="$CMD_DIR"/../../oldfish/uci.sh name="$2" \
 -each proto=uci tc="$3" timemargin=9999 -draw movenumber=40 movecount=5 score=50 \
 -resign movecount=3 score=500 twosided=false -maxmoves 100 -recover -games "$4"  -pgnout "$OUTFILE" #-debug
 

@@ -1,3 +1,4 @@
+import argparse
 import io
 import re
 import time
@@ -5,7 +6,8 @@ from contextlib import redirect_stdout
 
 import chess
 
-from engine import find_best_move, TimeControl, dump_parameters
+import mp_search
+from engine import find_best_move, TimeControl, dump_parameters, MAX_MP_CORES, IS_SHARED_TT_MP
 from mp_search import parallel_find_best_move
 
 # https://www.chessprogramming.org/Test-Positions
@@ -430,7 +432,7 @@ test_suites = {
     "eigenmann": (eigenmann_rapid_engine_test, r'";', -1, 120)
 }
 
-def run_engine_tests(test_suite):
+def run_engine_tests(test_suite, is_mp = False):
 
     tests_total = 0
     tests_passed =0
@@ -439,6 +441,10 @@ def run_engine_tests(test_suite):
 
     dump_parameters()
     print(f"time_limit={test_suite[3]}")
+
+    if is_mp:
+        mp_search.set_mp_cores(MAX_MP_CORES)
+        mp_search.set_shared_tt(IS_SHARED_TT_MP)
 
     for line in re.split(test_suite[1], test_suite[0])[:test_suite[2]]:
         tests_total += 1
@@ -455,9 +461,13 @@ def run_engine_tests(test_suite):
         f = io.StringIO()
         with redirect_stdout(f):
             start_time = time.perf_counter()
-            FIX ME - need initialization etc
-            found_move, score, _, _, _ = parallel_find_best_move(fen, max_depth=30, time_limit=test_suite[3],
-                                                  expected_best_moves=expected_moves)
+            if is_mp:
+                mp_search.clear_shared_tables()
+                found_move, score, _, nodes, nps = mp_search.parallel_find_best_move(fen, max_depth=30,
+                                                                                 time_limit=test_suite[3])
+            else:
+                found_move, score, _, _, _ = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
+                                                            expected_best_moves=expected_moves)
             end_time = time.perf_counter()
             time_exec = end_time - start_time
             time_max = max(time_max, time_exec)
@@ -480,8 +490,15 @@ def run_engine_tests(test_suite):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Engine Tests.')
+    parser.add_argument('--mp', action='store_true', help='Enables multi-processing tests (default: False)')
+    args = parser.parse_args()
+    is_mp = args.mp
+
     try:
-        run_engine_tests(test_suites['wac'])
+        run_engine_tests(test_suites['wac'], is_mp)
     except KeyboardInterrupt:
         print("Interrupted, stopping engine")
         TimeControl.stop_search = True

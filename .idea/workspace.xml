@@ -4,13 +4,17 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Training/Eval not to use diagnostic rec">
-      <change afterPath="$PROJECT_DIR$/mp_search.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Multi processing. mp_search.py works">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mp_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/mp_search.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/uci_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/oldfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/oldfish.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci_engine.sh" beforeDir="false" afterPath="$PROJECT_DIR$/uci.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -66,7 +70,7 @@
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;SHELLCHECK.PATH&quot;: &quot;/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/eapen/Documents/Projects/ChessDNN/utils&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/eapen/Documents/Projects/ChessDNN/engine.py&quot;,
     &quot;run.code.analysis.last.selected.profile&quot;: &quot;pProject Default&quot;,
     &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
@@ -309,14 +313,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00124" summary="Integrate with engine.py">
-      <option name="closed" value="true" />
-      <created>1768619532406</created>
-      <option name="number" value="00124" />
-      <option name="presentableId" value="LOCAL-00124" />
-      <option name="project" value="LOCAL" />
-      <updated>1768619532407</updated>
-    </task>
     <task id="LOCAL-00125" summary="Before C++ chess library">
       <option name="closed" value="true" />
       <created>1768657106019</created>
@@ -525,7 +521,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769173012541</updated>
     </task>
-    <option name="localTasksCounter" value="151" />
+    <task id="LOCAL-00151" summary="Multi processing. mp_search.py works">
+      <option name="closed" value="true" />
+      <created>1769212154602</created>
+      <option name="number" value="00151" />
+      <option name="presentableId" value="LOCAL-00151" />
+      <option name="project" value="LOCAL" />
+      <updated>1769212154606</updated>
+    </task>
+    <option name="localTasksCounter" value="152" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -540,7 +544,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="code clean up" />
     <MESSAGE value="Integrate with engine.py" />
     <MESSAGE value="Before C++ chess library" />
     <MESSAGE value="C++ chess library" />
@@ -565,7 +568,8 @@
     <MESSAGE value="Fixed cached_board.py to handle C++ board" />
     <MESSAGE value="Pondering" />
     <MESSAGE value="Training/Eval not to use diagnostic rec" />
-    <option name="LAST_COMMIT_MESSAGE" value="Training/Eval not to use diagnostic rec" />
+    <MESSAGE value="Multi processing. mp_search.py works" />
+    <option name="LAST_COMMIT_MESSAGE" value="Multi processing. mp_search.py works" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -573,6 +577,10 @@
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/test/engine_test.py</url>
           <option name="timeStamp" value="4" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/engine.py</url>
+          <option name="timeStamp" value="5" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

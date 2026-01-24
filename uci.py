@@ -232,8 +232,8 @@ def uci_loop():
 
                     # Use parallel search if MP enabled, otherwise single-threaded
                     if mp_search.is_mp_enabled():
-                        best_move, score, pv, nodes, nps = mp_search.parallel_find_best_move(
-                            fen, max_depth=max_depth, time_limit=movetime)
+                        best_move, score, pv, nodes, nps = mp_search.parallel_find_best_move(fen, max_depth=max_depth,
+                                                                                             time_limit=movetime)
                         # Print final info line for MP search
                         if pv:
                             print(f"info depth {len(pv)} score cp {score} nodes {nodes} nps {nps} pv {' '.join(m.uci() for m in pv)}", flush=True)
@@ -318,14 +318,15 @@ def uci_loop():
                         # Use a reasonable default time since we don't have clock info
                         # The GUI should ideally send new go command with time
                         if mp_search.is_mp_enabled():
-                            best_move, score, pv, nodes, nps = mp_search.parallel_find_best_move(
-                                fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=10.0, clear_tt=False)
+                            best_move, score, pv, nodes, nps = mp_search.parallel_find_best_move(fen,
+                                                                                                 max_depth=MAX_NEGAMAX_DEPTH,
+                                                                                                 time_limit=10.0,
+                                                                                                 clear_tt=False)
                             if pv:
                                 print(f"info depth {len(pv)} score cp {score} nodes {nodes} nps {nps} pv {' '.join(m.uci() for m in pv)}", flush=True)
                         else:
-                            best_move, score, pv, _, _ = find_best_move(
-                                fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=10.0, clear_tt=False
-                            )
+                            best_move, score, pv, _, _ = find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH,
+                                                                        time_limit=10.0, clear_tt=False)
 
                         # Check for resign condition
                         should_resign = False

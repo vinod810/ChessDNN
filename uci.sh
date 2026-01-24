@@ -7,4 +7,4 @@
 cd "$(dirname "$0")" # cd to the directory of this script
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate neurofish
-exec python -O uci_engine.py
+exec python -O uci.py

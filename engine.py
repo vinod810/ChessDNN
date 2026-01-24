@@ -15,46 +15,14 @@ from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
 from nn_inference import MAX_SCORE
 
 CURR_DIR = Path(__file__).resolve().parent
-
-
-# TODO support multiprocessing
-# # Run a search with OMP limited to 1 thread
-# OMP_NUM_THREADS=1 python engine.py
-# # Compare NPS to normal run
-# # If NPS drops 3-4x → BLAS parallelism is huge → Lazy SMP less valuable +20-40 ELO
-# # If NPS drops 1.5-2x → Search overhead dominates → Lazy SMP more valuable +50-80 ELO
-#
-# Lazy SMP Architecture Summary
-# Process Structure
-# MAIN PROCESS (UCI handler)
-# ├── Handles UCI I/O (stdin/stdout)
-# ├── Owns stop_event (multiprocessing.Event)
-# ├── Owns work_queue, result_queue
-# ├── Monitors time, sets stop_event when done
-# └── Collects results, prints bestmove
-#
-# WORKER PROCESSES (N = cpu_count - 1)
-# ├── Spawned once at engine startup
-# ├── Each loads own DNN model copy
-# ├── Shares TT, QS_TT, DNN cache via shared memory
-# ├── Independent killer_moves, history_heuristic
-# ├── Polls stop_event in search loop
-# └── Reports completed depths to result_queue
-# Start with Lazy SMP + independent caches first. Get that working (~60-80 Elo gain). Add shared TT later for the
-# remaining ~20 Elo. This splits the complexity into two manageable steps.
-
-
 HOME_DIR = "ChessDNN"
-MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
-MAX_NEGAMAX_DEPTH = 20
-MAX_DEFAULT_TIME = 30
-MAX_TABLE_SIZE = 200_000
 
 # Multiprocessing configuration
 MAX_MP_CORES = 1  # 1 or less disables multiprocessing, UCI option "Threads"
-IS_SHARED_TT_MP = True  # Whether to share TT across workers in MP mode
+IS_SHARED_TT_MP = False  # Whether to share TT across workers in MP mode
 
 IS_BLAS_ENABLED = False
+
 IS_NN_ENABLED = True
 NN_TYPE = "NNUE"
 FULL_NN_EVAL_FREQ = 3000 # Increase to 50_000 after initial testing
@@ -108,6 +76,10 @@ if not IS_BLAS_ENABLED:
 
 MODEL_PATH = str(DNN_MODEL_FILEPATH if NN_TYPE == "DNN" else NNUE_MODEL_FILEPATH)
 
+MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
+MAX_NEGAMAX_DEPTH = 20
+MAX_SEARCH_TIME = 30
+MAX_TABLE_SIZE = 200_000
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -937,8 +909,8 @@ def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
     return " ".join(san_moves)
 
 
-def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, expected_best_moves=None, clear_tt=True) -> Tuple[
-    Optional[chess.Move], int, List[chess.Move], int, float]:
+def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=True, expected_best_moves=None) -> \
+        Tuple[Optional[chess.Move], int, List[chess.Move], int, float]:
     """
     Finds the best move for a given FEN using iterative deepening negamax with alpha-beta pruning,
     aspiration windows, TT, quiescence, null-move pruning, LMR, singular extensions, and heuristics.
@@ -1241,6 +1213,8 @@ def print_vars(var_names, module_name, local_scope=None):
 
 def dump_parameters():
     print_vars([
+        "MAX_MP_CORES",
+        "IS_SHARED_TT_MP",
         "IS_NN_ENABLED",
         "NN_TYPE",
         "MODEL_PATH",
