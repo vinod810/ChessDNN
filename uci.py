@@ -8,7 +8,7 @@ import chess.polyglot
 
 from engine import (find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache,
                     clear_game_history, game_position_history, HOME_DIR, kpi,
-                    MAX_MP_CORES, IS_SHARED_TT_MP)
+                    MAX_MP_CORES, IS_SHARED_TT_MP, diag_summary)
 from book_move import init_opening_book, get_book_move
 import mp_search
 
@@ -121,9 +121,14 @@ def uci_loop():
                     mp_search.set_shared_tt(value.lower() == "true")
 
         elif command == "ucinewgame":
+            # Print diagnostic summary from previous game (if any issues)
+            summary = diag_summary()
+            if "all clear" not in summary:
+                print(f"info string {summary}", flush=True)
+
             board.reset()
             dnn_eval_cache.clear()
-            clear_game_history()
+            clear_game_history()  # Also resets diagnostic counters
             resign_counter = 0
             is_pondering = False
             ponder_fen = None
@@ -293,6 +298,17 @@ def uci_loop():
                     if is_pondering:
                         ponder_best_move = best_move
                         ponder_best_score = score
+
+                        # If search completed naturally (not from 'stop' command), wait for stop/ponderhit
+                        # This prevents "Premature bestmove while pondering" warning
+                        if not TimeControl.stop_search and not ponder_hit_pending:
+                            # Wait for either stop or ponderhit
+                            while is_pondering and not TimeControl.stop_search and not ponder_hit_pending:
+                                time.sleep(0.01)
+
+                            # If ponderhit received while waiting, suppress output (ponderhit handler takes over)
+                            if ponder_hit_pending:
+                                return
 
                     # If ponderhit was received, suppress output (ponderhit search will output)
                     # But on regular stop (ponder miss), we MUST output bestmove

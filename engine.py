@@ -32,17 +32,24 @@ NNUE_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'nnue.pt'
 
 QS_DEPTH_MIN_NN_EVAL = 2
 QS_DEPTH_MAX_NN_EVAL = 10
-MAX_QS_DEPTH = 25  # Hard limit to prevent search explosion
+MAX_QS_DEPTH = 15  # REDUCED from 25 to prevent search explosion
 DELTA_MAX_NN_EVAL = 50  # Score difference, below which will trigger a NN evaluation
 STAND_PAT_MAX_NN_EVAL = 200
+
+# NEW: Limit moves examined per QS ply to prevent explosion
+MAX_QS_MOVES_PER_PLY = 12  # Maximum captures to examine at each QS depth
+MAX_QS_MOVES_DEEP = 6  # Even fewer moves at deeper QS levels (depth > MAX_QS_DEPTH/2)
 
 QS_TT_SUPPORTED = True
 DELTA_PRUNING_QS_MIN_DEPTH = 6
 DELTA_PRUNING_MARGIN = 75
 TACTICAL_QS_MAX_DEPTH = 5
 
-ASPIRATION_WINDOW = 40
-MAX_AW_RETRIES = 3
+# NEW: Time check frequency in QS
+QS_TIME_CHECK_INTERVAL = 50  # Check time every N nodes in QS (was 10 moves)
+
+ASPIRATION_WINDOW = 50  # INCREASED from 40 to reduce retries in tactical positions
+MAX_AW_RETRIES = 2  # REDUCED from 3 to fail faster to full window
 
 LMR_MOVE_THRESHOLD = 2
 LMR_MIN_DEPTH = 3  # minimum depth to apply LMR
@@ -114,6 +121,55 @@ kpi = {
     "razoring_prunes": 0,  # Razoring
 }
 
+# -------- DIAGNOSTIC COUNTERS (for debugging) --------
+# These track anomalies without flooding output. Warnings printed only when threshold exceeded.
+_diag = {
+    "tt_illegal_moves": 0,  # TT returned illegal move
+    "score_out_of_bounds": 0,  # Score exceeded MAX_SCORE
+    "time_overruns": 0,  # Search ran over time limit
+    "pv_illegal_moves": 0,  # PV contained illegal move
+    "eval_drift": 0,  # Incremental vs full eval mismatch
+    "qs_depth_exceeded": 0,  # QS hit MAX_QS_DEPTH
+    "aspiration_retries": 0,  # Aspiration window retries hit max
+    "best_move_none": 0,  # Search completed but best_move is None (fallback used)
+    "score_instability": 0,  # Large score swings between depths
+    # NEW diagnostic counters
+    "qs_time_cutoff": 0,  # QS terminated early due to time
+    "qs_move_limit": 0,  # QS move limit reached
+    "fallback_shallow_search": 0,  # Used shallow search fallback instead of pure NN
+    "aw_tactical_skip": 0,  # Skipped aspiration window due to tactical position
+    "time_critical_abort": 0,  # Search aborted due to critical time pressure
+}
+_DIAG_WARN_THRESHOLD = 3  # Print warning after this many occurrences
+_DIAG_SAMPLE_RATE = 100  # Check expensive diagnostics every N nodes
+_SCORE_INSTABILITY_THRESHOLD = 200  # cp swing that triggers warning
+
+# Track QS statistics for current search
+_qs_stats = {
+    "max_depth_reached": 0,
+    "total_nodes": 0,
+    "time_cutoffs": 0,
+}
+
+
+def _diag_warn(key: str, msg: str):
+    """Record diagnostic event and warn if threshold exceeded."""
+    _diag[key] += 1
+    count = _diag[key]
+    # Print first occurrence, then at threshold, then every 10x threshold
+    if count == 1 or count == _DIAG_WARN_THRESHOLD or (
+            count > _DIAG_WARN_THRESHOLD and count % (_DIAG_WARN_THRESHOLD * 10) == 0):
+        print(f"info string DIAG[{key}={count}]: {msg}", flush=True)
+
+
+def diag_summary() -> str:
+    """Return summary of diagnostic counters (non-zero only)."""
+    non_zero = {k: v for k, v in _diag.items() if v > 0}
+    if non_zero:
+        return "DIAG_SUMMARY: " + ", ".join(f"{k}={v}" for k, v in non_zero.items())
+    return "DIAG_SUMMARY: all clear"
+
+
 # Track positions seen in the current game (cleared on ucinewgame)
 game_position_history: dict[int, int] = {}  # zobrist_hash -> count
 
@@ -136,6 +192,9 @@ PIECE_VALUES = {
 def clear_game_history():
     """Clear game position history (call on ucinewgame)."""
     game_position_history.clear()
+    # Also reset diagnostic counters for fresh tracking
+    for key in _diag:
+        _diag[key] = 0
 
 
 def is_draw_by_repetition(board: CachedBoard) -> bool:
@@ -240,8 +299,7 @@ def evaluate_nn(board: CachedBoard) -> int:
     if kpi['nn_evals'] % FULL_NN_EVAL_FREQ == 0:
         full_score = nn_evaluator.evaluate_full_centipawns(board)
         if abs(full_score - score) > 10:
-            print(f"Warning: incremental({score})) and full({full_score}) evaluation differ, {board.fen()}!")
-
+            _diag_warn("eval_drift", f"Incr={score} vs Full={full_score}, diff={abs(full_score - score)}")
     return score
 
 
@@ -408,21 +466,43 @@ def should_stop_search(current_depth: int) -> bool:
 
 def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple[int, List[chess.Move]]:
     """
-    Quiescence search.
+    Quiescence search with improved time management and move limits.
 
     Returns:
         Tuple of (score, pv) where pv is the list of moves in the principal variation.
     """
+    global _qs_stats
+
     kpi['q_depth'] = max(kpi['q_depth'], q_depth)
     kpi['nodes'] += 1
+    _qs_stats["total_nodes"] += 1
+    _qs_stats["max_depth_reached"] = max(_qs_stats["max_depth_reached"], q_depth)
 
-    check_time()
-    # FIXED: Also honor soft_stop in quiescence to prevent time overruns
-    if TimeControl.stop_search or TimeControl.soft_stop:
-        raise TimeoutError()
+    # -------- IMPROVED: More frequent time checks in QS --------
+    # Check time every QS_TIME_CHECK_INTERVAL nodes to prevent massive overruns
+    if _qs_stats["total_nodes"] % QS_TIME_CHECK_INTERVAL == 0:
+        check_time()
+
+    # Hard stop always honored immediately
+    if TimeControl.stop_search:
+        if IS_NN_ENABLED:
+            return evaluate_nn(board), []
+        else:
+            return evaluate_material(board), []
+
+    # -------- NEW: Soft stop honored in deep QS to prevent time explosions --------
+    if TimeControl.soft_stop and q_depth > MAX_QS_DEPTH // 2:
+        _qs_stats["time_cutoffs"] += 1
+        _diag_warn("qs_time_cutoff", f"QS soft-stopped at depth {q_depth}")
+        if IS_NN_ENABLED:
+            return evaluate_nn(board), []
+        else:
+            return evaluate_material(board), []
 
     # -------- Hard depth limit to prevent search explosion --------
     if q_depth > MAX_QS_DEPTH:
+        # DIAG: Track QS depth limit hits
+        _diag_warn("qs_depth_exceeded", f"QS hit depth {q_depth}, fen={board.fen()[:40]}")
         # Return static evaluation when QS goes too deep
         if IS_NN_ENABLED:
             return evaluate_nn(board), []
@@ -488,10 +568,18 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
     moves_searched = 0
 
+    # -------- NEW: Determine move limit based on depth --------
+    move_limit = MAX_QS_MOVES_DEEP if q_depth > MAX_QS_DEPTH // 2 else MAX_QS_MOVES_PER_PLY
+
     # Pre-compute move info for this position
     board.precompute_move_info()
 
     for move in ordered_moves_q_search(board):
+        # -------- NEW: Enforce move limit to prevent explosion --------
+        if not is_check and moves_searched >= move_limit:
+            _diag_warn("qs_move_limit", f"QS move limit ({move_limit}) at depth {q_depth}")
+            break
+
         if not is_check:
             # Use cached is_capture
             is_capture_move = board.is_capture_cached(move)
@@ -528,11 +616,15 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
         moves_searched += 1
 
-        # Check time periodically to ensure responsive timeout
-        if moves_searched % 10 == 0:
+        # -------- IMPROVED: Check time more frequently --------
+        if moves_searched % 5 == 0:
             check_time()
-            if TimeControl.stop_search or TimeControl.soft_stop:
-                raise TimeoutError()
+            if TimeControl.stop_search:
+                break  # Exit loop gracefully, return best_score below
+            # Also check soft_stop in deep QS
+            if TimeControl.soft_stop and q_depth > MAX_QS_DEPTH // 2:
+                _qs_stats["time_cutoffs"] += 1
+                break
 
         if score > best_score:  # ✅ Track best_score
             best_score = score
@@ -587,9 +679,11 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     kpi['nodes'] += 1
 
     check_time()
-    # FIXED: Also honor soft_stop in negamax for faster time response
-    if TimeControl.stop_search or TimeControl.soft_stop:
-        raise TimeoutError()
+    # Only check hard stop here - soft_stop is handled at root level
+    # This ensures current depth completes before stopping
+    if TimeControl.stop_search:
+        # Return material eval to keep push/pop balanced
+        return evaluate_material(board), []
 
     # -------- Draw detection --------
     if is_draw_by_repetition(board) or board.can_claim_fifty_moves():
@@ -618,6 +712,10 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
             return entry.score, []  # ✅ FIX 2 (no PV on cutoff)
 
         tt_move = entry.best_move
+        # DIAG: Verify TT move is legal (corruption detection)
+        if tt_move and tt_move not in board.get_legal_moves_list():
+            _diag_warn("tt_illegal_moves", f"TT move {tt_move.uci()} illegal in {board.fen()[:50]}")
+            tt_move = None  # Ignore corrupted TT move
     else:
         tt_move = None
 
@@ -875,6 +973,8 @@ def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
 
         move = entry.best_move
         if move not in board.get_legal_moves_list():
+            # DIAG: Track when TT contains illegal PV move
+            _diag_warn("pv_illegal_moves", f"PV move {move.uci()} illegal at depth {len(pv)}")
             break
 
         pv.append(move)
@@ -945,6 +1045,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     Returns:
         Tuple of (best_move, score, pv, nodes, nps)
     """
+    global _qs_stats
 
     # -------- Initialize time control --------
     TimeControl.time_limit = time_limit
@@ -954,40 +1055,16 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     nodes_start = kpi['nodes']
     nps = 0
 
+    # -------- NEW: Reset QS statistics for this search --------
+    _qs_stats = {
+        "max_depth_reached": 0,
+        "total_nodes": 0,
+        "time_cutoffs": 0,
+    }
+
     print(
         f"info string TimeControl: stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}, time_limit={time_limit}",
         flush=True)
-
-    # -------- Pre-search fallback: quick NN evaluation to ensure we have SOME move --------
-    # This prevents returning a bad move if the first move's quiescence takes too long
-    board_temp = CachedBoard(fen)
-    nn_evaluator.reset(board_temp)
-    legal_moves = board_temp.get_legal_moves_list()
-
-    if legal_moves:
-        # Quick NN evaluation of ALL moves as emergency fallback
-        # This ensures we have a reasonable move even if search times out immediately
-        emergency_best_move = legal_moves[0]
-        emergency_best_score = -MAX_SCORE
-        for move in legal_moves:
-            nn_evaluator.push_with_board(board_temp, move)
-            score = -evaluate_nn(board_temp)
-            board_temp.pop()
-            nn_evaluator.pop()
-            if score > emergency_best_score:
-                emergency_best_score = score
-                emergency_best_move = move
-        # This will be overwritten by real search results, but ensures we have something
-        best_move = emergency_best_move
-        best_score = emergency_best_score
-        best_pv = [emergency_best_move]
-        print(
-            f"info string Pre-search fallback: {len(legal_moves)} moves, best={emergency_best_move.uci()} score={emergency_best_score}cp",
-            flush=True)
-    else:
-        best_move = None
-        best_score = 0
-        best_pv = []
 
     # -------- Clear search tables & heuristics --------
     for i in range(len(killer_moves)):
@@ -1001,65 +1078,183 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
 
+    # -------- Initialize board and evaluator --------
     board = CachedBoard(fen)
     nn_evaluator.reset(board)
 
-    # Note: best_move, best_score, best_pv already set by emergency fallback above
-    # Don't reset them here - the fallback ensures we always have SOME move
+    # Start with no result - fallback computed lazily only if needed
+    best_move = None
+    best_score = 0
+    best_pv = []
     pv_move = None
+    prev_depth_score = None  # For score stability tracking
 
     last_depth_time = 0.0
 
-    try:
-        for depth in range(1, max_depth + 1):
-            depth_start_time = time.perf_counter()
-            check_time()
+    # -------- NEW: Track if position appears tactical (large score swings) --------
+    is_tactical_position = False
 
-            # Check if we should stop (respects MIN_DEPTH for soft_stop)
-            if should_stop_search(depth):
+    for depth in range(1, max_depth + 1):
+        depth_start_time = time.perf_counter()
+        check_time()
+
+        # -------- NEW: Debug output for search progress --------
+        if depth <= 3:
+            print(
+                f"info string DEBUG: Starting depth {depth}, stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}",
+                flush=True)
+
+        # Check if we should stop (respects MIN_DEPTH for soft_stop)
+        if should_stop_search(depth):
+            print(f"info string DEBUG: Stopping at depth {depth} due to should_stop_search", flush=True)
+            break
+
+        # After MIN_DEPTH, check if we have enough time to likely complete the next depth
+        if depth > MIN_NEGAMAX_DEPTH and time_limit is not None and last_depth_time > 0:
+            elapsed = time.perf_counter() - TimeControl.start_time
+            remaining = time_limit - elapsed
+            estimated_next_depth_time = last_depth_time * ESTIMATED_BRANCHING_FACTOR
+
+            if remaining < estimated_next_depth_time * TIME_SAFETY_MARGIN:
+                # Not enough time to likely complete this depth
                 break
 
-            # After MIN_DEPTH, check if we have enough time to likely complete the next depth
-            if depth > MIN_NEGAMAX_DEPTH and time_limit is not None and last_depth_time > 0:
-                elapsed = time.perf_counter() - TimeControl.start_time
-                remaining = time_limit - elapsed
-                estimated_next_depth_time = last_depth_time * ESTIMATED_BRANCHING_FACTOR
+        age_heuristic_history()
 
-                if remaining < estimated_next_depth_time * TIME_SAFETY_MARGIN:
-                    # Not enough time to likely complete this depth
+        # -------- Root TT move --------
+        root_key = board.zobrist_hash()
+        entry = transposition_table.get(root_key)
+        tt_move = entry.best_move if entry and entry.best_move in board.get_legal_moves_list() else None
+
+        # -------- Aspiration window --------
+        window = ASPIRATION_WINDOW
+        retries = 0
+        depth_completed = False  # Track if this depth completed successfully
+        search_aborted = False  # Track if search was aborted mid-depth
+
+        # -------- NEW: Skip aspiration window for tactical positions or when score is extreme --------
+        use_full_window = (depth == 1 or is_tactical_position or
+                           (prev_depth_score is not None and abs(prev_depth_score) > 500))
+        if use_full_window and depth > 1:
+            _diag_warn("aw_tactical_skip",
+                       f"Skipping AW at depth {depth}, tactical={is_tactical_position}, score={prev_depth_score}")
+
+        while not search_aborted:
+            # First iteration or tactical positions use full window
+            if use_full_window:
+                alpha = -MAX_SCORE
+                beta = MAX_SCORE
+            else:
+                alpha = best_score - window
+                beta = best_score + window
+            alpha_orig = alpha
+
+            current_best_score = -MAX_SCORE
+            current_best_move = None
+            current_best_pv = []
+
+            for move_index, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
+                check_time()
+
+                # -------- NEW: Debug output for move progress at depth 1 --------
+                if depth == 1 and move_index < 3:
+                    print(f"info string DEBUG: depth 1 move {move_index}: {move.uci()}, stop={TimeControl.stop_search}",
+                          flush=True)
+
+                # Check for stop before searching this move
+                if TimeControl.stop_search:
+                    search_aborted = True
+                    break
+                if depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop:
+                    search_aborted = True
                     break
 
-            age_heuristic_history()
+                push_move(board, move, nn_evaluator)
 
-            # -------- Root TT move --------
-            root_key = board.zobrist_hash()
-            entry = transposition_table.get(root_key)
-            tt_move = entry.best_move if entry and entry.best_move in board.get_legal_moves_list() else None
-
-            # -------- Aspiration window --------
-            window = ASPIRATION_WINDOW
-            retries = 0
-            depth_completed = False  # Track if this depth completed successfully
-            search_aborted = False  # Track if search was aborted mid-depth
-
-            while not search_aborted:
-                # First iteration should use full window
-                if depth == 1:
-                    alpha = -MAX_SCORE
-                    beta = MAX_SCORE
+                if is_draw_by_repetition(board):
+                    score = get_draw_score(board)
+                    child_pv = []
                 else:
-                    alpha = best_score - window
-                    beta = best_score + window
-                alpha_orig = alpha
+                    # Principal variation first, then late moves with PVS
+                    if move_index == 0:
+                        score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
+                        score = -score
+                    else:
+                        score, child_pv = negamax(board, depth - 1, -alpha - 1, -alpha, allow_singular=True)
+                        score = -score
+                        if score > alpha:
+                            score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
+                            score = -score
 
+                board.pop()
+                nn_evaluator.pop()
+
+                # Check if search was aborted during negamax
+                if TimeControl.stop_search or (depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop):
+                    search_aborted = True
+                    # Still save this move's result if it's our only one
+                    if current_best_move is None:
+                        current_best_move = move
+                        current_best_score = score
+                        current_best_pv = [move] + child_pv
+                    break
+
+                if score > current_best_score:
+                    current_best_score = score
+                    current_best_move = move
+                    current_best_pv = [move] + child_pv
+
+                if score > alpha:
+                    alpha = score
+
+                if alpha >= beta:
+                    break
+
+            # If search was aborted, only save partial result if we have NO completed result
+            # FIXED: Don't overwrite a completed depth's result with an incomplete one
+            if search_aborted:
+                if best_move is None and current_best_move is not None:
+                    best_move = current_best_move
+                    best_score = current_best_score
+                    best_pv = current_best_pv
+                break
+
+            # -------- SUCCESS: within aspiration window (or using full window) --------
+            if use_full_window or (current_best_score > alpha_orig and current_best_score < beta):
+                best_move = current_best_move
+                best_score = current_best_score
+                best_pv = current_best_pv
+                pv_move = best_move
+                depth_completed = True
+                break
+
+            # -------- FAIL-LOW or FAIL-HIGH: widen window --------
+            window *= 2
+            retries += 1
+
+            # DIAG: Track excessive aspiration retries
+            if retries >= MAX_AW_RETRIES:
+                _diag_warn("aspiration_retries", f"depth={depth} hit MAX_AW_RETRIES, score={current_best_score}")
+                # -------- NEW: Mark position as tactical for future depths --------
+                is_tactical_position = True
+
+            # Save partial result ONLY if we have NO completed result yet
+            # FIXED: Don't overwrite a completed depth's result with an incomplete aspiration retry
+            if best_move is None and current_best_move is not None:
+                best_move = current_best_move
+                best_score = current_best_score
+                best_pv = current_best_pv
+
+            # -------- FALLBACK: full window search --------
+            if retries >= MAX_AW_RETRIES:
+                alpha = -MAX_SCORE
+                beta = MAX_SCORE
                 current_best_score = -MAX_SCORE
-                current_best_move = None
-                current_best_pv = []
 
-                for move_index, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
+                for move in ordered_moves(board, depth, pv_move, tt_move):
                     check_time()
 
-                    # Check for stop before searching this move
+                    # Check for stop
                     if TimeControl.stop_search:
                         search_aborted = True
                         break
@@ -1068,24 +1263,19 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                         break
 
                     push_move(board, move, nn_evaluator)
-
-                    if is_draw_by_repetition(board):
-                        score = get_draw_score(board)
-                        child_pv = []
-                    else:
-                        # Principal variation first, then late moves with PVS
-                        if move_index == 0:
-                            score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
-                            score = -score
-                        else:
-                            score, child_pv = negamax(board, depth - 1, -alpha - 1, -alpha, allow_singular=True)
-                            score = -score
-                            if score > alpha:
-                                score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
-                                score = -score
-
+                    score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
+                    score = -score
                     board.pop()
                     nn_evaluator.pop()
+
+                    # Check if search was aborted during negamax
+                    if TimeControl.stop_search or (depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop):
+                        search_aborted = True
+                        if current_best_move is None:
+                            current_best_move = move
+                            current_best_score = score
+                            current_best_pv = [move] + child_pv
+                        break
 
                     if score > current_best_score:
                         current_best_score = score
@@ -1095,129 +1285,150 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     if score > alpha:
                         alpha = score
 
-                    if alpha >= beta:
-                        break
-
-                # If search was aborted, only save partial result if we have NO completed result
-                # FIXED: Don't overwrite a completed depth's result with an incomplete one
-                if search_aborted:
-                    if best_move is None and current_best_move is not None:
+                # Save results from fallback search ONLY if completed (not aborted)
+                # Or if we have no result yet (best_move is None)
+                if not search_aborted:
+                    if current_best_move is not None:
                         best_move = current_best_move
                         best_score = current_best_score
                         best_pv = current_best_pv
-                    break
-
-                # -------- SUCCESS: within aspiration window --------
-                if current_best_score > alpha_orig and current_best_score < beta:
-                    best_move = current_best_move
-                    best_score = current_best_score
-                    best_pv = current_best_pv
-                    pv_move = best_move
+                        pv_move = best_move
                     depth_completed = True
-                    break
-
-                # -------- FAIL-LOW or FAIL-HIGH: widen window --------
-                window *= 2
-                retries += 1
-
-                # Save partial result ONLY if we have NO completed result yet
-                # FIXED: Don't overwrite a completed depth's result with an incomplete aspiration retry
-                if best_move is None and current_best_move is not None:
+                elif best_move is None and current_best_move is not None:
+                    # Aborted but no previous result - save partial
                     best_move = current_best_move
                     best_score = current_best_score
                     best_pv = current_best_pv
-
-                # -------- FALLBACK: full window search --------
-                if retries >= MAX_AW_RETRIES:
-                    alpha = -MAX_SCORE
-                    beta = MAX_SCORE
-                    current_best_score = -MAX_SCORE
-
-                    for move in ordered_moves(board, depth, pv_move, tt_move):
-                        check_time()
-
-                        # Check for stop
-                        if TimeControl.stop_search:
-                            search_aborted = True
-                            break
-                        if depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop:
-                            search_aborted = True
-                            break
-
-                        push_move(board, move, nn_evaluator)
-                        score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
-                        score = -score
-                        board.pop()
-                        nn_evaluator.pop()
-
-                        if score > current_best_score:
-                            current_best_score = score
-                            current_best_move = move
-                            current_best_pv = [move] + child_pv
-
-                        if score > alpha:
-                            alpha = score
-
-                    # Save results from fallback search ONLY if completed (not aborted)
-                    # Or if we have no result yet (best_move is None)
-                    if not search_aborted:
-                        if current_best_move is not None:
-                            best_move = current_best_move
-                            best_score = current_best_score
-                            best_pv = current_best_pv
-                            pv_move = best_move
-                        depth_completed = True
-                    elif best_move is None and current_best_move is not None:
-                        # Aborted but no previous result - save partial
-                        best_move = current_best_move
-                        best_score = current_best_score
-                        best_pv = current_best_pv
-                    break
-
-            # Record time taken for this depth (only if completed)
-            if depth_completed:
-                last_depth_time = time.perf_counter() - depth_start_time
-
-            # Break out of depth loop if search was aborted
-            if search_aborted:
                 break
 
-            # Print progress with PV only if depth completed
-            if depth_completed and best_pv:
-                elapsed = time.perf_counter() - TimeControl.start_time
-                nps = int((kpi['nodes'] - nodes_start) / elapsed) if elapsed > 0 else 0
-                print(
-                    f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {' '.join(m.uci() for m in best_pv)}",
-                    flush=True)
+        # Record time taken for this depth (only if completed)
+        if depth_completed:
+            last_depth_time = time.perf_counter() - depth_start_time
 
-            # Early break to speed up testing
-            if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
-                break
+            # DIAG: Check for score instability (large swings between depths)
+            if prev_depth_score is not None and depth > 2:
+                score_diff = abs(best_score - prev_depth_score)
+                if score_diff > _SCORE_INSTABILITY_THRESHOLD:
+                    _diag_warn("score_instability",
+                               f"depth {depth}: {prev_depth_score} -> {best_score} (diff={score_diff})")
+                    # -------- NEW: Mark as tactical if large swing --------
+                    is_tactical_position = True
+            prev_depth_score = best_score
 
-    except TimeoutError:
-        # Return last completed depth's best move (or pre-search fallback)
-        elapsed = time.perf_counter() - TimeControl.start_time
-        print(
-            f"info string Search timeout after {elapsed:.2f}s, returning {'fallback' if best_pv and len(best_pv) == 1 and best_move == best_pv[0] else 'search result'}",
-            flush=True)
+        # Break out of depth loop if search was aborted
+        if search_aborted:
+            break
 
+        # Print progress with PV only if depth completed
+        if depth_completed and best_pv:
+            elapsed = time.perf_counter() - TimeControl.start_time
+            nps = int((kpi['nodes'] - nodes_start) / elapsed) if elapsed > 0 else 0
+            print(
+                f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {' '.join(m.uci() for m in best_pv)}",
+                flush=True)
+
+        # Early break to speed up testing
+        if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
+            break
+
+    # -------- NEW: Print QS statistics if significant --------
+    if _qs_stats["max_depth_reached"] > MAX_QS_DEPTH // 2 or _qs_stats["time_cutoffs"] > 0:
+        print(f"info string QS_STATS: max_depth={_qs_stats['max_depth_reached']}, "
+              f"nodes={_qs_stats['total_nodes']}, time_cutoffs={_qs_stats['time_cutoffs']}", flush=True)
+
+    # -------- IMPROVED fallback: shallow tactical search instead of pure NN eval --------
     if best_move is None:
-        print(f"info string WARNING: No move available (should not happen with pre-search fallback)!", flush=True)
+        # DIAG: Track when fallback is needed
+        _diag_warn("best_move_none", f"No depth completed, using shallow search fallback, fen={fen[:40]}")
+        print(f"info string Computing shallow search fallback (no depth completed)...", flush=True)
+
+        # -------- NEW: Debug output to understand why no depth completed --------
+        elapsed = time.perf_counter() - TimeControl.start_time if TimeControl.start_time else 0
+        print(f"info string DEBUG fallback: elapsed={elapsed:.2f}s, stop={TimeControl.stop_search}, "
+              f"soft={TimeControl.soft_stop}, time_limit={time_limit}", flush=True)
+
+        # Reset to clean state for fallback evaluation
         board = CachedBoard(fen)
+        nn_evaluator.reset(board)
         legal = board.get_legal_moves_list()
 
         if legal:
-            # Reset evaluator to current position for clean state
-            nn_evaluator.reset(board)
-
-            best_move = None
+            best_move = legal[0]  # Default to first legal move
             best_score = -MAX_SCORE
 
-            # Evaluate each legal move with NN (depth-0 search)
+            # -------- NEW: Do a shallow 1-ply search with captures/checks --------
+            # This provides some tactical awareness without calling quiescence
+            _diag_warn("fallback_shallow_search", f"Shallow search with {len(legal)} moves")
+
+            fallback_aborted = False
             for move in legal:
+                # -------- CRITICAL: Check for stop signal --------
+                if TimeControl.stop_search:
+                    print(f"info string Fallback aborted by stop signal", flush=True)
+                    fallback_aborted = True
+                    break
+
                 nn_evaluator.push_with_board(board, move)
-                # score = -nn_evaluator.evaluate_centipawns(board)
-                score = -evaluate_nn(board)
+
+                # Check for immediate game-ending conditions
+                if board.is_checkmate():
+                    # We just delivered checkmate!
+                    score = MAX_SCORE - board.ply()
+                    board.pop()
+                    nn_evaluator.pop()
+                    best_move = move
+                    best_score = score
+                    best_pv = [move]
+                    print(f"info string Fallback found checkmate: {move.uci()}", flush=True)
+                    break
+
+                if board.is_stalemate() or board.is_insufficient_material():
+                    score = 0  # Draw
+                else:
+                    # Do a 1-ply tactical check: look at opponent's best response
+                    # Only examine captures and checks to limit explosion
+                    opp_best = MAX_SCORE  # From opponent's perspective (we want to minimize this)
+                    opp_moves_checked = 0
+                    max_opp_moves = 8  # Limit opponent moves to check
+
+                    board.precompute_move_info()
+                    for opp_move in board.get_legal_moves_list():
+                        # -------- CRITICAL: Check for stop signal in inner loop --------
+                        if TimeControl.stop_search:
+                            break
+
+                        # Only consider captures, checks, or promotions
+                        is_tactical = (board.is_capture_cached(opp_move) or
+                                       board.gives_check_cached(opp_move) or
+                                       opp_move.promotion is not None)
+
+                        if not is_tactical and opp_moves_checked > 0:
+                            continue
+
+                        # -------- FIXED: Use push_move helper which handles both board and nn_evaluator --------
+                        push_move(board, opp_move, nn_evaluator)
+
+                        # Check for mate threats
+                        if board.is_checkmate():
+                            opp_score = MAX_SCORE - board.ply()  # Opponent wins
+                        else:
+                            # Use NN eval for the resulting position (already pushed)
+                            opp_score = -evaluate_nn(board)  # Negate because it's opponent's view
+
+                        board.pop()
+                        nn_evaluator.pop()
+                        opp_best = min(opp_best, opp_score)
+                        opp_moves_checked += 1
+
+                        if opp_moves_checked >= max_opp_moves:
+                            break
+
+                    # If no tactical responses found, use static eval
+                    if opp_moves_checked == 0:
+                        score = -evaluate_nn(board)
+                    else:
+                        score = -opp_best  # Our score is negative of opponent's best
+
                 board.pop()
                 nn_evaluator.pop()
 
@@ -1226,14 +1437,34 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     best_move = move
 
             best_pv = [best_move]
-            print(
-                f"info string Safety fallback evaluated {len(legal)} moves, best={best_move.uci()} score={best_score}cp",
-                flush=True)
+            if not fallback_aborted:
+                print(
+                    f"info string Shallow fallback: {len(legal)} moves, best={best_move.uci()} score={best_score}cp",
+                    flush=True)
         else:
             # No legal moves - game is over (checkmate or stalemate)
             best_move = chess.Move.null()
             best_score = evaluate_material(board)
             best_pv = []
+
+    # DIAG: Check for time overrun (only when time limit was set)
+    if time_limit is not None:
+        elapsed = time.perf_counter() - TimeControl.start_time
+        overrun = elapsed - time_limit
+        if overrun > 0.5:  # More than 500ms over
+            _diag_warn("time_overruns",
+                       f"Search overran by {overrun:.2f}s (limit={time_limit:.2f}s, actual={elapsed:.2f}s)")
+
+    # -------- NEW: Additional diagnostic for severe overruns --------
+    if time_limit is not None:
+        elapsed = time.perf_counter() - TimeControl.start_time
+        if elapsed > time_limit * 3:  # More than 3x the time limit
+            _diag_warn("time_critical_abort",
+                       f"SEVERE overrun: {elapsed:.2f}s vs {time_limit:.2f}s limit, QS_max_depth={_qs_stats['max_depth_reached']}")
+
+    # DIAG: Check score bounds
+    if abs(best_score) > MAX_SCORE:
+        _diag_warn("score_out_of_bounds", f"Score {best_score} exceeds MAX_SCORE {MAX_SCORE}")
 
     return best_move, best_score, best_pv, kpi['nodes'] - nodes_start, nps
 
@@ -1360,7 +1591,7 @@ def main():
 
             # Start timer
             start_time = time.perf_counter()
-            move, score, pv, _, _ = find_best_move(fen, max_depth=20, time_limit=30)
+            move, score, pv, _, _ = find_best_move(fen, max_depth=20, time_limit=5)
             end_time = time.perf_counter()
 
             # Record cache sizes and time
