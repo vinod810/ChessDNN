@@ -21,7 +21,13 @@ import time
 import chess
 
 from cached_board import CachedBoard
-from engine import kpi, transposition_table, dnn_eval_cache, pv_to_san, MAX_MP_CORES, IS_SHARED_TT_MP
+from engine import kpi, transposition_table, dnn_eval_cache, pv_to_san, MAX_MP_CORES, IS_SHARED_TT_MP, is_debug_enabled
+
+
+def _mp_diag_print(msg: str):
+    """Print diagnostic info string only when diagnostics are enabled."""
+    if is_debug_enabled():
+        print(f"info string {msg}", flush=True)
 
 # Worker pool (persistent workers)
 _worker_pool: List[Process] = []
@@ -52,7 +58,7 @@ def init_worker_pool(num_workers: int):
         _pool_initialized = False
         return
 
-    print(f"info string Initializing {num_workers} worker processes", flush=True)
+    _mp_diag_print(f"Initializing {num_workers} worker processes")
 
     # Create shared resources
     _stop_event = Event()
@@ -65,12 +71,12 @@ def init_worker_pool(num_workers: int):
         _shared_tt = _manager.dict()
         _shared_qs_tt = _manager.dict()
         _shared_dnn_cache = _manager.dict()
-        print("info string Using shared transposition tables", flush=True)
+        _mp_diag_print("Using shared transposition tables")
     else:
         _shared_tt = None
         _shared_qs_tt = None
         _shared_dnn_cache = None
-        print("info string Using independent transposition tables", flush=True)
+        _mp_diag_print("Using independent transposition tables")
 
     # Create work queues and workers
     _work_queues = []
@@ -90,7 +96,7 @@ def init_worker_pool(num_workers: int):
         _worker_pool.append(p)
 
     _pool_initialized = True
-    print(f"info string Worker pool initialized with {num_workers} workers", flush=True)
+    _mp_diag_print(f"Worker pool initialized with {num_workers} workers")
 
 
 def shutdown_worker_pool():
@@ -101,7 +107,7 @@ def shutdown_worker_pool():
     if not _pool_initialized:
         return
 
-    print("info string Shutting down worker pool", flush=True)
+    _mp_diag_print("Shutting down worker pool")
 
     # Signal workers to stop
     if _stop_event:
@@ -225,18 +231,14 @@ def _search_moves(engine, worker_id: int, fen: str, moves: List[chess.Move], max
     best_pv = [moves[0]]
     depth_reached = 0
 
-    #print(f"info string Worker {worker_id} searching {len(moves)} moves: {[m.uci() for m in moves]}", flush=True)
-
     try:
         # Iterative deepening
         for depth in range(1, max_depth + 1):
             if stop_event.is_set():
-                #print(f"info string Worker {worker_id} stopped by event at depth {depth}", flush=True)
                 break
 
             engine.check_time()
             if engine.TimeControl.stop_search or engine.TimeControl.soft_stop:
-                #print(f"info string Worker {worker_id} stopped by time at depth {depth}", flush=True)
                 break
 
             depth_best_move = None
@@ -294,21 +296,11 @@ def _search_moves(engine, worker_id: int, fen: str, moves: List[chess.Move], max
                 best_score = depth_best_score
                 best_pv = depth_best_pv
                 depth_reached = depth
-                #print(f"info string Worker {worker_id} depth {depth} best {best_move.uci()} score {best_score} pv_len {len(best_pv)}", flush=True)
-
-            #if depth >= MIN_DEPTH_BREAK_BEST_MOVE and expected_best_moves is not None and best_move is not None and best_move in expected_best_moves:
-                #print(
-                        #f"info string Worker Best move found {worker_id} depth {depth} best {best_move.uci()} score {best_score} pv_len {len(best_pv)}",
-                        #flush=True)
-                #break
 
     except TimeoutError:
-        # Engine raises TimeoutError when stop_search is set - this is normal
-        #print(f"info string Worker {worker_id} stopped by TimeoutError", flush=True)
         pass
 
     total_nodes = engine.kpi['nodes']
-    #print(f"info string Worker {worker_id} done: move={best_move.uci()} score={best_score} depth={depth_reached} nodes={total_nodes}", flush=True)
 
     return (best_move, best_score, best_pv, total_nodes, depth_reached)
 
@@ -392,18 +384,12 @@ def parallel_find_best_move(fen: str, max_depth: int = 20, time_limit: Optional[
             workers_done += 1
             if result is not None:
                 results.append(result)
-                print(f"info string Collected result from worker {worker_id}: {result[0].uci()} "
-                      f"score={result[1]} depth={result[4]}",
-                      flush=True)
-                #if expected_best_moves is not None and result[0] in expected_best_moves:
-                #    print(f"info string Best move from worker {worker_id}: {result[0].uci()} score={result[1]}, "
-                #          f"depth={result[4]} stopping workers",
-                #          flush=True)
-               #     _stop_event.set()
+                _mp_diag_print(f"Collected result from worker {worker_id}: {result[0].uci()} "
+                               f"score={result[1]} depth={result[4]}")
         except:
             # Check for timeout
             if time_limit and (time.perf_counter() - start_time) >= time_limit:
-                print("info string Time limit reached, stopping workers", flush=True)
+                _mp_diag_print("Time limit reached, stopping workers")
                 _stop_event.set()
 
                 # IMPORTANT: Wait for workers to finish and report (up to 0.5 seconds)
@@ -414,27 +400,22 @@ def parallel_find_best_move(fen: str, max_depth: int = 20, time_limit: Optional[
                 while workers_done < expected_workers:
                     remaining = grace_period - (time.perf_counter() - grace_start)
                     if remaining <= 0:
-                        print(
-                            f"info string Grace period expired, {expected_workers - workers_done} workers didn't report",
-                            flush=True)
+                        _mp_diag_print(f"Grace period expired, {expected_workers - workers_done} workers didn't report")
                         break
                     try:
                         worker_id, result = _result_queue.get(timeout=min(0.5, remaining))
                         workers_done += 1
                         if result is not None:
                             results.append(result)
-                            print(
-                                f"info string Collected result from worker {worker_id}: {result[0].uci()} "
-                                f"score={result[1]} depth={result[4]}",
-                                flush=True)
+                            _mp_diag_print(f"Collected result from worker {worker_id}: {result[0].uci()} "
+                                           f"score={result[1]} depth={result[4]}")
                     except:
                         pass  # Keep waiting
 
                 break  # Exit main loop after grace period
 
     if workers_done < expected_workers:
-        print(f"info string Not all workers responded, reported={workers_done}, expected={expected_workers}",
-              flush=True)
+        _mp_diag_print(f"Not all workers responded, reported={workers_done}, expected={expected_workers}")
 
     # Pick best result (highest score)
     if not results:

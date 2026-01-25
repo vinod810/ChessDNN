@@ -17,6 +17,12 @@ from nn_inference import MAX_SCORE
 CURR_DIR = Path(__file__).resolve().parent
 HOME_DIR = "ChessDNN"
 
+# -------- DIAGNOSTIC CONTROL --------
+# Set IS_DIAGNOSTIC = True for development/debugging builds
+# Or enable via UCI "debug on" command
+IS_DIAGNOSTIC = False  # Master switch for diagnostic output
+debug_mode = False     # Runtime toggle via UCI "debug on/off"
+
 # Multiprocessing configuration
 MAX_MP_CORES = 1  # 1 or less disables multiprocessing, UCI option "Threads"
 IS_SHARED_TT_MP = False  # Whether to share TT across workers in MP mode
@@ -90,6 +96,15 @@ if not IS_BLAS_ENABLED:
 
 MODEL_PATH = str(DNN_MODEL_FILEPATH if NN_TYPE == "DNN" else NNUE_MODEL_FILEPATH)
 
+def is_debug_enabled() -> bool:
+    """Check if diagnostic output is enabled (either via IS_DIAGNOSTIC or UCI debug on)."""
+    return IS_DIAGNOSTIC or debug_mode
+
+
+def set_debug_mode(enabled: bool):
+    """Set debug mode from UCI command."""
+    global debug_mode
+    debug_mode = enabled
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -153,8 +168,10 @@ _qs_stats = {
 
 
 def _diag_warn(key: str, msg: str):
-    """Record diagnostic event and warn if threshold exceeded."""
+    """Record diagnostic event and warn if threshold exceeded (only when diagnostics enabled)."""
     _diag[key] += 1
+    if not is_debug_enabled():
+        return  # Skip output when diagnostics disabled
     count = _diag[key]
     # Print first occurrence, then at threshold, then every 10x threshold
     if count == 1 or count == _DIAG_WARN_THRESHOLD or (
@@ -163,11 +180,17 @@ def _diag_warn(key: str, msg: str):
 
 
 def diag_summary() -> str:
-    """Return summary of diagnostic counters (non-zero only)."""
+    """Return summary of diagnostic counters (non-zero only). Only meaningful when diagnostics enabled."""
     non_zero = {k: v for k, v in _diag.items() if v > 0}
     if non_zero:
         return "DIAG_SUMMARY: " + ", ".join(f"{k}={v}" for k, v in non_zero.items())
     return "DIAG_SUMMARY: all clear"
+
+
+def diag_print(msg: str):
+    """Print diagnostic info string only when diagnostics are enabled."""
+    if is_debug_enabled():
+        print(f"info string {msg}", flush=True)
 
 
 # Track positions seen in the current game (cleared on ucinewgame)
@@ -687,7 +710,6 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
     # -------- Draw detection --------
     if is_draw_by_repetition(board) or board.can_claim_fifty_moves():
-        # print(f"Eapen, get_draw_score(board)={get_draw_score(board)}, dpeth={depth}, turn={board.turn}")
         return get_draw_score(board), []
 
     key = board.zobrist_hash()
@@ -994,9 +1016,27 @@ def age_heuristic_history():
 
 
 def control_dict_size(table, max_dict_size):
-    if len(table) > max_dict_size:
-        for _ in range(max_dict_size // 4):
-            table.pop(next(iter(table)))
+    """
+    Control dictionary size by removing oldest entries.
+    OPTIMIZED: Instead of popping one at a time (O(n) for each pop),
+    we rebuild the dict with only the most recent entries.
+    """
+    current_size = len(table)
+    if current_size > max_dict_size:
+        # Calculate how many entries to keep
+        entries_to_keep = max_dict_size * 3 // 4  # Keep 75%
+
+        # For a regular dict (Python 3.7+), iteration order is insertion order
+        # So we want to keep the LAST entries_to_keep items
+        entries_to_remove = current_size - entries_to_keep
+
+        # Much faster: get keys to remove, then delete them
+        # Using islice to get first N keys (oldest entries)
+        from itertools import islice
+        keys_to_remove = list(islice(table.keys(), entries_to_remove))
+
+        for key in keys_to_remove:
+            del table[key]
 
 
 def pv_to_san(board: CachedBoard, pv: List[chess.Move]) -> str:
@@ -1062,11 +1102,12 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         "time_cutoffs": 0,
     }
 
-    print(
-        f"info string TimeControl: stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}, time_limit={time_limit}",
-        flush=True)
+    diag_print(f"TimeControl: stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}, time_limit={time_limit}")
 
     # -------- Clear search tables & heuristics --------
+    # -------- DIAGNOSTIC: Track initialization steps --------
+    init_start = time.perf_counter()
+
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
     history_heuristic.clear()
@@ -1076,11 +1117,46 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         transposition_table.clear()
         qs_transposition_table.clear()
 
+    # -------- CRITICAL: NN cache trimming can be slow if cache is huge --------
+    cache_size_before = len(dnn_eval_cache)
+    cache_trim_start = time.perf_counter()
     control_dict_size(dnn_eval_cache, MAX_TABLE_SIZE)
+    cache_trim_time = time.perf_counter() - cache_trim_start
+    cache_size_after = len(dnn_eval_cache)
+
+    if cache_trim_time > 0.1:
+        diag_print(f"DEBUG: NN cache trim took {cache_trim_time:.3f}s "
+                   f"({cache_size_before} -> {cache_size_after} entries)")
+
+    tables_cleared_time = time.perf_counter() - init_start
+    if tables_cleared_time > 0.1:
+        diag_print(f"DEBUG: Tables cleared in {tables_cleared_time:.3f}s")
 
     # -------- Initialize board and evaluator --------
+    board_init_start = time.perf_counter()
     board = CachedBoard(fen)
+    board_init_time = time.perf_counter() - board_init_start
+    if board_init_time > 0.1:
+        diag_print(f"DEBUG: Board init took {board_init_time:.3f}s")
+
+    # -------- CRITICAL: Check for stop before NN reset (which can be slow) --------
+    if TimeControl.stop_search:
+        diag_print(f"DEBUG: Stop received before NN reset, aborting")
+        # Return first legal move as fallback
+        legal = board.get_legal_moves_list()
+        if legal:
+            return legal[0], 0, [legal[0]], 0, 0
+        return chess.Move.null(), 0, [], 0, 0
+
+    nn_reset_start = time.perf_counter()
     nn_evaluator.reset(board)
+    nn_reset_time = time.perf_counter() - nn_reset_start
+    if nn_reset_time > 0.1:
+        diag_print(f"DEBUG: NN reset took {nn_reset_time:.3f}s")
+
+    total_init_time = time.perf_counter() - init_start
+    if total_init_time > 0.2:
+        diag_print(f"DEBUG: Total init took {total_init_time:.3f}s")
 
     # Start with no result - fallback computed lazily only if needed
     best_move = None
@@ -1100,13 +1176,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
         # -------- NEW: Debug output for search progress --------
         if depth <= 3:
-            print(
-                f"info string DEBUG: Starting depth {depth}, stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}",
-                flush=True)
+            diag_print(f"DEBUG: Starting depth {depth}, stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}")
 
         # Check if we should stop (respects MIN_DEPTH for soft_stop)
         if should_stop_search(depth):
-            print(f"info string DEBUG: Stopping at depth {depth} due to should_stop_search", flush=True)
+            diag_print(f"DEBUG: Stopping at depth {depth} due to should_stop_search")
             break
 
         # After MIN_DEPTH, check if we have enough time to likely complete the next depth
@@ -1158,8 +1232,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
                 # -------- NEW: Debug output for move progress at depth 1 --------
                 if depth == 1 and move_index < 3:
-                    print(f"info string DEBUG: depth 1 move {move_index}: {move.uci()}, stop={TimeControl.stop_search}",
-                          flush=True)
+                    diag_print(f"DEBUG: depth 1 move {move_index}: {move.uci()}, stop={TimeControl.stop_search}")
 
                 # Check for stop before searching this move
                 if TimeControl.stop_search:
@@ -1333,19 +1406,19 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
     # -------- NEW: Print QS statistics if significant --------
     if _qs_stats["max_depth_reached"] > MAX_QS_DEPTH // 2 or _qs_stats["time_cutoffs"] > 0:
-        print(f"info string QS_STATS: max_depth={_qs_stats['max_depth_reached']}, "
-              f"nodes={_qs_stats['total_nodes']}, time_cutoffs={_qs_stats['time_cutoffs']}", flush=True)
+        diag_print(f"QS_STATS: max_depth={_qs_stats['max_depth_reached']}, "
+                   f"nodes={_qs_stats['total_nodes']}, time_cutoffs={_qs_stats['time_cutoffs']}")
 
     # -------- IMPROVED fallback: shallow tactical search instead of pure NN eval --------
     if best_move is None:
         # DIAG: Track when fallback is needed
         _diag_warn("best_move_none", f"No depth completed, using shallow search fallback, fen={fen[:40]}")
-        print(f"info string Computing shallow search fallback (no depth completed)...", flush=True)
+        diag_print(f"Computing shallow search fallback (no depth completed)...")
 
         # -------- NEW: Debug output to understand why no depth completed --------
         elapsed = time.perf_counter() - TimeControl.start_time if TimeControl.start_time else 0
-        print(f"info string DEBUG fallback: elapsed={elapsed:.2f}s, stop={TimeControl.stop_search}, "
-              f"soft={TimeControl.soft_stop}, time_limit={time_limit}", flush=True)
+        diag_print(f"DEBUG fallback: elapsed={elapsed:.2f}s, stop={TimeControl.stop_search}, "
+                   f"soft={TimeControl.soft_stop}, time_limit={time_limit}")
 
         # Reset to clean state for fallback evaluation
         board = CachedBoard(fen)
@@ -1364,7 +1437,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
             for move in legal:
                 # -------- CRITICAL: Check for stop signal --------
                 if TimeControl.stop_search:
-                    print(f"info string Fallback aborted by stop signal", flush=True)
+                    diag_print(f"Fallback aborted by stop signal")
                     fallback_aborted = True
                     break
 
@@ -1379,7 +1452,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     best_move = move
                     best_score = score
                     best_pv = [move]
-                    print(f"info string Fallback found checkmate: {move.uci()}", flush=True)
+                    diag_print(f"Fallback found checkmate: {move.uci()}")
                     break
 
                 if board.is_stalemate() or board.is_insufficient_material():
@@ -1438,9 +1511,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
             best_pv = [best_move]
             if not fallback_aborted:
-                print(
-                    f"info string Shallow fallback: {len(legal)} moves, best={best_move.uci()} score={best_score}cp",
-                    flush=True)
+                diag_print(f"Shallow fallback: {len(legal)} moves, best={best_move.uci()} score={best_score}cp")
         else:
             # No legal moves - game is over (checkmate or stalemate)
             best_move = chess.Move.null()
@@ -1577,13 +1648,6 @@ def main():
             if fen == "":
                 print("Type 'exit' to quit")
                 continue
-
-            # repeated_fen = "8/8/8/p6p/P3k1pP/6p1/8/5K2 w - - 20 59"
-            # board = chess.Board(repeated_fen)
-            # key = chess.polyglot.zobrist_hash(board)
-            # game_position_history[key] = game_position_history.get(key, 0) + 1
-            # game_position_history[key] = game_position_history.get(key, 0) + 1
-            # print("Eapen game_position_history.get(key, 0)=", game_position_history.get(key, 0))
 
             # Reset KPIs
             for key in kpi:

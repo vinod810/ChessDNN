@@ -8,7 +8,8 @@ import chess.polyglot
 
 from engine import (find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache,
                     clear_game_history, game_position_history, HOME_DIR, kpi,
-                    MAX_MP_CORES, IS_SHARED_TT_MP, diag_summary)
+                    MAX_MP_CORES, IS_SHARED_TT_MP, diag_summary, set_debug_mode,
+                    is_debug_enabled, diag_print)
 from book_move import init_opening_book, get_book_move
 import mp_search
 
@@ -95,6 +96,14 @@ def uci_loop():
                 search_thread.join()
             print("readyok", flush=True)
 
+        elif command == "debug on":
+            set_debug_mode(True)
+            print("info string Debug mode enabled", flush=True)
+
+        elif command == "debug off":
+            set_debug_mode(False)
+            print("info string Debug mode disabled", flush=True)
+
         elif command.startswith("setoption"):
             tokens = command.split()
             if "name" in tokens and "value" in tokens:
@@ -121,10 +130,11 @@ def uci_loop():
                     mp_search.set_shared_tt(value.lower() == "true")
 
         elif command == "ucinewgame":
-            # Print diagnostic summary from previous game (if any issues)
-            summary = diag_summary()
-            if "all clear" not in summary:
-                print(f"info string {summary}", flush=True)
+            # Print diagnostic summary from previous game (if any issues) when debug enabled
+            if is_debug_enabled():
+                summary = diag_summary()
+                if "all clear" not in summary:
+                    print(f"info string {summary}", flush=True)
 
             board.reset()
             dnn_eval_cache.clear()
@@ -414,12 +424,11 @@ def uci_loop():
                         hard_cap = (time_left / 1000.0) * 0.10
                         ponderhit_time_limit = min(ponderhit_time_limit, hard_cap)
 
-                        print(f"info string ponderhit time_limit={ponderhit_time_limit:.2f}s (clock={time_left}ms)",
-                              flush=True)
+                        diag_print(f"ponderhit time_limit={ponderhit_time_limit:.2f}s (clock={time_left}ms)")
 
                     # If we have very little time, just use the pondered move
                     if ponderhit_time_limit < 0.3 and ponder_best_move:
-                        print(f"info string Using pondered move (time critical)", flush=True)
+                        diag_print(f"Using pondered move (time critical)")
                         print(f"bestmove {ponder_best_move.uci()}", flush=True)
                     else:
                         def ponderhit_search():
