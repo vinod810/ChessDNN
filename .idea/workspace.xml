@@ -4,11 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Blunders reduced. Occasionaly stalls">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Stalling fixed">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mp_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/mp_search.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/uci.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -307,14 +305,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00128" summary="Cython">
-      <option name="closed" value="true" />
-      <created>1768698985776</created>
-      <option name="number" value="00128" />
-      <option name="presentableId" value="LOCAL-00128" />
-      <option name="project" value="LOCAL" />
-      <updated>1768698985776</updated>
-    </task>
     <task id="LOCAL-00129" summary="nn_tests to support lates nn_inference">
       <option name="closed" value="true" />
       <created>1768744314655</created>
@@ -523,7 +513,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769347795322</updated>
     </task>
-    <option name="localTasksCounter" value="155" />
+    <task id="LOCAL-00155" summary="Stalling fixed">
+      <option name="closed" value="true" />
+      <created>1769360095582</created>
+      <option name="number" value="00155" />
+      <option name="presentableId" value="LOCAL-00155" />
+      <option name="project" value="LOCAL" />
+      <updated>1769360095583</updated>
+    </task>
+    <option name="localTasksCounter" value="156" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -538,7 +536,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Optimizing nn_inference" />
     <MESSAGE value="Cython" />
     <MESSAGE value="nn_tests to support lates nn_inference" />
     <MESSAGE value="Code cleanup" />
@@ -563,7 +560,8 @@
     <MESSAGE value="Multi processing, tests, UCI" />
     <MESSAGE value="Fixes for QS explosion" />
     <MESSAGE value="Blunders reduced. Occasionaly stalls" />
-    <option name="LAST_COMMIT_MESSAGE" value="Blunders reduced. Occasionaly stalls" />
+    <MESSAGE value="Stalling fixed" />
+    <option name="LAST_COMMIT_MESSAGE" value="Stalling fixed" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

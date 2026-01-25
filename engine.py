@@ -21,7 +21,7 @@ HOME_DIR = "ChessDNN"
 # Set IS_DIAGNOSTIC = True for development/debugging builds
 # Or enable via UCI "debug on" command
 IS_DIAGNOSTIC = False  # Master switch for diagnostic output
-debug_mode = False     # Runtime toggle via UCI "debug on/off"
+debug_mode = False  # Runtime toggle via UCI "debug on/off"
 
 # Multiprocessing configuration
 MAX_MP_CORES = 1  # 1 or less disables multiprocessing, UCI option "Threads"
@@ -38,21 +38,26 @@ NNUE_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'nnue.pt'
 
 QS_DEPTH_MIN_NN_EVAL = 2
 QS_DEPTH_MAX_NN_EVAL = 10
-MAX_QS_DEPTH = 15  # REDUCED from 25 to prevent search explosion
+MAX_QS_DEPTH = 12  # REDUCED from 15 to prevent search explosion
 DELTA_MAX_NN_EVAL = 50  # Score difference, below which will trigger a NN evaluation
 STAND_PAT_MAX_NN_EVAL = 200
 
-# NEW: Limit moves examined per QS ply to prevent explosion
-MAX_QS_MOVES_PER_PLY = 12  # Maximum captures to examine at each QS depth
-MAX_QS_MOVES_DEEP = 6  # Even fewer moves at deeper QS levels (depth > MAX_QS_DEPTH/2)
+# Limit moves examined per QS ply to prevent explosion
+MAX_QS_MOVES_PER_PLY = 10  # REDUCED from 12 - Maximum captures to examine at each QS depth
+MAX_QS_MOVES_DEEP = 5  # REDUCED from 6 - Even fewer moves at deeper QS levels
+MAX_QS_MOVES_TIME_CRITICAL = 3  # NEW: Very few moves when time is critical
 
 QS_TT_SUPPORTED = True
-DELTA_PRUNING_QS_MIN_DEPTH = 6
+DELTA_PRUNING_QS_MIN_DEPTH = 5  # REDUCED from 6 - Enable delta pruning earlier
 DELTA_PRUNING_MARGIN = 75
-TACTICAL_QS_MAX_DEPTH = 5
+TACTICAL_QS_MAX_DEPTH = 4  # REDUCED from 5
 
-# NEW: Time check frequency in QS
-QS_TIME_CHECK_INTERVAL = 50  # Check time every N nodes in QS (was 10 moves)
+# Time check frequency in QS - more aggressive
+QS_TIME_CHECK_INTERVAL = 25  # REDUCED from 50 - Check time every N nodes in QS
+
+# Time budget allocation
+QS_TIME_BUDGET_FRACTION = 0.6  # NEW: Maximum fraction of time budget QS can consume
+MIN_MAIN_SEARCH_RESERVE = 0.3  # NEW: Always reserve 30% of time for main search iterations
 
 ASPIRATION_WINDOW = 50  # INCREASED from 40 to reduce retries in tactical positions
 MAX_AW_RETRIES = 2  # REDUCED from 3 to fail faster to full window
@@ -84,7 +89,11 @@ RAZORING_MAX_DEPTH = 2  # Only apply at depth <= 2
 ESTIMATED_BRANCHING_FACTOR = 3.5  # Typical branching factor after pruning
 TIME_SAFETY_MARGIN = 0.55  # Only start new depth if we estimate having 70%+ of needed time
 
-MIN_NEGAMAX_DEPTH = 2  # FIXED: Allow stopping after depth 1 when time is critical
+# Minimum depth requirements
+MIN_NEGAMAX_DEPTH = 2  # Minimum depth before soft_stop is honored
+MIN_ACCEPTABLE_DEPTH = 4  # NEW: Preferred minimum depth - force continuation if not reached
+TACTICAL_MIN_DEPTH = 5  # NEW: Minimum depth for tactical positions
+
 MAX_NEGAMAX_DEPTH = 20
 MAX_SEARCH_TIME = 30
 MAX_TABLE_SIZE = 200_000
@@ -96,6 +105,7 @@ if not IS_BLAS_ENABLED:
 
 MODEL_PATH = str(DNN_MODEL_FILEPATH if NN_TYPE == "DNN" else NNUE_MODEL_FILEPATH)
 
+
 def is_debug_enabled() -> bool:
     """Check if diagnostic output is enabled (either via IS_DIAGNOSTIC or UCI debug on)."""
     return IS_DIAGNOSTIC or debug_mode
@@ -105,6 +115,7 @@ def set_debug_mode(enabled: bool):
     """Set debug mode from UCI command."""
     global debug_mode
     debug_mode = enabled
+
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -148,12 +159,21 @@ _diag = {
     "aspiration_retries": 0,  # Aspiration window retries hit max
     "best_move_none": 0,  # Search completed but best_move is None (fallback used)
     "score_instability": 0,  # Large score swings between depths
-    # NEW diagnostic counters
+    # Time and QS diagnostic counters
     "qs_time_cutoff": 0,  # QS terminated early due to time
     "qs_move_limit": 0,  # QS move limit reached
+    "qs_budget_exceeded": 0,  # NEW: QS exceeded its time budget fraction
     "fallback_shallow_search": 0,  # Used shallow search fallback instead of pure NN
     "aw_tactical_skip": 0,  # Skipped aspiration window due to tactical position
     "time_critical_abort": 0,  # Search aborted due to critical time pressure
+    # Depth tracking counters
+    "shallow_search_d2": 0,  # NEW: Bestmove at depth 2
+    "shallow_search_d3": 0,  # NEW: Bestmove at depth 3
+    "shallow_search_total": 0,  # NEW: Bestmove at depth <= 3
+    "tactical_extension": 0,  # Search extended due to score instability
+    "min_depth_forced": 0,  # Forced deeper search due to MIN_ACCEPTABLE_DEPTH
+    "bestmove_depth_sum": 0,  # NEW: Sum of depths at bestmove (for average)
+    "bestmove_count": 0,  # NEW: Count of bestmoves (for average)
 }
 _DIAG_WARN_THRESHOLD = 3  # Print warning after this many occurrences
 _DIAG_SAMPLE_RATE = 100  # Check expensive diagnostics every N nodes
@@ -181,9 +201,19 @@ def _diag_warn(key: str, msg: str):
 
 def diag_summary() -> str:
     """Return summary of diagnostic counters (non-zero only). Only meaningful when diagnostics enabled."""
-    non_zero = {k: v for k, v in _diag.items() if v > 0}
+    non_zero = {k: v for k, v in _diag.items() if v > 0 and not k.startswith("bestmove_")}
+    summary_parts = []
+
     if non_zero:
-        return "DIAG_SUMMARY: " + ", ".join(f"{k}={v}" for k, v in non_zero.items())
+        summary_parts.append(", ".join(f"{k}={v}" for k, v in non_zero.items()))
+
+    # Add average depth if we have data
+    if _diag["bestmove_count"] > 0:
+        avg_depth = _diag["bestmove_depth_sum"] / _diag["bestmove_count"]
+        summary_parts.append(f"avg_depth={avg_depth:.1f}")
+
+    if summary_parts:
+        return "DIAG_SUMMARY: " + " | ".join(summary_parts)
     return "DIAG_SUMMARY: all clear"
 
 
@@ -478,7 +508,10 @@ def should_stop_search(current_depth: int) -> bool:
     """
     Determine if search should stop.
     - TimeControl.stop_search (from UCI 'stop'): Always honored immediately
-    - TimeControl.soft_stop (from time limit): Only honored after MIN_DEPTH
+    - TimeControl.soft_stop (from time limit): Only honored after MIN_NEGAMAX_DEPTH
+
+    Note: MIN_ACCEPTABLE_DEPTH enforcement is done in find_best_move
+    to allow more nuanced control based on position type.
     """
     if TimeControl.stop_search:
         return True
@@ -501,10 +534,16 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     _qs_stats["total_nodes"] += 1
     _qs_stats["max_depth_reached"] = max(_qs_stats["max_depth_reached"], q_depth)
 
-    # -------- IMPROVED: More frequent time checks in QS --------
-    # Check time every QS_TIME_CHECK_INTERVAL nodes to prevent massive overruns
+    # -------- AGGRESSIVE: Check time every QS_TIME_CHECK_INTERVAL nodes --------
     if _qs_stats["total_nodes"] % QS_TIME_CHECK_INTERVAL == 0:
         check_time()
+        # NEW: Also check QS time budget
+        if TimeControl.time_limit and TimeControl.start_time:
+            elapsed = time.perf_counter() - TimeControl.start_time
+            if elapsed > TimeControl.time_limit * QS_TIME_BUDGET_FRACTION:
+                TimeControl.soft_stop = True
+                _diag_warn("qs_budget_exceeded",
+                           f"QS exceeded {QS_TIME_BUDGET_FRACTION * 100:.0f}% time budget at depth {q_depth}")
 
     # Hard stop always honored immediately
     if TimeControl.stop_search:
@@ -513,8 +552,8 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         else:
             return evaluate_material(board), []
 
-    # -------- NEW: Soft stop honored in deep QS to prevent time explosions --------
-    if TimeControl.soft_stop and q_depth > MAX_QS_DEPTH // 2:
+    # -------- EARLIER soft stop in QS - honor at shallower depth --------
+    if TimeControl.soft_stop and q_depth > MAX_QS_DEPTH // 3:  # Changed from // 2
         _qs_stats["time_cutoffs"] += 1
         _diag_warn("qs_time_cutoff", f"QS soft-stopped at depth {q_depth}")
         if IS_NN_ENABLED:
@@ -591,8 +630,18 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
     moves_searched = 0
 
-    # -------- NEW: Determine move limit based on depth --------
-    move_limit = MAX_QS_MOVES_DEEP if q_depth > MAX_QS_DEPTH // 2 else MAX_QS_MOVES_PER_PLY
+    # -------- DYNAMIC move limit based on depth AND time pressure --------
+    time_critical = TimeControl.soft_stop or (
+            TimeControl.time_limit and TimeControl.start_time and
+            (time.perf_counter() - TimeControl.start_time) > TimeControl.time_limit * 0.7
+    )
+
+    if time_critical:
+        move_limit = MAX_QS_MOVES_TIME_CRITICAL  # Very aggressive (3 moves)
+    elif q_depth > MAX_QS_DEPTH // 2:
+        move_limit = MAX_QS_MOVES_DEEP  # Medium (5 moves)
+    else:
+        move_limit = MAX_QS_MOVES_PER_PLY  # Normal (10 moves)
 
     # Pre-compute move info for this position
     board.precompute_move_info()
@@ -1166,22 +1215,37 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     prev_depth_score = None  # For score stability tracking
 
     last_depth_time = 0.0
+    max_completed_depth = 0  # Track highest completed depth
 
-    # -------- NEW: Track if position appears tactical (large score swings) --------
+    # -------- Track if position appears tactical (large score swings) --------
     is_tactical_position = False
 
     for depth in range(1, max_depth + 1):
         depth_start_time = time.perf_counter()
         check_time()
 
-        # -------- NEW: Debug output for search progress --------
+        # -------- Debug output for search progress --------
         if depth <= 3:
             diag_print(f"DEBUG: Starting depth {depth}, stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}")
 
-        # Check if we should stop (respects MIN_DEPTH for soft_stop)
-        if should_stop_search(depth):
-            diag_print(f"DEBUG: Stopping at depth {depth} due to should_stop_search")
+        # Determine minimum required depth based on position type
+        if is_tactical_position:
+            current_min_depth = TACTICAL_MIN_DEPTH  # Higher minimum for tactical
+        else:
+            current_min_depth = MIN_ACCEPTABLE_DEPTH  # Normal minimum
+
+        # Check if we should stop (but respect minimum depths)
+        if depth > current_min_depth and should_stop_search(depth):
+            diag_print(f"DEBUG: Stopping at depth {depth} due to should_stop_search (min={current_min_depth})")
             break
+
+        # NEW: If we haven't reached minimum acceptable depth, clear soft_stop to force deeper search
+        if depth <= current_min_depth and TimeControl.soft_stop and not TimeControl.stop_search:
+            if max_completed_depth > 0 and max_completed_depth < MIN_ACCEPTABLE_DEPTH:
+                TimeControl.soft_stop = False
+                _diag["min_depth_forced"] += 1
+                diag_print(
+                    f"MIN_DEPTH: Forcing depth {depth}, only completed {max_completed_depth}, need {MIN_ACCEPTABLE_DEPTH}")
 
         # After MIN_DEPTH, check if we have enough time to likely complete the next depth
         if depth > MIN_NEGAMAX_DEPTH and time_limit is not None and last_depth_time > 0:
@@ -1189,9 +1253,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
             remaining = time_limit - elapsed
             estimated_next_depth_time = last_depth_time * ESTIMATED_BRANCHING_FACTOR
 
-            if remaining < estimated_next_depth_time * TIME_SAFETY_MARGIN:
-                # Not enough time to likely complete this depth
-                break
+            # Only apply time estimation if we've reached minimum acceptable depth
+            if max_completed_depth >= MIN_ACCEPTABLE_DEPTH:
+                if remaining < estimated_next_depth_time * TIME_SAFETY_MARGIN:
+                    # Not enough time to likely complete this depth
+                    break
 
         age_heuristic_history()
 
@@ -1377,15 +1443,23 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         # Record time taken for this depth (only if completed)
         if depth_completed:
             last_depth_time = time.perf_counter() - depth_start_time
+            max_completed_depth = depth  # Track highest completed depth
 
-            # DIAG: Check for score instability (large swings between depths)
+            # Check for score instability (large swings between depths)
             if prev_depth_score is not None and depth > 2:
                 score_diff = abs(best_score - prev_depth_score)
                 if score_diff > _SCORE_INSTABILITY_THRESHOLD:
                     _diag_warn("score_instability",
                                f"depth {depth}: {prev_depth_score} -> {best_score} (diff={score_diff})")
-                    # -------- NEW: Mark as tactical if large swing --------
-                    is_tactical_position = True
+                    # Mark as tactical and potentially extend time
+                    if not is_tactical_position:
+                        is_tactical_position = True
+                        _diag["tactical_extension"] += 1
+                        # Clear soft_stop to force at least one more depth
+                        if TimeControl.soft_stop and not TimeControl.stop_search:
+                            TimeControl.soft_stop = False
+                            diag_print(
+                                f"TACTICAL_EXTENSION: Score swing {score_diff}cp at depth {depth}, extending search")
             prev_depth_score = best_score
 
         # Break out of depth loop if search was aborted
@@ -1404,7 +1478,20 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
             break
 
-    # -------- NEW: Print QS statistics if significant --------
+    # -------- SHALLOW SEARCH DIAGNOSTICS --------
+    _diag["bestmove_depth_sum"] += max_completed_depth
+    _diag["bestmove_count"] += 1
+
+    if max_completed_depth <= 3 and max_completed_depth > 0:
+        _diag["shallow_search_total"] += 1
+        if max_completed_depth == 2:
+            _diag["shallow_search_d2"] += 1
+        elif max_completed_depth == 3:
+            _diag["shallow_search_d3"] += 1
+        diag_print(f"SHALLOW_SEARCH: bestmove selected at depth {max_completed_depth} "
+                   f"(tactical={is_tactical_position}, move={best_move})")
+
+    # Print QS statistics if significant
     if _qs_stats["max_depth_reached"] > MAX_QS_DEPTH // 2 or _qs_stats["time_cutoffs"] > 0:
         diag_print(f"QS_STATS: max_depth={_qs_stats['max_depth_reached']}, "
                    f"nodes={_qs_stats['total_nodes']}, time_cutoffs={_qs_stats['time_cutoffs']}")
