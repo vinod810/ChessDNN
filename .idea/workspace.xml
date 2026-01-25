@@ -4,9 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Stalling fixed">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Perfromance got worse. But now more configrarable">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -305,14 +306,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00129" summary="nn_tests to support lates nn_inference">
-      <option name="closed" value="true" />
-      <created>1768744314655</created>
-      <option name="number" value="00129" />
-      <option name="presentableId" value="LOCAL-00129" />
-      <option name="project" value="LOCAL" />
-      <updated>1768744314660</updated>
-    </task>
     <task id="LOCAL-00130" summary="Code cleanup">
       <option name="closed" value="true" />
       <created>1768747657769</created>
@@ -521,7 +514,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769360095583</updated>
     </task>
-    <option name="localTasksCounter" value="156" />
+    <task id="LOCAL-00156" summary="Perfromance got worse. But now more configrarable">
+      <option name="closed" value="true" />
+      <created>1769370957367</created>
+      <option name="number" value="00156" />
+      <option name="presentableId" value="LOCAL-00156" />
+      <option name="project" value="LOCAL" />
+      <updated>1769370957367</updated>
+    </task>
+    <option name="localTasksCounter" value="157" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -536,7 +537,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Cython" />
     <MESSAGE value="nn_tests to support lates nn_inference" />
     <MESSAGE value="Code cleanup" />
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 238/300" />
@@ -561,7 +561,8 @@
     <MESSAGE value="Fixes for QS explosion" />
     <MESSAGE value="Blunders reduced. Occasionaly stalls" />
     <MESSAGE value="Stalling fixed" />
-    <option name="LAST_COMMIT_MESSAGE" value="Stalling fixed" />
+    <MESSAGE value="Perfromance got worse. But now more configrarable" />
+    <option name="LAST_COMMIT_MESSAGE" value="Perfromance got worse. But now more configrarable" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

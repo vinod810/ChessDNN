@@ -36,7 +36,7 @@ FULL_NN_EVAL_FREQ = 3000  # Increase to 50_000 after initial testing
 DNN_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'dnn.pt'
 NNUE_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'nnue.pt'
 
-QS_DEPTH_MIN_NN_EVAL = 2
+QS_DEPTH_MIN_NN_EVAL = 1
 QS_DEPTH_MAX_NN_EVAL = 10
 MAX_QS_DEPTH = 12  # REDUCED from 15 to prevent search explosion
 DELTA_MAX_NN_EVAL = 50  # Score difference, below which will trigger a NN evaluation

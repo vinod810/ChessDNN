@@ -17,7 +17,7 @@ echo "PGN File: $OUTFILE"
 python -c 'from engine import dump_parameters; dump_parameters()'
 
 $CUTECHESS_PATH/build/cutechess-cli \
--engine cmd="$CMD_DIR"/../uci.sh name="$1"  ponder  option.Threads=2  -debug \
+-engine cmd="$CMD_DIR"/../uci.sh name="$1"  ponder  option.Threads=2 -debug  \
 -engine cmd=stockfish option.UCI_LimitStrength=true option.UCI_Elo="$2" name=stockfish"$2" \
 -each proto=uci tc=40/120+1 timemargin=9999 -draw movenumber=40 movecount=5 score=50 \
 -resign movecount=3 score=500 twosided=false -maxmoves 100 -recover -games "$3"  -pgnout "$OUTFILE" # -debug
