@@ -406,9 +406,9 @@ def parallel_find_best_move(fen: str, max_depth: int = 20, time_limit: Optional[
                 print("info string Time limit reached, stopping workers", flush=True)
                 _stop_event.set()
 
-                # IMPORTANT: Wait for workers to finish and report (up to 5 seconds)
-                # Workers need time to notice stop_event and return their results
-                grace_period = 5.0
+                # IMPORTANT: Wait for workers to finish and report (up to 0.5 seconds)
+                # FIXED: Reduced from 5 seconds to prevent time overruns
+                grace_period = 0.5
                 grace_start = time.perf_counter()
 
                 while workers_done < expected_workers:

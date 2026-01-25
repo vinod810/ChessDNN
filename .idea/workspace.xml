@@ -4,17 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Multi processing. mp_search.py works">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Multi processing, tests, UCI">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/mp_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/mp_search.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/oldfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/oldfish.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/uci.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/uci_engine.sh" beforeDir="false" afterPath="$PROJECT_DIR$/uci.sh" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -313,14 +312,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00125" summary="Before C++ chess library">
-      <option name="closed" value="true" />
-      <created>1768657106019</created>
-      <option name="number" value="00125" />
-      <option name="presentableId" value="LOCAL-00125" />
-      <option name="project" value="LOCAL" />
-      <updated>1768657106020</updated>
-    </task>
     <task id="LOCAL-00126" summary="C++ chess library">
       <option name="closed" value="true" />
       <created>1768689452268</created>
@@ -529,7 +520,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769212154606</updated>
     </task>
-    <option name="localTasksCounter" value="152" />
+    <task id="LOCAL-00152" summary="Multi processing, tests, UCI">
+      <option name="closed" value="true" />
+      <created>1769266926190</created>
+      <option name="number" value="00152" />
+      <option name="presentableId" value="LOCAL-00152" />
+      <option name="project" value="LOCAL" />
+      <updated>1769266926190</updated>
+    </task>
+    <option name="localTasksCounter" value="153" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -544,7 +543,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Integrate with engine.py" />
     <MESSAGE value="Before C++ chess library" />
     <MESSAGE value="C++ chess library" />
     <MESSAGE value="Optimizing nn_inference" />
@@ -569,7 +567,8 @@
     <MESSAGE value="Pondering" />
     <MESSAGE value="Training/Eval not to use diagnostic rec" />
     <MESSAGE value="Multi processing. mp_search.py works" />
-    <option name="LAST_COMMIT_MESSAGE" value="Multi processing. mp_search.py works" />
+    <MESSAGE value="Multi processing, tests, UCI" />
+    <option name="LAST_COMMIT_MESSAGE" value="Multi processing, tests, UCI" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -695,8 +695,7 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int = 10
     print("Tanh Space (network output space):")
     print(f"  MSE:  {mse:.6f}")
     print(f"  RMSE: {rmse:.6f}")
-    print(f"  Mean Delta Error:  {mean_delta_error:.6f} {'NN is better than SF' \
-        if mean_delta_error <= 0 else 'SF is better than NN' }")
+    print(f"  Mean Delta Error:  {mean_delta_error:.6f} {'NN is better than SF' if mean_delta_error <= 0 else 'SF is better than NN' }")
     print()
     print("Centipawn Space (Error capped at +/-{:,}):".format(CP_ERROR_CLIP))
     print(f"  Mean Delta Error:  {mean_delta_error_cp:.2f} cp")

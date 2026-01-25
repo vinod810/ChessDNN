@@ -56,7 +56,7 @@ except ImportError as e:
     print(e)
     print("\033[91m! Cython not available, using pure Python fallback\033[0m")
 
-L1_QUANTIZATION = "NONE" # Options: "NONE" (FP32), "INT8", "INT16"
+L1_QUANTIZATION = "INT8" # Options: "NONE" (FP32), "INT8", "INT16"
 
 KING_SQUARES = 64
 PIECE_SQUARES = 64

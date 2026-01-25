@@ -25,12 +25,14 @@ IS_BLAS_ENABLED = False
 
 IS_NN_ENABLED = True
 NN_TYPE = "NNUE"
-FULL_NN_EVAL_FREQ = 3000 # Increase to 50_000 after initial testing
+# L1_QUANTIZATION defined in nn_inference.py
+FULL_NN_EVAL_FREQ = 3000  # Increase to 50_000 after initial testing
 DNN_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'dnn.pt'
 NNUE_MODEL_FILEPATH = CURR_DIR / f"../{HOME_DIR}" / 'model' / 'nnue.pt'
 
-QS_DEPTH_MIN_NN_EVAL = 1
+QS_DEPTH_MIN_NN_EVAL = 2
 QS_DEPTH_MAX_NN_EVAL = 10
+MAX_QS_DEPTH = 25  # Hard limit to prevent search explosion
 DELTA_MAX_NN_EVAL = 50  # Score difference, below which will trigger a NN evaluation
 STAND_PAT_MAX_NN_EVAL = 200
 
@@ -66,8 +68,13 @@ RAZORING_MARGIN = [0, 125, 250]  # Margins by depth (depth 1, 2)
 RAZORING_MAX_DEPTH = 2  # Only apply at depth <= 2
 
 # Time management
-ESTIMATED_BRANCHING_FACTOR = 2.5  # Typical branching factor after pruning
-TIME_SAFETY_MARGIN = 0.7  # Only start new depth if we estimate having 70%+ of needed time
+ESTIMATED_BRANCHING_FACTOR = 3.5  # Typical branching factor after pruning
+TIME_SAFETY_MARGIN = 0.55  # Only start new depth if we estimate having 70%+ of needed time
+
+MIN_NEGAMAX_DEPTH = 2  # FIXED: Allow stopping after depth 1 when time is critical
+MAX_NEGAMAX_DEPTH = 20
+MAX_SEARCH_TIME = 30
+MAX_TABLE_SIZE = 200_000
 
 if not IS_BLAS_ENABLED:
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -76,10 +83,6 @@ if not IS_BLAS_ENABLED:
 
 MODEL_PATH = str(DNN_MODEL_FILEPATH if NN_TYPE == "DNN" else NNUE_MODEL_FILEPATH)
 
-MIN_NEGAMAX_DEPTH = 3  # Minimum depth to complete regardless of time
-MAX_NEGAMAX_DEPTH = 20
-MAX_SEARCH_TIME = 30
-MAX_TABLE_SIZE = 200_000
 
 class TimeControl:
     time_limit = None  # in seconds
@@ -114,9 +117,9 @@ kpi = {
 # Track positions seen in the current game (cleared on ucinewgame)
 game_position_history: dict[int, int] = {}  # zobrist_hash -> count
 
-#nn_evaluator: DNNEvaluator | NNUEEvaluator | None = None
+# nn_evaluator: DNNEvaluator | NNUEEvaluator | None = None
 if NN_TYPE == "DNN":
-    nn_evaluator = DNNEvaluator.create(CachedBoard(), NN_TYPE, MODEL_PATH) # Loads model
+    nn_evaluator = DNNEvaluator.create(CachedBoard(), NN_TYPE, MODEL_PATH)  # Loads model
 else:
     nn_evaluator = NNUEEvaluator.create(CachedBoard(), NN_TYPE, MODEL_PATH)
 
@@ -414,8 +417,17 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     kpi['nodes'] += 1
 
     check_time()
-    if TimeControl.stop_search:
+    # FIXED: Also honor soft_stop in quiescence to prevent time overruns
+    if TimeControl.stop_search or TimeControl.soft_stop:
         raise TimeoutError()
+
+    # -------- Hard depth limit to prevent search explosion --------
+    if q_depth > MAX_QS_DEPTH:
+        # Return static evaluation when QS goes too deep
+        if IS_NN_ENABLED:
+            return evaluate_nn(board), []
+        else:
+            return evaluate_material(board), []
 
     # -------- Draw detection --------
     if is_draw_by_repetition(board) or board.can_claim_fifty_moves():
@@ -516,6 +528,12 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
         moves_searched += 1
 
+        # Check time periodically to ensure responsive timeout
+        if moves_searched % 10 == 0:
+            check_time()
+            if TimeControl.stop_search or TimeControl.soft_stop:
+                raise TimeoutError()
+
         if score > best_score:  # ✅ Track best_score
             best_score = score
             best_pv = [move] + child_pv
@@ -569,7 +587,8 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     kpi['nodes'] += 1
 
     check_time()
-    if TimeControl.stop_search:
+    # FIXED: Also honor soft_stop in negamax for faster time response
+    if TimeControl.stop_search or TimeControl.soft_stop:
         raise TimeoutError()
 
     # -------- Draw detection --------
@@ -935,6 +954,41 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     nodes_start = kpi['nodes']
     nps = 0
 
+    print(
+        f"info string TimeControl: stop={TimeControl.stop_search}, soft={TimeControl.soft_stop}, time_limit={time_limit}",
+        flush=True)
+
+    # -------- Pre-search fallback: quick NN evaluation to ensure we have SOME move --------
+    # This prevents returning a bad move if the first move's quiescence takes too long
+    board_temp = CachedBoard(fen)
+    nn_evaluator.reset(board_temp)
+    legal_moves = board_temp.get_legal_moves_list()
+
+    if legal_moves:
+        # Quick NN evaluation of ALL moves as emergency fallback
+        # This ensures we have a reasonable move even if search times out immediately
+        emergency_best_move = legal_moves[0]
+        emergency_best_score = -MAX_SCORE
+        for move in legal_moves:
+            nn_evaluator.push_with_board(board_temp, move)
+            score = -evaluate_nn(board_temp)
+            board_temp.pop()
+            nn_evaluator.pop()
+            if score > emergency_best_score:
+                emergency_best_score = score
+                emergency_best_move = move
+        # This will be overwritten by real search results, but ensures we have something
+        best_move = emergency_best_move
+        best_score = emergency_best_score
+        best_pv = [emergency_best_move]
+        print(
+            f"info string Pre-search fallback: {len(legal_moves)} moves, best={emergency_best_move.uci()} score={emergency_best_score}cp",
+            flush=True)
+    else:
+        best_move = None
+        best_score = 0
+        best_pv = []
+
     # -------- Clear search tables & heuristics --------
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
@@ -950,9 +1004,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     board = CachedBoard(fen)
     nn_evaluator.reset(board)
 
-    best_move = None
-    best_score = 0
-    best_pv = []
+    # Note: best_move, best_score, best_pv already set by emergency fallback above
+    # Don't reset them here - the fallback ensures we always have SOME move
     pv_move = None
 
     last_depth_time = 0.0
@@ -1045,9 +1098,10 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     if alpha >= beta:
                         break
 
-                # If search was aborted, save partial result and exit
+                # If search was aborted, only save partial result if we have NO completed result
+                # FIXED: Don't overwrite a completed depth's result with an incomplete one
                 if search_aborted:
-                    if current_best_move is not None:
+                    if best_move is None and current_best_move is not None:
                         best_move = current_best_move
                         best_score = current_best_score
                         best_pv = current_best_pv
@@ -1066,8 +1120,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                 window *= 2
                 retries += 1
 
-                # Save partial result in case we need to stop
-                if current_best_move is not None:
+                # Save partial result ONLY if we have NO completed result yet
+                # FIXED: Don't overwrite a completed depth's result with an incomplete aspiration retry
+                if best_move is None and current_best_move is not None:
                     best_move = current_best_move
                     best_score = current_best_score
                     best_pv = current_best_pv
@@ -1103,16 +1158,20 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                         if score > alpha:
                             alpha = score
 
-                    # Save results from fallback search
-                    if current_best_move is not None:
+                    # Save results from fallback search ONLY if completed (not aborted)
+                    # Or if we have no result yet (best_move is None)
+                    if not search_aborted:
+                        if current_best_move is not None:
+                            best_move = current_best_move
+                            best_score = current_best_score
+                            best_pv = current_best_pv
+                            pv_move = best_move
+                        depth_completed = True
+                    elif best_move is None and current_best_move is not None:
+                        # Aborted but no previous result - save partial
                         best_move = current_best_move
                         best_score = current_best_score
                         best_pv = current_best_pv
-                        pv_move = best_move
-
-                    # Only mark complete if we didn't abort
-                    if not search_aborted:
-                        depth_completed = True
                     break
 
             # Record time taken for this depth (only if completed)
@@ -1136,19 +1195,43 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                 break
 
     except TimeoutError:
-        # Return last completed depth's best move
-        pass
+        # Return last completed depth's best move (or pre-search fallback)
+        elapsed = time.perf_counter() - TimeControl.start_time
+        print(
+            f"info string Search timeout after {elapsed:.2f}s, returning {'fallback' if best_pv and len(best_pv) == 1 and best_move == best_pv[0] else 'search result'}",
+            flush=True)
 
     if best_move is None:
+        print(f"info string WARNING: No move available (should not happen with pre-search fallback)!", flush=True)
         board = CachedBoard(fen)
         legal = board.get_legal_moves_list()
+
         if legal:
-            best_move = legal[0]
-            best_score = evaluate_material(board)
+            # Reset evaluator to current position for clean state
+            nn_evaluator.reset(board)
+
+            best_move = None
+            best_score = -MAX_SCORE
+
+            # Evaluate each legal move with NN (depth-0 search)
+            for move in legal:
+                nn_evaluator.push_with_board(board, move)
+                # score = -nn_evaluator.evaluate_centipawns(board)
+                score = -evaluate_nn(board)
+                board.pop()
+                nn_evaluator.pop()
+
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+
             best_pv = [best_move]
+            print(
+                f"info string Safety fallback evaluated {len(legal)} moves, best={best_move.uci()} score={best_score}cp",
+                flush=True)
         else:
             # No legal moves - game is over (checkmate or stalemate)
-            best_move = chess.Move.null()  # Or handle differently
+            best_move = chess.Move.null()
             best_score = evaluate_material(board)
             best_pv = []
 
@@ -1212,6 +1295,7 @@ def print_vars(var_names, module_name, local_scope=None):
 
 
 def dump_parameters():
+    print_vars(["L1_QUANTIZATION"], "nn_inference")
     print_vars([
         "MAX_MP_CORES",
         "IS_SHARED_TT_MP",
@@ -1221,6 +1305,7 @@ def dump_parameters():
         "IS_BLAS_ENABLED",
         "QS_DEPTH_MIN_NN_EVAL",
         "QS_DEPTH_MAX_NN_EVAL",
+        "MAX_QS_DEPTH",
         "DELTA_MAX_NN_EVAL",
         "STAND_PAT_MAX_NN_EVAL",
         "QS_TT_SUPPORTED",
