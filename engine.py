@@ -56,7 +56,7 @@ TACTICAL_QS_MAX_DEPTH = 4  # REDUCED from 5
 QS_TIME_CHECK_INTERVAL = 25  # REDUCED from 50 - Check time every N nodes in QS
 
 # Time budget allocation
-QS_TIME_BUDGET_FRACTION = 0.6  # NEW: Maximum fraction of time budget QS can consume
+QS_TIME_BUDGET_FRACTION = 0.35  # FIXED: Reduced from 0.6 - Maximum fraction of time budget QS can consume
 MIN_MAIN_SEARCH_RESERVE = 0.3  # NEW: Always reserve 30% of time for main search iterations
 
 ASPIRATION_WINDOW = 50  # INCREASED from 40 to reduce retries in tactical positions
@@ -172,6 +172,7 @@ _diag = {
     "shallow_search_total": 0,  # NEW: Bestmove at depth <= 3
     "tactical_extension": 0,  # Search extended due to score instability
     "min_depth_forced": 0,  # Forced deeper search due to MIN_ACCEPTABLE_DEPTH
+    "mid_depth_abort": 0,  # NEW: Search aborted mid-depth due to soft_stop
     "bestmove_depth_sum": 0,  # NEW: Sum of depths at bestmove (for average)
     "bestmove_count": 0,  # NEW: Count of bestmoves (for average)
 }
@@ -1304,7 +1305,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                 if TimeControl.stop_search:
                     search_aborted = True
                     break
-                if depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop:
+                # FIX: Only honor soft_stop mid-depth after reaching MIN_ACCEPTABLE_DEPTH
+                if TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH:
+                    _diag_warn("mid_depth_abort", f"Aborting depth {depth} mid-search (completed={max_completed_depth})")
                     search_aborted = True
                     break
 
@@ -1329,7 +1332,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                 nn_evaluator.pop()
 
                 # Check if search was aborted during negamax
-                if TimeControl.stop_search or (depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop):
+                # FIX: Only honor soft_stop after reaching MIN_ACCEPTABLE_DEPTH
+                if TimeControl.stop_search or (TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH):
                     search_aborted = True
                     # Still save this move's result if it's our only one
                     if current_best_move is None:
@@ -1397,7 +1401,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     if TimeControl.stop_search:
                         search_aborted = True
                         break
-                    if depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop:
+                    # FIX: Only honor soft_stop after reaching MIN_ACCEPTABLE_DEPTH
+                    if TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH:
                         search_aborted = True
                         break
 
@@ -1408,7 +1413,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     nn_evaluator.pop()
 
                     # Check if search was aborted during negamax
-                    if TimeControl.stop_search or (depth > MIN_NEGAMAX_DEPTH and TimeControl.soft_stop):
+                    # FIX: Only honor soft_stop after reaching MIN_ACCEPTABLE_DEPTH
+                    if TimeControl.stop_search or (TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH):
                         search_aborted = True
                         if current_best_move is None:
                             current_best_move = move
