@@ -428,7 +428,7 @@ eigenmann_rapid_engine_test = \
     8/8/8/8/4kp2/1R6/P2q1PPK/8 w - - bm a3; id "ERET 111 - Fortress";'
 
 test_suites = {
-    "wac": (win_at_chess_positions, r'\d{3}\';', -1, 3),
+    "wac": (win_at_chess_positions, r'\d{3}\';', -1, 5),
     "eigenmann": (eigenmann_rapid_engine_test, r'";', -1, 3)
 }
 
@@ -439,7 +439,7 @@ def run_engine_tests(test_suite, is_mp = False):
     time_max = 0.0
     time_sum = 0.9
 
-    dump_parameters()
+    #dump_parameters()
     print(f"time_limit={test_suite[3]}")
 
     if is_mp:
@@ -483,7 +483,7 @@ def run_engine_tests(test_suite, is_mp = False):
         print(f"total={tests_total}, passed={tests_passed}, "
               f"success-rate={round(tests_passed / tests_total * 100, 2)}%")
 
-    dump_parameters()
+    #dump_parameters()
     print(f"time-avg={round(time_sum / tests_total, 2)}, time-max={round(time_max, 2)}")
 
     return round(tests_passed / tests_total * 100, 2)

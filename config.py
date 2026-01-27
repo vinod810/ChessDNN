@@ -1,23 +1,42 @@
 import os
 
+# Track which parameters were overridden from environment
+_overridden_params = []
+
 def _env_int(key, default):
     """Get integer from environment variable."""
-    return int(os.environ.get(key, default))
+    val = os.environ.get(key)
+    if val is not None:
+        result = int(val)
+        _overridden_params.append((key, default, result))
+        return result
+    return default
 
 def _env_float(key, default):
     """Get float from environment variable."""
-    return float(os.environ.get(key, default))
+    val = os.environ.get(key)
+    if val is not None:
+        result = float(val)
+        _overridden_params.append((key, default, result))
+        return result
+    return default
 
 def _env_bool(key, default):
     """Get boolean from environment variable (accepts true/false/1/0/yes/no)."""
     val = os.environ.get(key)
     if val is None:
         return default
-    return val.lower() in ('true', '1', 'yes', 'on')
+    result = val.lower() in ('true', '1', 'yes', 'on')
+    _overridden_params.append((key, default, result))
+    return result
 
 def _env_str(key, default):
     """Get string from environment variable."""
-    return os.environ.get(key, default)
+    val = os.environ.get(key)
+    if val is not None:
+        _overridden_params.append((key, default, val))
+        return val
+    return default
 
 
 MAX_SCORE = _env_int('MAX_SCORE', 10_000)
@@ -49,7 +68,7 @@ QS_DELTA_MAX_NN_EVAL = _env_int('QS_DELTA_MAX_NN_EVAL', 75)  # Score difference,
 STAND_PAT_MAX_NN_EVAL = _env_int('STAND_PAT_MAX_NN_EVAL', 200)  # Absolute value of stand-pat, below it will trigger a NN evaluation.
 
 # Limit moves examined per QS ply to prevent explosion
-MAX_QS_DEPTH = _env_int('MAX_QS_DEPTH', 12)  # REDUCED from 15 to prevent search explosion
+MAX_QS_DEPTH = _env_int('MAX_QS_DEPTH', 10)  # REDUCED from 15 to prevent search explosion
 MAX_QS_MOVES_PER_PLY = _env_int('MAX_QS_MOVES_PER_PLY', 10)  # REDUCED from 12 - Maximum captures to examine at each QS depth
 MAX_QS_MOVES_DEEP = _env_int('MAX_QS_MOVES_DEEP', 5)  # REDUCED from 6
 MAX_QS_MOVES_TIME_CRITICAL = _env_int('MAX_QS_MOVES_TIME_CRITICAL', 5)  # FIX: Increased from 3 to 5
@@ -90,7 +109,11 @@ FUTILITY_PRUNING_ENABLED = _env_bool('FUTILITY_PRUNING_ENABLED', True)
 # Note: FUTILITY_MARGIN is a list - use JSON format in env var, e.g. "[0,150,300,450]"
 _futility_default = [0, 150, 300, 450]
 _futility_env = os.environ.get('FUTILITY_MARGIN')
-FUTILITY_MARGIN = eval(_futility_env) if _futility_env else _futility_default  # Margins by depth
+if _futility_env:
+    FUTILITY_MARGIN = eval(_futility_env)
+    _overridden_params.append(('FUTILITY_MARGIN', _futility_default, FUTILITY_MARGIN))
+else:
+    FUTILITY_MARGIN = _futility_default
 FUTILITY_MAX_DEPTH = _env_int('FUTILITY_MAX_DEPTH', 3)  # Only apply at depth <= 3
 
 # Razoring - drop into quiescence when far below alpha
@@ -98,7 +121,11 @@ RAZORING_ENABLED = _env_bool('RAZORING_ENABLED', False)
 # Note: RAZORING_MARGIN is a list - use JSON format in env var, e.g. "[0,125,250]"
 _razoring_default = [0, 125, 250]
 _razoring_env = os.environ.get('RAZORING_MARGIN')
-RAZORING_MARGIN = eval(_razoring_env) if _razoring_env else _razoring_default  # Margins by depth
+if _razoring_env:
+    RAZORING_MARGIN = eval(_razoring_env)
+    _overridden_params.append(('RAZORING_MARGIN', _razoring_default, RAZORING_MARGIN))
+else:
+    RAZORING_MARGIN = _razoring_default
 RAZORING_MAX_DEPTH = _env_int('RAZORING_MAX_DEPTH', 2)  # Only apply at depth <= 2
 
 # Time management
@@ -114,3 +141,25 @@ UNSTABLE_MIN_DEPTH = _env_int('UNSTABLE_MIN_DEPTH', 6)  # FIX V4: Minimum depth 
 MAX_NEGAMAX_DEPTH = _env_int('MAX_NEGAMAX_DEPTH', 20)
 MAX_SEARCH_TIME = _env_int('MAX_SEARCH_TIME', 30)
 MAX_TABLE_SIZE = _env_int('MAX_TABLE_SIZE', 200_000)
+
+
+# Print overridden parameters at module load time
+def print_overridden_config():
+    """Print all configuration parameters that were overridden via environment variables."""
+    if _overridden_params:
+        print("=" * 60)
+        print("CONFIGURATION OVERRIDES FROM ENVIRONMENT:")
+        print("=" * 60)
+        for key, default, new_value in _overridden_params:
+            print(f"  {key}: {default} -> {new_value}")
+        print("=" * 60)
+
+
+def get_overridden_params():
+    """Return list of (key, default, new_value) tuples for overridden params."""
+    return _overridden_params.copy()
+
+
+# Auto-print on import (can be disabled by setting QUIET_CONFIG=true)
+if not _env_bool('QUIET_CONFIG', False) and _overridden_params:
+    print_overridden_config()
