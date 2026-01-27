@@ -82,10 +82,11 @@ VALIDATION_SPLIT_RATIO = 0.01
 BATCH_SIZE = 16384  # SF 16384
 LEARNING_RATE = 8.75e-4  # SF 8.75e-4
 
-# Training mode selection (priority: SPARSE_COO > EMBEDDING_BAG > DENSE)
-SPARSE_COO = True  # Recommended: sparse COO tensors with dense gradients
+# Training mode selection (priority: CPP_LOADER > SPARSE_COO > EMBEDDING_BAG > DENSE)
+CPP_LOADER = True  # Best: C++ multi-threaded loader (requires libbatch_loader.so)
+SPARSE_COO = True  # Recommended fallback: sparse COO tensors with dense gradients
 EMBEDDING_BAG = False  # Alternative: EmbeddingBag with sparse gradients
-# If both are False, uses dense one-hot vectors (slow, high memory)
+# If all are False, uses dense one-hot vectors (slow, high memory)
 
 POSITIONS_PER_EPOCH = 100_000_000  # SF 100_000_000
 VALIDATION_SIZE = 1_000_000  # SF 1_000_000
@@ -849,6 +850,59 @@ def create_data_loader(
 
 
 # =============================================================================
+# C++ Batch Loader (High Performance)
+# =============================================================================
+
+_cpp_loader_available = None
+
+
+def is_cpp_loader_available() -> bool:
+    """Check if the C++ batch loader is available."""
+    global _cpp_loader_available
+    if _cpp_loader_available is not None:
+        return _cpp_loader_available
+
+    try:
+        from batch_loader import CppBatchLoader
+        _cpp_loader_available = True
+    except (ImportError, RuntimeError) as e:
+        _cpp_loader_available = False
+
+    return _cpp_loader_available
+
+
+def create_cpp_data_loader(
+        shard_files: List[str],
+        batch_size: int,
+        device: torch.device,
+        num_workers: int = NUM_WORKERS,
+        shuffle: bool = True,
+        max_positions: Optional[int] = None,
+        seed: Optional[int] = None,
+        num_features: int = NNUE_INPUT_SIZE
+):
+    """
+    Create a C++ batch loader for high-performance training.
+
+    This is significantly faster than the Python DataLoader, especially
+    on systems with limited CPU cores.
+    """
+    from batch_loader import CppBatchLoader
+
+    return CppBatchLoader(
+        shard_paths=shard_files,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        num_features=num_features,
+        shuffle=shuffle,
+        seed=seed,
+        device=device,
+        max_positions=max_positions,
+        tanh_scale=TANH_SCALE
+    )
+
+
+# =============================================================================
 # Training Loop
 # =============================================================================
 
@@ -865,6 +919,7 @@ class Trainer:
             lr: float = LEARNING_RATE,
             num_workers: int = NUM_WORKERS,
             prefetch_factor: int = PREFETCH_FACTOR,
+            use_cpp_loader: bool = CPP_LOADER,
             use_sparse_coo: bool = SPARSE_COO,
             use_embedding_bag: bool = EMBEDDING_BAG,
             val_ratio: float = VALIDATION_SPLIT_RATIO
@@ -877,6 +932,7 @@ class Trainer:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
+        self.use_cpp_loader = use_cpp_loader and is_cpp_loader_available() and nn_type.upper() == "NNUE"
         self.use_sparse_coo = use_sparse_coo
         self.use_embedding_bag = use_embedding_bag
 
@@ -886,8 +942,9 @@ class Trainer:
         self.criterion = nn.MSELoss()
 
         # Optimizer setup based on training mode
-        if use_sparse_coo:
-            # Sparse COO uses dense gradients - standard Adam works!
+        # C++ loader and sparse COO both use dense gradients
+        if self.use_cpp_loader or use_sparse_coo:
+            # Dense gradients - standard Adam works!
             self.optimizer = optim.Adam(model.parameters(), lr=lr)
             self.optimizer_dense = None
         elif use_embedding_bag:
@@ -1010,30 +1067,49 @@ class Trainer:
         expected_batches = positions_per_epoch // self.batch_size
         report_interval = max(1, expected_batches // 100)
 
-        loader = create_data_loader(
-            self.train_shards,
-            self.nn_type,
-            self.batch_size,
-            self.device,
-            shuffle=True,
-            max_positions=positions_per_epoch,
-            num_workers=self.num_workers,
-            use_sparse_coo=self.use_sparse_coo,
-            use_embedding_bag=self.use_embedding_bag,
-            prefetch_factor=self.prefetch_factor,
-            seed=self.current_epoch
-        )
+        # Create appropriate loader
+        if self.use_cpp_loader:
+            loader = create_cpp_data_loader(
+                self.train_shards,
+                self.batch_size,
+                self.device,
+                num_workers=self.num_workers,
+                shuffle=True,
+                max_positions=positions_per_epoch,
+                seed=self.current_epoch,
+                num_features=NNUE_INPUT_SIZE
+            )
+        else:
+            loader = create_data_loader(
+                self.train_shards,
+                self.nn_type,
+                self.batch_size,
+                self.device,
+                shuffle=True,
+                max_positions=positions_per_epoch,
+                num_workers=self.num_workers,
+                use_sparse_coo=self.use_sparse_coo,
+                use_embedding_bag=self.use_embedding_bag,
+                prefetch_factor=self.prefetch_factor,
+                seed=self.current_epoch
+            )
 
         start_time = time.time()
 
         for batch in loader:
-            batch = self._move_batch_to_device(batch)
+            # C++ loader returns tensors already on device
+            if not self.use_cpp_loader:
+                batch = self._move_batch_to_device(batch)
 
             positions_seen += self.batch_size
             if positions_seen > positions_per_epoch:
                 break
 
-            if self.nn_type == "DNN":
+            # C++ loader always returns sparse COO format
+            if self.use_cpp_loader:
+                white_sparse, black_sparse, stm, targets = batch
+                outputs = self.model(white_sparse, black_sparse, stm)
+            elif self.nn_type == "DNN":
                 outputs, targets = self._forward_dnn(batch)
             else:
                 outputs, targets = self._forward_nnue(batch)
@@ -1080,28 +1156,46 @@ class Trainer:
         num_batches = 0
         positions_seen = 0
 
-        loader = create_data_loader(
-            self.val_shards,
-            self.nn_type,
-            self.batch_size,
-            self.device,
-            shuffle=False,
-            max_positions=max_positions,
-            num_workers=self.num_workers,
-            use_sparse_coo=self.use_sparse_coo,
-            use_embedding_bag=self.use_embedding_bag,
-            prefetch_factor=self.prefetch_factor
-        )
+        # Create appropriate loader
+        if self.use_cpp_loader:
+            loader = create_cpp_data_loader(
+                self.val_shards,
+                self.batch_size,
+                self.device,
+                num_workers=self.num_workers,
+                shuffle=False,
+                max_positions=max_positions,
+                num_features=NNUE_INPUT_SIZE
+            )
+        else:
+            loader = create_data_loader(
+                self.val_shards,
+                self.nn_type,
+                self.batch_size,
+                self.device,
+                shuffle=False,
+                max_positions=max_positions,
+                num_workers=self.num_workers,
+                use_sparse_coo=self.use_sparse_coo,
+                use_embedding_bag=self.use_embedding_bag,
+                prefetch_factor=self.prefetch_factor
+            )
 
         with torch.no_grad():
             for batch in loader:
-                batch = self._move_batch_to_device(batch)
+                # C++ loader returns tensors already on device
+                if not self.use_cpp_loader:
+                    batch = self._move_batch_to_device(batch)
 
                 positions_seen += self.batch_size
                 if positions_seen > max_positions:
                     break
 
-                if self.nn_type == "DNN":
+                # C++ loader always returns sparse COO format
+                if self.use_cpp_loader:
+                    white_sparse, black_sparse, stm, targets = batch
+                    outputs = self.model(white_sparse, black_sparse, stm)
+                elif self.nn_type == "DNN":
                     outputs, targets = self._forward_dnn(batch)
                 else:
                     outputs, targets = self._forward_nnue(batch)
@@ -1393,25 +1487,34 @@ Performance Notes:
     # Detect device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
-    print(f"DataLoader workers: {args.num_workers} (multiprocessing)")
-    print(f"Prefetch factor: {args.prefetch_factor} (buffer = {args.num_workers * args.prefetch_factor} batches)")
+    print(f"DataLoader workers: {args.num_workers}")
+    print(f"Prefetch factor: {args.prefetch_factor}")
     print(f"Pin memory: {device.type == 'cuda'}")
 
-    # Determine training mode
-    use_sparse_coo = SPARSE_COO and args.nn_type == "NNUE"
-    use_embedding_bag = EMBEDDING_BAG and not use_sparse_coo
+    # Determine training mode (priority: CPP_LOADER > SPARSE_COO > EMBEDDING_BAG > DENSE)
+    use_cpp_loader = CPP_LOADER and args.nn_type == "NNUE" and is_cpp_loader_available()
+    use_sparse_coo = SPARSE_COO and args.nn_type == "NNUE" and not use_cpp_loader
+    use_embedding_bag = EMBEDDING_BAG and not use_sparse_coo and not use_cpp_loader
 
     # Print training mode
-    if use_sparse_coo:
-        print(f"Training mode: Sparse COO tensors (recommended - dense gradients)")
+    if use_cpp_loader:
+        print(f"Training mode: C++ batch loader (high performance)")
+    elif use_sparse_coo:
+        print(f"Training mode: Sparse COO tensors (dense gradients)")
     elif use_embedding_bag:
         print(f"Training mode: EmbeddingBag (sparse gradients - may have convergence issues)")
     else:
         print(f"Training mode: Dense one-hot vectors (high memory usage)")
 
+    # Show fallback info if C++ loader requested but not available
+    if CPP_LOADER and args.nn_type == "NNUE" and not is_cpp_loader_available():
+        print(f"Note: C++ loader not available, falling back to Python loader")
+        print(f"      Build with: cd cpp_batch_loader && ./build.sh")
+
     # Create training model based on mode
+    # C++ loader uses sparse COO format, so use NNUENetworkSparseCOO
     if args.nn_type == "NNUE":
-        if use_sparse_coo:
+        if use_cpp_loader or use_sparse_coo:
             model = NNUENetworkSparseCOO(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
         elif use_embedding_bag:
             model = NNUENetworkSparse(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
@@ -1436,6 +1539,7 @@ Performance Notes:
         lr=args.lr,
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
+        use_cpp_loader=use_cpp_loader,
         use_sparse_coo=use_sparse_coo,
         use_embedding_bag=use_embedding_bag,
         val_ratio=VALIDATION_SPLIT_RATIO

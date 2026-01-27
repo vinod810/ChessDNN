@@ -4,12 +4,17 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="NN optimization">
-      <change afterPath="$PROJECT_DIR$/nn_train_coo.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Pytorch COO training">
+      <change afterPath="$PROJECT_DIR$/batch_loader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/nn_build_cpp/CMakeLists.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/nn_build_cpp/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/nn_build_cpp/batch_loader.cpp" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/nn_build_cpp/batch_loader.h" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/nn_build_cpp/build.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_ops_fallback.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_ops_fallback.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_ops_fast.pyx" beforeDir="false" afterPath="$PROJECT_DIR$/nn_ops_fast.pyx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -308,14 +313,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00134" summary="FUTILITY_PRUNING_ENABLED WAC 236/300">
-      <option name="closed" value="true" />
-      <created>1768760335066</created>
-      <option name="number" value="00134" />
-      <option name="presentableId" value="LOCAL-00134" />
-      <option name="project" value="LOCAL" />
-      <updated>1768760335066</updated>
-    </task>
     <task id="LOCAL-00135" summary="FUTILITY_PRUNING_ENABLED WAC 236/300">
       <option name="closed" value="true" />
       <created>1768778227959</created>
@@ -524,7 +521,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769522047449</updated>
     </task>
-    <option name="localTasksCounter" value="161" />
+    <task id="LOCAL-00161" summary="Pytorch COO training">
+      <option name="closed" value="true" />
+      <created>1769533970385</created>
+      <option name="number" value="00161" />
+      <option name="presentableId" value="LOCAL-00161" />
+      <option name="project" value="LOCAL" />
+      <updated>1769533970385</updated>
+    </task>
+    <option name="localTasksCounter" value="162" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -539,7 +544,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="pre-data - train split" />
     <MESSAGE value="NN vs Stockfish test" />
     <MESSAGE value="Fixed bugs in DNN data. Refactoring. Untested code." />
     <MESSAGE value="Fixed bugs in DNN data. Refactoring. Partially tested code." />
@@ -564,7 +568,8 @@
     <MESSAGE value="About 75% win rate again SF2300" />
     <MESSAGE value="Config via bash" />
     <MESSAGE value="NN optimization" />
-    <option name="LAST_COMMIT_MESSAGE" value="NN optimization" />
+    <MESSAGE value="Pytorch COO training" />
+    <option name="LAST_COMMIT_MESSAGE" value="Pytorch COO training" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
