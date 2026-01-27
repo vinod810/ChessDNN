@@ -361,7 +361,8 @@ cpdef float nnue_evaluate_incremental_int16(
     Quantization scheme:
     - Input (hidden_buf) is in [0, 1], quantized to [0, 32767] as INT16
     - Weights are pre-quantized to [-32767, 32767] as INT16
-    - Accumulation is done in INT32 to prevent overflow
+    - Accumulation is done in INT64 to prevent overflow
+      (INT32 would overflow: 512 * 32767 * 32767 > 2^31)
     - Result is dequantized using pre-computed combined scale
 
     # TODO: add actual SIMD intrinsics via cython.parallel or direct C calls
@@ -373,7 +374,9 @@ cpdef float nnue_evaluate_incremental_int16(
     cdef Py_ssize_t concat_size = hidden_size * 2
     cdef Py_ssize_t l1_size = l1_bias.shape[0]
     cdef Py_ssize_t l2_size = l2_bias.shape[0]
-    cdef INT32_t sum_q
+    # FIX: Use INT64 for accumulator to prevent overflow with INT16 quantization
+    # Worst case: 512 * 32767 * 32767 = ~549 billion, exceeds INT32_MAX (~2.1 billion)
+    cdef INT64_t sum_q
     cdef float sum_val, output, val
 
     with nogil:
@@ -413,11 +416,12 @@ cpdef float nnue_evaluate_incremental_int16(
             else:
                 hidden_buf_q[i] = <INT16_t>(val + 0.5)  # Round to nearest
 
-        # L1: Quantized matmul with INT32 accumulation
+        # L1: Quantized matmul with INT64 accumulation (prevents overflow)
         for i in range(l1_size):
             sum_q = 0
             for j in range(concat_size):
-                sum_q = sum_q + <INT32_t>hidden_buf_q[j] * <INT32_t>l1_weight_q[i, j]
+                # Cast to INT64 before multiplication to prevent overflow
+                sum_q = sum_q + <INT64_t>hidden_buf_q[j] * <INT64_t>l1_weight_q[i, j]
 
             # Dequantize and add bias
             sum_val = <float>sum_q * l1_combined_scale + l1_bias[i]

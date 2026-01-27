@@ -198,7 +198,8 @@ def nnue_evaluate_incremental_int16(
     Quantization scheme:
     - Input (hidden_buf) is in [0, 1], quantized to [0, 32767] as INT16
     - Weights are pre-quantized to [-32767, 32767] as INT16
-    - Accumulation is done in INT32 to prevent overflow
+    - Accumulation is done in INT64 to prevent overflow
+      (INT32 would overflow: 512 * 32767 * 32767 > 2^31)
     - Result is dequantized using pre-computed combined scale
     """
     # TODO: store accumulators in quantized form for additional speedup
@@ -221,8 +222,9 @@ def nnue_evaluate_incremental_int16(
     np.clip(np.round(hidden_buf * 32767.0), 0, 32767, out=hidden_buf)
     hidden_buf_q[:] = hidden_buf.astype(np.int16)
 
-    # L1: Quantized matmul with INT32 accumulation
-    result_q = np.dot(hidden_buf_q.astype(np.int32), l1_weight_q.T.astype(np.int32))
+    # L1: Quantized matmul with INT64 accumulation (FIX: prevents overflow)
+    # Worst case: 512 * 32767 * 32767 = ~549 billion, exceeds INT32_MAX (~2.1 billion)
+    result_q = np.dot(hidden_buf_q.astype(np.int64), l1_weight_q.T.astype(np.int64))
 
     # Dequantize and add bias
     l1_buf[:] = result_q.astype(np.float32) * l1_combined_scale + l1_bias

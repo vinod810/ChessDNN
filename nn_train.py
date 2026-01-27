@@ -2,11 +2,11 @@
 """
 nn_train.py - Train NNUE or DNN models from pre-processed binary shards.
 
-MULTIPROCESSING VERSION:
+MULTIPROCESSING VERSION WITH SPARSE COO TENSOR SUPPORT:
 - Uses PyTorch DataLoader with multiprocessing for true parallel data loading
 - pin_memory=True for faster GPU transfer
 - persistent_workers=True to avoid worker restart overhead
-- Bypasses Python GIL limitations for CPU-bound parsing
+- Sparse COO tensors for memory-efficient NNUE training with dense gradients
 
 This script reads binary shard files created by prepare_data.py and trains
 neural network models for chess position evaluation.
@@ -16,7 +16,9 @@ Usage:
     python nn_train.py --nn-type DNN --data-dir data/dnn --resume model/dnn.pt
 
 Features:
-    - Efficient sparse feature handling using index-based accumulation
+    - Sparse COO tensor training (recommended for NNUE - memory efficient with dense gradients)
+    - EmbeddingBag sparse training (alternative, may have convergence issues)
+    - Dense one-hot training (slow, high memory, but reliable convergence)
     - Parallel data loading with multiprocessing (not threading)
     - Prefetch queue for efficient GPU utilization
     - Shuffling across multiple shards for better training
@@ -33,6 +35,22 @@ Binary shard format (created by prepare_data.py):
                      [num_black:uint8][black:uint16[]]
     NNUE Diagnostic: [0xFF][score:int16][stm:uint8][num_white:uint8][white:uint16[]]
                      [num_black:uint8][black:uint16[]][fen_length:uint8][fen_bytes]
+
+Training Modes:
+    SPARSE_COO (recommended): Uses sparse COO tensors with nn.Linear
+        - Memory efficient (~2MB per batch vs 1.3GB for dense)
+        - Dense gradients (good convergence)
+        - Standard Adam optimizer
+
+    EMBEDDING_BAG: Uses nn.EmbeddingBag with sparse gradients
+        - Memory efficient
+        - Sparse gradients (may have convergence issues)
+        - Requires SparseAdam optimizer
+
+    DENSE: Uses explicit one-hot tensors
+        - Very high memory usage
+        - Dense gradients (good convergence)
+        - Standard Adam optimizer
 """
 
 import argparse
@@ -62,11 +80,13 @@ from config import MAX_SCORE, TANH_SCALE
 # Training configuration
 VALIDATION_SPLIT_RATIO = 0.01
 BATCH_SIZE = 16384  # SF 16384
-LEARNING_RATE_DENSE = 8.75e-4  # SF 8.75e-4
 LEARNING_RATE = 8.75e-4  # SF 8.75e-4
-# Embedding mode: True = use EmbeddingBag (sparse), False = use one-hot dense vectors
-EMBEDDING_BAG = False
-# Adjusted learning rate for dense mode (one-hot vectors may need different tuning)
+
+# Training mode selection (priority: SPARSE_COO > EMBEDDING_BAG > DENSE)
+SPARSE_COO = True  # Recommended: sparse COO tensors with dense gradients
+EMBEDDING_BAG = False  # Alternative: EmbeddingBag with sparse gradients
+# If both are False, uses dense one-hot vectors (slow, high memory)
+
 POSITIONS_PER_EPOCH = 100_000_000  # SF 100_000_000
 VALIDATION_SIZE = 1_000_000  # SF 1_000_000
 EPOCHS = 600  # SF 600
@@ -89,15 +109,182 @@ MAX_FEATURES_PER_POSITION = 32  # Chess has max 30 non-king pieces
 
 
 # =============================================================================
-# Sparse-Efficient Network Implementations for Training
+# Sparse COO Tensor Utilities
+# =============================================================================
+
+def create_sparse_coo_features(
+        batch_indices: List[List[int]],
+        batch_size: int,
+        num_features: int,
+        device: torch.device = None
+) -> torch.Tensor:
+    """
+    Create a sparse COO tensor from a list of feature indices.
+
+    This follows the nnue-pytorch approach:
+    1. Create 2D indices tensor: [[position_indices], [feature_indices]]
+    2. Values are all 1.0 (binary features)
+    3. Mark tensor as coalesced (indices are sorted)
+
+    Args:
+        batch_indices: List of lists, where batch_indices[i] contains the
+                       active feature indices for position i
+        batch_size: Number of positions in batch
+        num_features: Total number of possible features (e.g., 40960)
+        device: Target device (CPU or CUDA)
+
+    Returns:
+        Sparse COO tensor of shape [batch_size, num_features]
+    """
+    # Count total active features
+    total_active = sum(len(indices) for indices in batch_indices)
+
+    if total_active == 0:
+        # Edge case: no active features
+        indices = torch.empty((2, 0), dtype=torch.long)
+        values = torch.empty(0, dtype=torch.float32)
+    else:
+        # Pre-allocate arrays for indices
+        position_indices = np.empty(total_active, dtype=np.int64)
+        feature_indices = np.empty(total_active, dtype=np.int64)
+
+        offset = 0
+        for pos_idx, features in enumerate(batch_indices):
+            n = len(features)
+            if n > 0:
+                position_indices[offset:offset + n] = pos_idx
+                # Sort feature indices within each position (required for coalesced)
+                sorted_features = sorted(features)
+                feature_indices[offset:offset + n] = sorted_features
+                offset += n
+
+        # Create indices tensor: shape [2, total_active]
+        indices = torch.tensor(
+            np.stack([position_indices, feature_indices], axis=0),
+            dtype=torch.long
+        )
+
+        # Values are all 1.0 (binary features)
+        values = torch.ones(total_active, dtype=torch.float32)
+
+    # Create sparse COO tensor
+    # is_coalesced=True tells PyTorch our indices are already sorted and unique,
+    # which skips the expensive coalescing step
+    sparse_tensor = torch.sparse_coo_tensor(
+        indices,
+        values,
+        size=(batch_size, num_features),
+        is_coalesced=True
+    )
+
+    if device is not None:
+        sparse_tensor = sparse_tensor.to(device)
+
+    return sparse_tensor
+
+
+# =============================================================================
+# Sparse COO Network Implementation (Recommended for NNUE)
+# =============================================================================
+
+class NNUENetworkSparseCOO(nn.Module):
+    """
+    NNUE Network using sparse COO tensor inputs.
+
+    This uses standard nn.Linear layers which support sparse input tensors.
+    The key advantage over EmbeddingBag is that gradients are DENSE, which
+    typically leads to better convergence.
+
+    Architecture (matches standard NNUE):
+    - Feature transformer: [input_size] -> [hidden_size] (shared for both perspectives)
+    - Concatenate white + black accumulators based on side-to-move: [hidden_size * 2]
+    - Hidden layers: [hidden_size * 2] -> 32 -> 32 -> 1
+    """
+
+    def __init__(self, input_size: int = NNUE_INPUT_SIZE, hidden_size: int = NNUE_HIDDEN_SIZE):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+
+        # Feature transformer - standard Linear layer (supports sparse inputs!)
+        self.ft = nn.Linear(input_size, hidden_size)
+
+        # Output layers (dense)
+        self.l1 = nn.Linear(hidden_size * 2, 32)
+        self.l2 = nn.Linear(32, 32)
+        self.l3 = nn.Linear(32, 1)
+
+    def forward(self, white_features: torch.Tensor, black_features: torch.Tensor,
+                stm: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass with sparse COO tensor inputs.
+
+        Args:
+            white_features: Sparse COO tensor [batch_size, input_size] - white's perspective
+            black_features: Sparse COO tensor [batch_size, input_size] - black's perspective
+            stm: Dense tensor [batch_size, 1] - side to move (1.0=white, 0.0=black)
+
+        Returns:
+            Dense tensor [batch_size, 1] - evaluation output
+        """
+        # Feature transformer (nn.Linear handles sparse inputs automatically)
+        w = self.ft(white_features)  # [batch, hidden_size]
+        b = self.ft(black_features)  # [batch, hidden_size]
+
+        # Clipped ReLU activation [0, 1]
+        w = torch.clamp(w, 0.0, 1.0)
+        b = torch.clamp(b, 0.0, 1.0)
+
+        # Concatenate based on side to move using interpolation trick
+        # stm=1 (white to move): [white_accum, black_accum]
+        # stm=0 (black to move): [black_accum, white_accum]
+        accumulator = (stm * torch.cat([w, b], dim=1)) + ((1 - stm) * torch.cat([b, w], dim=1))
+
+        # Output layers with clipped ReLU
+        x = torch.clamp(self.l1(accumulator), 0.0, 1.0)
+        x = torch.clamp(self.l2(x), 0.0, 1.0)
+        x = self.l3(x)
+
+        return x
+
+    def to_inference_model(self) -> dict:
+        """Convert to state dict compatible with nn_inference.NNUENetwork."""
+        return {
+            'ft.weight': self.ft.weight.data,
+            'ft.bias': self.ft.bias.data,
+            'l1.weight': self.l1.weight.data,
+            'l1.bias': self.l1.bias.data,
+            'l2.weight': self.l2.weight.data,
+            'l2.bias': self.l2.bias.data,
+            'l3.weight': self.l3.weight.data,
+            'l3.bias': self.l3.bias.data,
+        }
+
+    def load_from_inference_model(self, state_dict: dict):
+        """Load weights from standard NNUENetwork state dict."""
+        self.ft.weight.data = state_dict['ft.weight']
+        self.ft.bias.data = state_dict['ft.bias']
+        self.l1.weight.data = state_dict['l1.weight']
+        self.l1.bias.data = state_dict['l1.bias']
+        self.l2.weight.data = state_dict['l2.weight']
+        self.l2.bias.data = state_dict['l2.bias']
+        self.l3.weight.data = state_dict['l3.weight']
+        self.l3.bias.data = state_dict['l3.bias']
+
+
+# =============================================================================
+# EmbeddingBag Network Implementation (Alternative sparse approach)
 # =============================================================================
 
 class NNUENetworkSparse(nn.Module):
     """
-    NNUE Network optimized for sparse training.
+    NNUE Network optimized for sparse training using EmbeddingBag.
 
     Uses EmbeddingBag for efficient sparse feature accumulation in the first layer.
     This avoids creating huge dense tensors (batch_size × 40960).
+
+    Note: This approach uses SPARSE gradients which may cause convergence issues.
+    Consider using NNUENetworkSparseCOO instead for better convergence.
 
     The architecture matches NNUENetwork from nn_inference.py:
     - Input: 40960 sparse features -> 256 hidden (via EmbeddingBag)
@@ -110,7 +297,6 @@ class NNUENetworkSparse(nn.Module):
         self.hidden_size = hidden_size
 
         # First layer as EmbeddingBag (sparse-efficient)
-        # EmbeddingBag computes: sum of embeddings for given indices + bias
         self.ft_weight = nn.EmbeddingBag(input_size, hidden_size, mode='sum', sparse=True)
         self.ft_bias = nn.Parameter(torch.zeros(hidden_size))
 
@@ -142,7 +328,6 @@ class NNUENetworkSparse(nn.Module):
         black_hidden = torch.clamp(black_hidden, 0, 1)
 
         # Concatenate based on side to move
-        # stm=1 (white): [white, black], stm=0 (black): [black, white]
         stm_expanded = stm.unsqueeze(-1) if stm.dim() == 1 else stm
         hidden = torch.where(
             stm_expanded.bool(),
@@ -157,10 +342,7 @@ class NNUENetworkSparse(nn.Module):
         return x
 
     def to_inference_model(self):
-        """
-        Convert to the standard NNUENetwork format for inference.
-        Returns a state dict compatible with nn_inference.NNUENetwork.
-        """
+        """Convert to state dict compatible with nn_inference.NNUENetwork."""
         state_dict = {
             'ft.weight': self.ft_weight.weight.data.t(),  # EmbeddingBag is (num_emb, emb_dim), Linear is (out, in)
             'ft.bias': self.ft_bias.data,
@@ -214,31 +396,16 @@ class DNNNetworkSparse(nn.Module):
         self.l4 = nn.Linear(hidden_layers[2], 1)
 
     def forward(self, indices, offsets):
-        """
-        Forward pass with sparse indices.
-
-        Args:
-            indices: 1D tensor of all feature indices (concatenated)
-            offsets: 1D tensor of offsets into indices for each sample
-
-        Returns:
-            (batch_size, 1) output tensor
-        """
-        # Compute first layer activation using EmbeddingBag
+        """Forward pass with sparse indices."""
         x = self.l1_weight(indices, offsets) + self.l1_bias
         x = torch.clamp(x, 0, 1)
-
-        # Dense layers with clipped ReLU
         x = torch.clamp(self.l2(x), 0, 1)
         x = torch.clamp(self.l3(x), 0, 1)
         x = self.l4(x)
         return x
 
     def to_inference_model(self):
-        """
-        Convert to the standard DNNNetwork format for inference.
-        Returns a state dict compatible with nn_inference.DNNNetwork.
-        """
+        """Convert to state dict compatible with nn_inference.DNNNetwork."""
         state_dict = {
             'l1.weight': self.l1_weight.weight.data.t(),
             'l1.bias': self.l1_bias.data,
@@ -289,26 +456,13 @@ class NNUENetworkDense(nn.Module):
         self.l3 = nn.Linear(32, 1)
 
     def forward(self, white_onehot, black_onehot, stm):
-        """
-        Forward pass with dense one-hot vectors.
-
-        Args:
-            white_onehot: (batch_size, input_size) dense one-hot tensor
-            black_onehot: (batch_size, input_size) dense one-hot tensor
-            stm: (batch_size, 1) tensor, 1.0 for white to move, 0.0 for black
-
-        Returns:
-            (batch_size, 1) output tensor
-        """
-        # Compute first layer activations
+        """Forward pass with dense one-hot vectors."""
         white_hidden = self.ft(white_onehot)
         black_hidden = self.ft(black_onehot)
 
-        # Clipped ReLU [0, 1]
         white_hidden = torch.clamp(white_hidden, 0, 1)
         black_hidden = torch.clamp(black_hidden, 0, 1)
 
-        # Concatenate based on side to move
         stm_expanded = stm.unsqueeze(-1) if stm.dim() == 1 else stm
         hidden = torch.where(
             stm_expanded.bool(),
@@ -316,7 +470,6 @@ class NNUENetworkDense(nn.Module):
             torch.cat([black_hidden, white_hidden], dim=-1)
         )
 
-        # Dense layers with clipped ReLU
         x = torch.clamp(self.l1(hidden), 0, 1)
         x = torch.clamp(self.l2(x), 0, 1)
         x = self.l3(x)
@@ -324,7 +477,7 @@ class NNUENetworkDense(nn.Module):
 
     def to_inference_model(self):
         """Convert to inference format."""
-        state_dict = {
+        return {
             'ft.weight': self.ft.weight.data,
             'ft.bias': self.ft.bias.data,
             'l1.weight': self.l1.weight.data,
@@ -334,7 +487,6 @@ class NNUENetworkDense(nn.Module):
             'l3.weight': self.l3.weight.data,
             'l3.bias': self.l3.bias.data,
         }
-        return state_dict
 
     def load_from_inference_model(self, state_dict):
         """Load weights from standard NNUENetwork state dict."""
@@ -349,11 +501,7 @@ class NNUENetworkDense(nn.Module):
 
 
 class DNNNetworkDense(nn.Module):
-    """
-    DNN Network using dense one-hot vectors instead of EmbeddingBag.
-
-    Uses standard Linear layers throughout.
-    """
+    """DNN Network using dense one-hot vectors instead of EmbeddingBag."""
 
     def __init__(self, input_size=DNN_INPUT_SIZE, hidden_layers=None):
         super(DNNNetworkDense, self).__init__()
@@ -363,22 +511,13 @@ class DNNNetworkDense(nn.Module):
         self.input_size = input_size
         self.hidden_layers = hidden_layers
 
-        # All layers as standard Linear
         self.l1 = nn.Linear(input_size, hidden_layers[0])
         self.l2 = nn.Linear(hidden_layers[0], hidden_layers[1])
         self.l3 = nn.Linear(hidden_layers[1], hidden_layers[2])
         self.l4 = nn.Linear(hidden_layers[2], 1)
 
     def forward(self, onehot):
-        """
-        Forward pass with dense one-hot vector.
-
-        Args:
-            onehot: (batch_size, input_size) dense one-hot tensor
-
-        Returns:
-            (batch_size, 1) output tensor
-        """
+        """Forward pass with dense one-hot vector."""
         x = self.l1(onehot)
         x = torch.clamp(x, 0, 1)
         x = torch.clamp(self.l2(x), 0, 1)
@@ -388,7 +527,7 @@ class DNNNetworkDense(nn.Module):
 
     def to_inference_model(self):
         """Convert to inference format."""
-        state_dict = {
+        return {
             'l1.weight': self.l1.weight.data,
             'l1.bias': self.l1.bias.data,
             'l2.weight': self.l2.weight.data,
@@ -398,7 +537,6 @@ class DNNNetworkDense(nn.Module):
             'l4.weight': self.l4.weight.data,
             'l4.bias': self.l4.bias.data,
         }
-        return state_dict
 
     def load_from_inference_model(self, state_dict):
         """Load weights from standard DNNNetwork state dict."""
@@ -423,12 +561,6 @@ class ShardIterableDataset(IterableDataset):
     This dataset is designed for use with PyTorch's DataLoader with num_workers > 0.
     Each worker process gets a subset of the shards to read, enabling true parallel
     data loading that bypasses the Python GIL.
-
-    Key features:
-    - Each worker reads different shards (no overlap)
-    - Streaming decompression to minimize memory usage
-    - Shuffling within and across shards
-    - Supports both DNN and NNUE formats
     """
 
     def __init__(
@@ -451,18 +583,13 @@ class ShardIterableDataset(IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            # Single-process loading
             shards = self.shard_files.copy()
         else:
-            # Multi-process loading - split shards among workers
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
-
-            # Each worker gets every num_workers-th shard
             shards = self.shard_files[worker_id::num_workers]
 
         if self.shuffle:
-            # Use deterministic shuffle based on seed + worker_id for reproducibility
             worker_id = worker_info.id if worker_info else 0
             rng = random.Random(self.seed + worker_id)
             shards = shards.copy()
@@ -486,10 +613,8 @@ class ShardIterableDataset(IterableDataset):
         shards = self._get_worker_shards()
         positions_yielded = 0
 
-        # Calculate per-worker max if specified
         worker_info = torch.utils.data.get_worker_info()
         if self.max_positions and worker_info:
-            # Divide max_positions among workers
             per_worker_max = self.max_positions // worker_info.num_workers
         else:
             per_worker_max = self.max_positions
@@ -507,22 +632,51 @@ class ShardIterableDataset(IterableDataset):
                 continue
 
 
-def collate_dnn_sparse(batch: List[Dict]) -> Tuple:
+# =============================================================================
+# Collate Functions for Different Training Modes
+# =============================================================================
+
+def collate_nnue_sparse_coo(batch: List[Dict]) -> Tuple:
     """
-    Collate function for DNN sparse (EmbeddingBag) batches.
+    Collate function for NNUE batches using sparse COO tensors.
 
-    Args:
-        batch: List of position dicts with 'score_cp' and 'features'
-
-    Returns:
-        (indices, offsets, targets) tensors (CPU, for pin_memory transfer)
+    This creates sparse COO tensors with dense gradients - recommended approach.
     """
     batch_size = len(batch)
 
-    # Calculate total features
+    # Extract feature lists and other data
+    white_features_list = []
+    black_features_list = []
+    stm = np.empty(batch_size, dtype=np.float32)
+    scores = np.empty(batch_size, dtype=np.float32)
+
+    for i, pos in enumerate(batch):
+        white_features_list.append(pos['white_features'])
+        black_features_list.append(pos['black_features'])
+        stm[i] = pos['stm']
+        scores[i] = pos['score_cp']
+
+    # Create sparse COO tensors
+    white_sparse = create_sparse_coo_features(
+        white_features_list, batch_size, NNUE_INPUT_SIZE
+    )
+    black_sparse = create_sparse_coo_features(
+        black_features_list, batch_size, NNUE_INPUT_SIZE
+    )
+
+    # Create dense tensors for stm and targets
+    targets = np.tanh(scores / TANH_SCALE).astype(np.float32)
+    stm_t = torch.from_numpy(stm).unsqueeze(1)
+    targets_t = torch.from_numpy(targets).unsqueeze(1)
+
+    return white_sparse, black_sparse, stm_t, targets_t
+
+
+def collate_dnn_sparse(batch: List[Dict]) -> Tuple:
+    """Collate function for DNN sparse (EmbeddingBag) batches."""
+    batch_size = len(batch)
     total_features = sum(len(pos['features']) for pos in batch)
 
-    # Pre-allocate arrays
     all_features = np.empty(total_features, dtype=np.int64)
     offsets = np.empty(batch_size, dtype=np.int64)
     scores = np.empty(batch_size, dtype=np.float32)
@@ -537,10 +691,8 @@ def collate_dnn_sparse(batch: List[Dict]) -> Tuple:
             all_features[offset + j] = f
         offset += len(features)
 
-    # Compute targets
     targets = np.tanh(scores / TANH_SCALE)
 
-    # Convert to tensors (stay on CPU for pin_memory)
     indices_t = torch.from_numpy(all_features)
     offsets_t = torch.from_numpy(offsets)
     targets_t = torch.from_numpy(targets).unsqueeze(1)
@@ -549,18 +701,9 @@ def collate_dnn_sparse(batch: List[Dict]) -> Tuple:
 
 
 def collate_dnn_dense(batch: List[Dict]) -> Tuple:
-    """
-    Collate function for DNN dense (one-hot) batches.
-
-    Args:
-        batch: List of position dicts with 'score_cp' and 'features'
-
-    Returns:
-        (onehot, targets) tensors
-    """
+    """Collate function for DNN dense (one-hot) batches."""
     batch_size = len(batch)
 
-    # Create one-hot tensor (on CPU for pin_memory)
     onehot = torch.zeros(batch_size, DNN_INPUT_SIZE)
     scores = np.empty(batch_size, dtype=np.float32)
 
@@ -577,22 +720,12 @@ def collate_dnn_dense(batch: List[Dict]) -> Tuple:
 
 
 def collate_nnue_sparse(batch: List[Dict]) -> Tuple:
-    """
-    Collate function for NNUE sparse (EmbeddingBag) batches.
-
-    Args:
-        batch: List of position dicts with 'score_cp', 'stm', 'white_features', 'black_features'
-
-    Returns:
-        (white_indices, white_offsets, black_indices, black_offsets, stm, targets) tensors
-    """
+    """Collate function for NNUE sparse (EmbeddingBag) batches."""
     batch_size = len(batch)
 
-    # Calculate total features
     total_white = sum(len(pos['white_features']) for pos in batch)
     total_black = sum(len(pos['black_features']) for pos in batch)
 
-    # Pre-allocate arrays
     all_white = np.empty(total_white, dtype=np.int64)
     white_offsets = np.empty(batch_size, dtype=np.int64)
     all_black = np.empty(total_black, dtype=np.int64)
@@ -620,7 +753,6 @@ def collate_nnue_sparse(batch: List[Dict]) -> Tuple:
 
     targets = np.tanh(scores / TANH_SCALE)
 
-    # Convert to tensors
     white_indices = torch.from_numpy(all_white)
     white_offsets_t = torch.from_numpy(white_offsets)
     black_indices = torch.from_numpy(all_black)
@@ -632,18 +764,9 @@ def collate_nnue_sparse(batch: List[Dict]) -> Tuple:
 
 
 def collate_nnue_dense(batch: List[Dict]) -> Tuple:
-    """
-    Collate function for NNUE dense (one-hot) batches.
-
-    Args:
-        batch: List of position dicts
-
-    Returns:
-        (white_onehot, black_onehot, stm, targets) tensors
-    """
+    """Collate function for NNUE dense (one-hot) batches."""
     batch_size = len(batch)
 
-    # Create one-hot tensors
     white_onehot = torch.zeros(batch_size, NNUE_INPUT_SIZE)
     black_onehot = torch.zeros(batch_size, NNUE_INPUT_SIZE)
     stm = np.empty(batch_size, dtype=np.float32)
@@ -665,15 +788,18 @@ def collate_nnue_dense(batch: List[Dict]) -> Tuple:
     return white_onehot, black_onehot, stm_t, targets_t
 
 
-def get_collate_fn(nn_type: str, use_embedding_bag: bool):
+def get_collate_fn(nn_type: str, use_sparse_coo: bool, use_embedding_bag: bool):
     """Get the appropriate collate function for the network type and mode."""
     if nn_type.upper() == "DNN":
+        # DNN doesn't support sparse COO (would need separate implementation)
         if use_embedding_bag:
             return collate_dnn_sparse
         else:
             return collate_dnn_dense
     else:  # NNUE
-        if use_embedding_bag:
+        if use_sparse_coo:
+            return collate_nnue_sparse_coo
+        elif use_embedding_bag:
             return collate_nnue_sparse
         else:
             return collate_nnue_dense
@@ -687,6 +813,7 @@ def create_data_loader(
         shuffle: bool = True,
         max_positions: Optional[int] = None,
         num_workers: int = NUM_WORKERS,
+        use_sparse_coo: bool = SPARSE_COO,
         use_embedding_bag: bool = EMBEDDING_BAG,
         prefetch_factor: int = PREFETCH_FACTOR,
         seed: Optional[int] = None
@@ -694,23 +821,7 @@ def create_data_loader(
     """
     Create a PyTorch DataLoader for training or validation.
 
-    This uses multiprocessing (not threading) for true parallel data loading,
-    bypassing the Python GIL for CPU-bound operations like parsing.
-
-    Args:
-        shard_files: List of shard file paths
-        nn_type: "DNN" or "NNUE"
-        batch_size: Batch size
-        device: Target device
-        shuffle: Whether to shuffle data
-        max_positions: Maximum positions to load (None for all)
-        num_workers: Number of parallel worker processes
-        use_embedding_bag: Whether to use sparse (True) or dense (False) mode
-        prefetch_factor: Number of batches to prefetch per worker
-        seed: Random seed for reproducibility
-
-    Returns:
-        PyTorch DataLoader configured for optimal GPU training
+    Uses multiprocessing (not threading) for true parallel data loading.
     """
     dataset = ShardIterableDataset(
         shard_files=shard_files,
@@ -720,12 +831,10 @@ def create_data_loader(
         seed=seed
     )
 
-    collate_fn = get_collate_fn(nn_type, use_embedding_bag)
+    collate_fn = get_collate_fn(nn_type, use_sparse_coo, use_embedding_bag)
 
-    # Determine if we should use pin_memory (only for CUDA devices)
     pin_memory = device.type == 'cuda' and num_workers > 0
 
-    # Create DataLoader with multiprocessing
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -733,7 +842,7 @@ def create_data_loader(
         collate_fn=collate_fn,
         pin_memory=pin_memory,
         prefetch_factor=prefetch_factor if num_workers > 0 else None,
-        persistent_workers=num_workers > 0,  # Keep workers alive between epochs
+        persistent_workers=num_workers > 0,
     )
 
     return loader
@@ -756,6 +865,7 @@ class Trainer:
             lr: float = LEARNING_RATE,
             num_workers: int = NUM_WORKERS,
             prefetch_factor: int = PREFETCH_FACTOR,
+            use_sparse_coo: bool = SPARSE_COO,
             use_embedding_bag: bool = EMBEDDING_BAG,
             val_ratio: float = VALIDATION_SPLIT_RATIO
     ):
@@ -767,6 +877,7 @@ class Trainer:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
+        self.use_sparse_coo = use_sparse_coo
         self.use_embedding_bag = use_embedding_bag
 
         # Initial shard discovery
@@ -774,30 +885,37 @@ class Trainer:
 
         self.criterion = nn.MSELoss()
 
-        # For sparse EmbeddingBag, we need to use SparseAdam for the sparse parameters
-        # and regular Adam for dense parameters
-        sparse_params = []
-        dense_params = []
-        for name, param in model.named_parameters():
-            if 'weight' in name and hasattr(model, name.split('.')[0]):
-                module = getattr(model, name.split('.')[0])
-                if isinstance(module, nn.EmbeddingBag) and module.sparse:
-                    sparse_params.append(param)
+        # Optimizer setup based on training mode
+        if use_sparse_coo:
+            # Sparse COO uses dense gradients - standard Adam works!
+            self.optimizer = optim.Adam(model.parameters(), lr=lr)
+            self.optimizer_dense = None
+        elif use_embedding_bag:
+            # EmbeddingBag with sparse=True needs SparseAdam for sparse params
+            sparse_params = []
+            dense_params = []
+            for name, param in model.named_parameters():
+                if 'weight' in name and hasattr(model, name.split('.')[0]):
+                    module = getattr(model, name.split('.')[0])
+                    if isinstance(module, nn.EmbeddingBag) and module.sparse:
+                        sparse_params.append(param)
+                    else:
+                        dense_params.append(param)
                 else:
                     dense_params.append(param)
-            else:
-                dense_params.append(param)
 
-        # Use SparseAdam for embedding parameters, Adam for the rest
-        if sparse_params:
-            self.optimizer = optim.SparseAdam(sparse_params, lr=lr)
-            self.optimizer_dense = optim.Adam(dense_params, lr=lr)
+            if sparse_params:
+                self.optimizer = optim.SparseAdam(sparse_params, lr=lr)
+                self.optimizer_dense = optim.Adam(dense_params, lr=lr)
+            else:
+                self.optimizer = optim.Adam(model.parameters(), lr=lr)
+                self.optimizer_dense = None
         else:
-            # Dense mode: use Adam for all parameters
+            # Dense mode - standard Adam
             self.optimizer = optim.Adam(model.parameters(), lr=lr)
             self.optimizer_dense = None
 
-        # Scheduler only on dense optimizer (or main optimizer if no sparse)
+        # Scheduler on main optimizer
         main_optimizer = self.optimizer_dense if self.optimizer_dense else self.optimizer
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             main_optimizer, mode='min', factor=0.5, patience=LR_PATIENCE
@@ -831,7 +949,16 @@ class Trainer:
                     targets.to(self.device, non_blocking=True)
                 )
         else:  # NNUE
-            if self.use_embedding_bag:
+            if self.use_sparse_coo:
+                # Sparse COO batch: (white_sparse, black_sparse, stm, targets)
+                white_sparse, black_sparse, stm, targets = batch
+                return (
+                    white_sparse.to(self.device),
+                    black_sparse.to(self.device),
+                    stm.to(self.device, non_blocking=True),
+                    targets.to(self.device, non_blocking=True)
+                )
+            elif self.use_embedding_bag:
                 white_indices, white_offsets, black_indices, black_offsets, stm, targets = batch
                 return (
                     white_indices.to(self.device, non_blocking=True),
@@ -862,7 +989,10 @@ class Trainer:
 
     def _forward_nnue(self, batch):
         """Forward pass for NNUE."""
-        if self.use_embedding_bag:
+        if self.use_sparse_coo:
+            white_sparse, black_sparse, stm, targets = batch
+            outputs = self.model(white_sparse, black_sparse, stm)
+        elif self.use_embedding_bag:
             white_indices, white_offsets, black_indices, black_offsets, stm, targets = batch
             outputs = self.model(white_indices, white_offsets, black_indices, black_offsets, stm)
         else:
@@ -877,11 +1007,9 @@ class Trainer:
         num_batches = 0
         positions_seen = 0
 
-        # Calculate report interval for ~100 updates per epoch
         expected_batches = positions_per_epoch // self.batch_size
         report_interval = max(1, expected_batches // 100)
 
-        # Create PyTorch DataLoader with multiprocessing
         loader = create_data_loader(
             self.train_shards,
             self.nn_type,
@@ -890,32 +1018,28 @@ class Trainer:
             shuffle=True,
             max_positions=positions_per_epoch,
             num_workers=self.num_workers,
+            use_sparse_coo=self.use_sparse_coo,
             use_embedding_bag=self.use_embedding_bag,
             prefetch_factor=self.prefetch_factor,
-            seed=self.current_epoch  # Different seed per epoch
+            seed=self.current_epoch
         )
 
         start_time = time.time()
 
         for batch in loader:
-            # Move batch to device (handles pin_memory -> device transfer)
             batch = self._move_batch_to_device(batch)
 
-            # Check if we've processed enough positions
             positions_seen += self.batch_size
             if positions_seen > positions_per_epoch:
                 break
 
-            # Forward pass
             if self.nn_type == "DNN":
                 outputs, targets = self._forward_dnn(batch)
             else:
                 outputs, targets = self._forward_nnue(batch)
 
-            # Compute loss
             loss = self.criterion(outputs, targets)
 
-            # Backward pass
             self.optimizer.zero_grad()
             if self.optimizer_dense:
                 self.optimizer_dense.zero_grad()
@@ -935,18 +1059,16 @@ class Trainer:
             total_loss += loss.item()
             num_batches += 1
 
-            # Progress reporting
             if num_batches % report_interval == 0:
                 pct = 100 * positions_seen / positions_per_epoch
                 elapsed = time.time() - start_time
                 pos_per_sec = positions_seen / elapsed if elapsed > 0 else 0
                 print(f"\r  [{pct:5.1f}%] Loss: {loss.item():.6f} | {pos_per_sec / 1e6:.2f}M pos/s", end='', flush=True)
 
-            # Garbage collection
             if num_batches % GC_INTERVAL == 0:
                 gc.collect()
 
-        print()  # New line after progress
+        print()
 
         avg_loss = total_loss / max(1, num_batches)
         return avg_loss
@@ -966,6 +1088,7 @@ class Trainer:
             shuffle=False,
             max_positions=max_positions,
             num_workers=self.num_workers,
+            use_sparse_coo=self.use_sparse_coo,
             use_embedding_bag=self.use_embedding_bag,
             prefetch_factor=self.prefetch_factor
         )
@@ -992,7 +1115,6 @@ class Trainer:
 
     def save_checkpoint(self, path: str, is_best: bool = False):
         """Save model checkpoint in inference-compatible format."""
-        # Convert sparse training model to inference format
         inference_state_dict = self.model.to_inference_model()
 
         checkpoint = {
@@ -1008,7 +1130,6 @@ class Trainer:
             'history': self.history
         }
 
-        # Ensure directory exists
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
 
         torch.save(checkpoint, path)
@@ -1021,15 +1142,12 @@ class Trainer:
         """Load model checkpoint."""
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
-        # Verify nn_type matches
         if checkpoint.get('nn_type', self.nn_type) != self.nn_type:
             raise ValueError(f"Checkpoint nn_type ({checkpoint.get('nn_type')}) "
                              f"does not match current ({self.nn_type})")
 
-        # Load from inference format into sparse training model
         self.model.load_from_inference_model(checkpoint['model_state_dict'])
 
-        # Load optimizer states if available
         if 'optimizer_state_dict' in checkpoint:
             try:
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -1069,23 +1187,18 @@ class Trainer:
             self.current_epoch = epoch + 1
             epoch_start = time.time()
 
-            # Refresh shards each epoch to pick up any new files
             num_shards = self._refresh_shards()
             print(f"Epoch {self.current_epoch}/{epochs} ({num_shards} shards)")
 
-            # Training
             train_loss = self.train_epoch(positions_per_epoch)
             self.history['train_loss'].append(train_loss)
 
-            # Validation
             if self.current_epoch % VAL_INTERVAL == 0:
                 val_loss = self.validate()
                 self.history['val_loss'].append(val_loss)
 
-                # Update scheduler
                 self.scheduler.step(val_loss)
 
-                # Track improvement
                 is_best = val_loss < self.best_val_loss
                 if is_best:
                     self.best_val_loss = val_loss
@@ -1093,7 +1206,6 @@ class Trainer:
                 else:
                     self.epochs_without_improvement += 1
 
-                # Get current LR
                 main_optimizer = self.optimizer_dense if self.optimizer_dense else self.optimizer
                 current_lr = main_optimizer.param_groups[0]['lr']
                 self.history['lr'].append(current_lr)
@@ -1103,22 +1215,18 @@ class Trainer:
                       f"LR: {current_lr:.2e} | Time: {epoch_time:.1f}s"
                       f"{' *BEST*' if is_best else ''}")
 
-                # Early stopping
                 if self.epochs_without_improvement >= early_stopping_patience:
                     print(f"\nEarly stopping after {early_stopping_patience} epochs without improvement")
                     break
 
-            # Checkpointing
             if self.current_epoch % CHECKPOINT_INTERVAL == 0:
                 self.save_checkpoint(checkpoint_path, is_best if 'is_best' in dir() else False)
                 print(f"  Checkpoint saved to {checkpoint_path}")
 
             print()
 
-            # Force garbage collection between epochs
             gc.collect()
 
-        # Final checkpoint
         self.save_checkpoint(checkpoint_path, False)
 
         return self.history
@@ -1133,7 +1241,6 @@ def split_shards(shards: List[str], val_ratio: float = VALIDATION_SPLIT_RATIO) -
     num_val = max(1, int(len(shards) * val_ratio))
     num_train = len(shards) - num_val
 
-    # Use last shards for validation (they're from later in processing)
     train_shards = shards[:num_train]
     val_shards = shards[num_train:]
 
@@ -1146,7 +1253,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Train NNUE model
+    # Train NNUE model (uses sparse COO by default - recommended)
     python nn_train.py --nn-type NNUE --data-dir data/nnue
 
     # Train DNN model with custom parameters
@@ -1157,6 +1264,11 @@ Examples:
 
     # High-end GPU optimization (A100, H100, RTX 4090)
     python nn_train.py --nn-type NNUE --data-dir data/nnue --num-workers 8 --prefetch-factor 8
+
+Training Modes:
+    SPARSE_COO (default for NNUE): Memory efficient with dense gradients
+    EMBEDDING_BAG: Memory efficient but sparse gradients (may have convergence issues)
+    DENSE: High memory usage but reliable convergence
 
 Performance Notes:
     - Uses PyTorch DataLoader with multiprocessing for true parallel data loading
@@ -1262,7 +1374,7 @@ Performance Notes:
     # Determine checkpoint path
     checkpoint_path = args.checkpoint or f"model/{args.nn_type.lower()}.pt"
 
-    # Discover shards (Trainer will re-discover each epoch)
+    # Discover shards
     print(f"Discovering shards in {args.data_dir}...")
     shards = discover_shards(args.data_dir, args.nn_type)
 
@@ -1273,7 +1385,7 @@ Performance Notes:
 
     print(f"Found {len(shards)} shard files")
 
-    # Preview train/val split (actual split done in Trainer and refreshed each epoch)
+    # Preview train/val split
     train_shards, val_shards = split_shards(shards, val_ratio=VALIDATION_SPLIT_RATIO)
     print(f"Train shards: {len(train_shards)}")
     print(f"Validation shards: {len(val_shards)}")
@@ -1285,26 +1397,29 @@ Performance Notes:
     print(f"Prefetch factor: {args.prefetch_factor} (buffer = {args.num_workers * args.prefetch_factor} batches)")
     print(f"Pin memory: {device.type == 'cuda'}")
 
-    # Print embedding mode
-    if EMBEDDING_BAG:
-        print(f"Embedding mode: EmbeddingBag (sparse)")
+    # Determine training mode
+    use_sparse_coo = SPARSE_COO and args.nn_type == "NNUE"
+    use_embedding_bag = EMBEDDING_BAG and not use_sparse_coo
+
+    # Print training mode
+    if use_sparse_coo:
+        print(f"Training mode: Sparse COO tensors (recommended - dense gradients)")
+    elif use_embedding_bag:
+        print(f"Training mode: EmbeddingBag (sparse gradients - may have convergence issues)")
     else:
-        print(f"Embedding mode: Dense one-hot vectors")
+        print(f"Training mode: Dense one-hot vectors (high memory usage)")
 
-    # Adjust learning rate for dense mode if not explicitly set
-    lr = args.lr
-    if not EMBEDDING_BAG and args.lr == LEARNING_RATE:
-        lr = LEARNING_RATE_DENSE
-        print(f"Adjusted learning rate for dense mode: {lr}")
-
-    # Create training model based on embedding mode
+    # Create training model based on mode
     if args.nn_type == "NNUE":
-        if EMBEDDING_BAG:
+        if use_sparse_coo:
+            model = NNUENetworkSparseCOO(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
+        elif use_embedding_bag:
             model = NNUENetworkSparse(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
         else:
             model = NNUENetworkDense(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
     else:
-        if EMBEDDING_BAG:
+        # DNN - no sparse COO support (would need separate implementation)
+        if use_embedding_bag:
             model = DNNNetworkSparse(DNN_INPUT_SIZE)
         else:
             model = DNNNetworkDense(DNN_INPUT_SIZE)
@@ -1318,12 +1433,14 @@ Performance Notes:
         data_dir=args.data_dir,
         device=device,
         batch_size=args.batch_size,
-        lr=lr,
+        lr=args.lr,
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
-        use_embedding_bag=EMBEDDING_BAG,
+        use_sparse_coo=use_sparse_coo,
+        use_embedding_bag=use_embedding_bag,
         val_ratio=VALIDATION_SPLIT_RATIO
     )
+
     # Load checkpoint if resuming
     if args.resume:
         if not os.path.exists(args.resume):
