@@ -23,7 +23,6 @@ def _env_str(key, default):
 MAX_SCORE = _env_int('MAX_SCORE', 10_000)
 TANH_SCALE = _env_int('TANH_SCALE', 410)  # Stockfish value
 
-L1_QUANTIZATION = _env_str('L1_QUANTIZATION', "INT8")  # Options: "NONE" (FP32), "INT8", "INT16"
 
 IS_PONDERING_ENABLED = _env_bool('IS_PONDERING_ENABLED', True)
 
@@ -40,6 +39,7 @@ IS_BLAS_ENABLED = _env_bool('IS_BLAS_ENABLED', False)
 
 IS_NN_ENABLED = _env_bool('IS_NN_ENABLED', True)
 NN_TYPE = _env_str('NN_TYPE', "NNUE")
+L1_QUANTIZATION = _env_str('L1_QUANTIZATION', "INT8")  # Options: "NONE" (FP32), "INT8", "INT16"
 FULL_NN_EVAL_FREQ = _env_int('FULL_NN_EVAL_FREQ', 3000)  # Increase to 50_000 after initial testing
 
 # Note when NN related parameters are optimized, use real games as positional understanding will be reflected.
