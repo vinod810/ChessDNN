@@ -49,8 +49,8 @@ import zstandard as zstd
 
 # Import from nn_inference to ensure consistency
 from nn_inference import (
-    NNUEFeatures, DNNFeatures, MAX_SCORE,
-)
+    NNUEFeatures, DNNFeatures, )
+from config import MAX_SCORE
 
 # Import ShardWriter from shared module
 from shard_io import ShardWriter
@@ -61,7 +61,6 @@ MAX_MATE_DEPTH = 10
 MAX_NON_MATE_SCORE = MAX_SCORE - MAX_MATE_DEPTH * MATE_FACTOR
 OPENING_PLYS = 10
 DEFAULT_POSITIONS_PER_SHARD = 1_000_000
-
 
 def eval_to_cp_stm(ev, board_turn: bool) -> Optional[int]:
     """

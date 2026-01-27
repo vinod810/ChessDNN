@@ -6,7 +6,8 @@ import chess
 from cached_board import CachedBoard
 from nn_inference import NNUEIncrementalUpdater
 from nn_inference import DNNIncrementalUpdater
-from nn_inference import load_model, MAX_SCORE
+from nn_inference import load_model
+from config import MAX_SCORE
 
 
 class NNEvaluator(ABC):

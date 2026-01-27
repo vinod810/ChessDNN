@@ -18,6 +18,8 @@ import numpy as np
 import torch
 from torch import nn as nn
 
+from config import L1_QUANTIZATION
+
 # Try to import Cython-optimized operations
 try:
     from nn_ops_fast import (
@@ -56,8 +58,6 @@ except ImportError as e:
     print(e)
     print("\033[91m! Cython not available, using pure Python fallback\033[0m")
 
-L1_QUANTIZATION = "INT8" # Options: "NONE" (FP32), "INT8", "INT16"
-
 KING_SQUARES = 64
 PIECE_SQUARES = 64
 PIECE_TYPES = 5  # P, N, B, R, Q (no King)
@@ -67,8 +67,6 @@ NNUE_HIDDEN_SIZE = 256
 DNN_INPUT_SIZE = 768  # 64 squares * 6 piece types * 2 colors
 DNN_HIDDEN_LAYERS = [1024, 256, 32]
 OUTPUT_SIZE = 1
-TANH_SCALE = 410 # Stockfish value
-MAX_SCORE = 10_000
 
 # Pre-computed lookup tables
 _FLIPPED_SQUARES = np.array([(7 - (sq // 8)) * 8 + (sq % 8) for sq in range(64)], dtype=np.int32)

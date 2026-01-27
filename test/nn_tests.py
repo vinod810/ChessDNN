@@ -34,9 +34,10 @@ from cached_board import CachedBoard
 from engine import find_best_move
 # Import from our modules - this ensures we test the actual production code
 from nn_inference import (
-    TANH_SCALE, NNUEFeatures, DNNFeatures,
-    NNUE_INPUT_SIZE, DNN_INPUT_SIZE, MAX_SCORE
+    NNUEFeatures, DNNFeatures,
+    NNUE_INPUT_SIZE, DNN_INPUT_SIZE
 )
+from config import MAX_SCORE, TANH_SCALE
 from nn_evaluator import NNEvaluator
 
 CP_ERROR_CLIP = 100 # Keep low to make the average more sense.

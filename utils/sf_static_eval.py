@@ -32,7 +32,7 @@ from shard_io import ShardReader, discover_shards
 
 # Import MAX_SCORE from nn_inference
 try:
-    from nn_inference import MAX_SCORE
+    from config import MAX_SCORE
 except ImportError:
     MAX_SCORE = 10000  # Fallback value
 

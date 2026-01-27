@@ -6,9 +6,10 @@ from pathlib import Path
 import chess
 import chess.polyglot
 
+from config import IS_PONDERING_ENABLED
 from engine import (find_best_move, MAX_NEGAMAX_DEPTH, TimeControl, dnn_eval_cache,
                     clear_game_history, game_position_history, HOME_DIR, kpi,
-                    MAX_MP_CORES, IS_SHARED_TT_MP, diag_summary, set_debug_mode,
+                    diag_summary, set_debug_mode,
                     is_debug_enabled, diag_print)
 from book_move import init_opening_book, get_book_move
 import mp_search
@@ -19,7 +20,6 @@ RESIGN_CONSECUTIVE_MOVES = 3  # must be losing for this many moves
 resign_counter = 0
 
 # Pondering settings
-IS_PONDERING_ENABLED = True
 PONDER_TIME_LIMIT = 600  # Maximum time for ponder search (safety cap)
 
 CURR_DIR = Path(__file__).resolve().parent
@@ -39,23 +39,6 @@ ponder_time_info = None  # Dict with wtime, btime, winc, binc, movestogo
 ponder_start_time = None  # Time when ponder search started
 ponder_best_move = None  # Best move found during pondering
 ponder_best_score = None  # Score of best move during pondering
-
-
-# TODO support behind the screen pondering
-# Don't generate any code yet. Just want to get your thoughts. How easy or difficult to add pondering in the
-# background without relying on the UCI interface?  Once it is the engine's turn and if there is a ponder hit
-# continue the evaluation for the remaining time.
-# Soft ponder (easier): On ponder hit, stop the ponder search, then start a new search with remaining time.
-# TT entries from pondering give you a head start—you'll blast through early depths quickly.
-# 1. Engine makes move, records pv[1] as ponder_move
-# 2. Spawn thread: search(ponder_position, time_limit=infinite)
-# 3. Main thread: wait for opponent's move
-# 4. Opponent moves:
-#    - Set stop_search = True
-#    - Wait for thread to finish
-#    - If ponder hit: search from same position with real time limit
-#      (TT is warm, will be fast)
-#    - If ponder miss: search from new position with real time limit
 
 def record_position_hash(board: chess.Board):
     """Record position in game history using Zobrist hash."""

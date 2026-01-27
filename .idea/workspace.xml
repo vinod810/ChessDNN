@@ -4,9 +4,22 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="About 50% win rate again SF2300">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="About 75% win rate again SF2300">
+      <change afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mp_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/mp_search.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/prepare_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/data_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/data_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/sf_static_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/sf_static_eval.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -51,22 +64,22 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.best_move.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.nn_tests.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;SHELLCHECK.PATH&quot;: &quot;/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/eapen/Documents/Projects/ChessDNN/engine.py&quot;,
-    &quot;run.code.analysis.last.selected.profile&quot;: &quot;pProject Default&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.best_move.executor": "Debug",
+    "Python.nn_tests.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "SHELLCHECK.PATH": "/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck",
+    "git-widget-placeholder": "master",
+    "last_opened_file_path": "/home/eapen/Documents/Projects/ChessDNN/config.py",
+    "run.code.analysis.last.selected.profile": "pProject Default",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/utils" />
@@ -305,14 +318,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00131" summary="Code cleanup">
-      <option name="closed" value="true" />
-      <created>1768749319708</created>
-      <option name="number" value="00131" />
-      <option name="presentableId" value="LOCAL-00131" />
-      <option name="project" value="LOCAL" />
-      <updated>1768749319708</updated>
-    </task>
     <task id="LOCAL-00132" summary="Code cleanup">
       <option name="closed" value="true" />
       <created>1768752836547</created>
@@ -521,7 +526,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769381859904</updated>
     </task>
-    <option name="localTasksCounter" value="158" />
+    <task id="LOCAL-00158" summary="About 75% win rate again SF2300">
+      <option name="closed" value="true" />
+      <created>1769386301249</created>
+      <option name="number" value="00158" />
+      <option name="presentableId" value="LOCAL-00158" />
+      <option name="project" value="LOCAL" />
+      <updated>1769386301249</updated>
+    </task>
+    <option name="localTasksCounter" value="159" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -536,7 +549,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Code cleanup" />
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 238/300" />
     <MESSAGE value="FUTILITY_PRUNING_ENABLED WAC 236/300" />
     <MESSAGE value="pre-data - train split" />
@@ -561,7 +573,8 @@
     <MESSAGE value="Stalling fixed" />
     <MESSAGE value="Perfromance got worse. But now more configrarable" />
     <MESSAGE value="About 50% win rate again SF2300" />
-    <option name="LAST_COMMIT_MESSAGE" value="About 50% win rate again SF2300" />
+    <MESSAGE value="About 75% win rate again SF2300" />
+    <option name="LAST_COMMIT_MESSAGE" value="About 75% win rate again SF2300" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

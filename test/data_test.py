@@ -20,7 +20,7 @@ from prepare_data import MAX_MATE_DEPTH, MATE_FACTOR, MAX_NON_MATE_SCORE
 
 # Check what TANH_SCALE is set to
 try:
-    from nn_inference import TANH_SCALE, MAX_SCORE
+    from config import MAX_SCORE, TANH_SCALE
 
     print(f"TANH_SCALE = {TANH_SCALE}")
     print(f"MAX_SCORE = {MAX_SCORE}")

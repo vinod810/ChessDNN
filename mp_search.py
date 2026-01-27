@@ -203,7 +203,7 @@ def _search_moves(engine, worker_id: int, fen: str, moves: List[chess.Move], max
     Search a list of root moves using iterative deepening.
     Returns (best_move, best_score, best_pv, nodes) or None if stopped.
     """
-    from nn_inference import MAX_SCORE
+    from config import MAX_SCORE
     from cached_board import CachedBoard
 
     if not moves:
@@ -323,7 +323,7 @@ def parallel_find_best_move(fen: str, max_depth: int = 20, time_limit: Optional[
         return engine.find_best_move(fen, max_depth=max_depth, time_limit=time_limit, clear_tt=clear_tt)
 
     from cached_board import CachedBoard
-    from nn_inference import MAX_SCORE
+    from config import MAX_SCORE
     import engine
 
     start_time = time.perf_counter()

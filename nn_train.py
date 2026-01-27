@@ -55,9 +55,9 @@ import zstandard as zstd
 
 # Import network architectures and constants from nn_inference
 from nn_inference import (
-    NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, DNN_HIDDEN_LAYERS,
-    TANH_SCALE, MAX_SCORE
+    NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, DNN_HIDDEN_LAYERS
 )
+from config import MAX_SCORE, TANH_SCALE
 
 # Training configuration
 VALIDATION_SPLIT_RATIO = 0.01
