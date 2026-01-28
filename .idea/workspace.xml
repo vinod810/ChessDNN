@@ -4,21 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Parameter optimization">
-      <change afterPath="$PROJECT_DIR$/cpp_nn_build/CMakeLists.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/cpp_nn_build/build.sh" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dnn_batch_loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/batch_loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/nnue_batch_loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_build_cpp/CMakeLists.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_build_cpp/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_nn_build/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_build_cpp/batch_loader.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_nn_build/nnue_batch_loader.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_build_cpp/batch_loader.h" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_nn_build/nnue_batch_loader.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_build_cpp/build.sh" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
-    </list>
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="DNN COO and Dataloader" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -316,14 +302,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00138" summary="Fixed bugs in DNN data. Refactoring. Untested code.">
-      <option name="closed" value="true" />
-      <created>1768850793815</created>
-      <option name="number" value="00138" />
-      <option name="presentableId" value="LOCAL-00138" />
-      <option name="project" value="LOCAL" />
-      <updated>1768850793815</updated>
-    </task>
     <task id="LOCAL-00139" summary="Fixed bugs in DNN data. Refactoring. Partially tested code.">
       <option name="closed" value="true" />
       <created>1768868139662</created>
@@ -532,7 +510,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769607511012</updated>
     </task>
-    <option name="localTasksCounter" value="165" />
+    <task id="LOCAL-00165" summary="DNN COO and Dataloader">
+      <option name="closed" value="true" />
+      <created>1769611535505</created>
+      <option name="number" value="00165" />
+      <option name="presentableId" value="LOCAL-00165" />
+      <option name="project" value="LOCAL" />
+      <updated>1769611535506</updated>
+    </task>
+    <option name="localTasksCounter" value="166" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -547,7 +533,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Builds work. Convergence not yet verified." />
     <MESSAGE value="NNUE and DNN converging well." />
     <MESSAGE value="Removed multiple is_game_over()" />
     <MESSAGE value="Cached stockfish NNUE evals" />
@@ -572,7 +557,8 @@
     <MESSAGE value="CPP training" />
     <MESSAGE value="config.py to print overridden params" />
     <MESSAGE value="Parameter optimization" />
-    <option name="LAST_COMMIT_MESSAGE" value="Parameter optimization" />
+    <MESSAGE value="DNN COO and Dataloader" />
+    <option name="LAST_COMMIT_MESSAGE" value="DNN COO and Dataloader" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
