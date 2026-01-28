@@ -7,7 +7,7 @@
  * Or use CMake (recommended).
  */
 
-#include "batch_loader.h"
+#include "nnue_batch_loader.h"
 
 #include <algorithm>
 #include <atomic>

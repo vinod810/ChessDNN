@@ -53,12 +53,6 @@ True, False, False - 225
 False, True, False - 238
 False, False, True - 206
 
-Quantization (TODO Need to rest when no other work in progress)
-Type, Nodes, NPS, SF-MSE, Better, SF-CP, WAC, 10K-full-time, 10K-incr-time, Accumulator-Correctness
-NONE, TBS, 4222, 0.017535, NN, 22.46, 218/300
-INT16, TBD, 3921, 0.017535, NN, 22.46, 218/300
-INT8, TBD, 3637, 0.017535, NN, 22.46, 224/300
-
 Multiprocessing
 Cores, WAXC
 1, 199/300
@@ -73,6 +67,19 @@ QS_DEPTH_MIN_NN_EVAL 30 games against SF-2300
 3,2254
 5,2254
 8,2265
+QS_DEPTH_MIN_NN_EVAL 100 games against SF-2100
+0,2069
+1,2121
+2,2193
+3,2167
+4,2124
+5,2223*
+6,
+7
+9
+12
+16
+99
 
 QS_DEPTH_MAX_NN_EVAL 60 games again SF-2300
 2 - 2153

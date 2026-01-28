@@ -6,7 +6,8 @@ MULTIPROCESSING VERSION WITH SPARSE COO TENSOR SUPPORT:
 - Uses PyTorch DataLoader with multiprocessing for true parallel data loading
 - pin_memory=True for faster GPU transfer
 - persistent_workers=True to avoid worker restart overhead
-- Sparse COO tensors for memory-efficient NNUE training with dense gradients
+- Sparse COO tensors for memory-efficient NNUE and DNN training with dense gradients
+- C++ batch loaders for high-performance data loading (both NNUE and DNN)
 
 This script reads binary shard files created by prepare_data.py and trains
 neural network models for chess position evaluation.
@@ -16,7 +17,8 @@ Usage:
     python nn_train.py --nn-type DNN --data-dir data/dnn --resume model/dnn.pt
 
 Features:
-    - Sparse COO tensor training (recommended for NNUE - memory efficient with dense gradients)
+    - C++ batch loaders for both NNUE and DNN (highest performance)
+    - Sparse COO tensor training (recommended fallback - memory efficient with dense gradients)
     - EmbeddingBag sparse training (alternative, may have convergence issues)
     - Dense one-hot training (slow, high memory, but reliable convergence)
     - Parallel data loading with multiprocessing (not threading)
@@ -37,7 +39,12 @@ Binary shard format (created by prepare_data.py):
                      [num_black:uint8][black:uint16[]][fen_length:uint8][fen_bytes]
 
 Training Modes:
-    SPARSE_COO (recommended): Uses sparse COO tensors with nn.Linear
+    CPP_LOADER (best): Uses C++ multi-threaded batch loader
+        - Highest performance (2-3x fewer CPU cores needed)
+        - Available for both NNUE and DNN
+        - Requires libbatch_loader.so (NNUE) or libdnn_batch_loader.so (DNN)
+
+    SPARSE_COO (recommended fallback): Uses sparse COO tensors with nn.Linear
         - Memory efficient (~2MB per batch vs 1.3GB for dense)
         - Dense gradients (good convergence)
         - Standard Adam optimizer
@@ -60,16 +67,13 @@ import random
 import time
 import gc
 import traceback
-from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional, Iterator
-from collections import deque
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, IterableDataset
-import zstandard as zstd
 
 # Import network architectures and constants from nn_inference
 from nn_inference import (
@@ -551,6 +555,83 @@ class DNNNetworkDense(nn.Module):
         self.l4.bias.data = state_dict['l4.bias']
 
 
+class DNNNetworkSparseCOO(nn.Module):
+    """
+    DNN Network using sparse COO tensor inputs.
+
+    This uses standard nn.Linear layers which support sparse input tensors.
+    The key advantage over EmbeddingBag is that gradients are DENSE, which
+    typically leads to better convergence.
+
+    Architecture (matches standard DNN):
+    - Input: [input_size] sparse -> [hidden_layers[0]] (e.g., 768 -> 1024)
+    - Hidden layers: 1024 -> 256 -> 32 -> 1
+    """
+
+    def __init__(self, input_size: int = DNN_INPUT_SIZE, hidden_layers: list = None):
+        super().__init__()
+        if hidden_layers is None:
+            hidden_layers = DNN_HIDDEN_LAYERS
+
+        self.input_size = input_size
+        self.hidden_layers = hidden_layers
+
+        # First layer - standard Linear layer (supports sparse inputs!)
+        self.l1 = nn.Linear(input_size, hidden_layers[0])
+
+        # Remaining layers (dense)
+        self.l2 = nn.Linear(hidden_layers[0], hidden_layers[1])
+        self.l3 = nn.Linear(hidden_layers[1], hidden_layers[2])
+        self.l4 = nn.Linear(hidden_layers[2], 1)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass with sparse COO tensor input.
+
+        Args:
+            features: Sparse COO tensor [batch_size, input_size]
+
+        Returns:
+            Dense tensor [batch_size, 1] - evaluation output
+        """
+        # nn.Linear handles sparse inputs automatically
+        x = self.l1(features)  # [batch, hidden_layers[0]]
+
+        # Clipped ReLU activation [0, 1]
+        x = torch.clamp(x, 0.0, 1.0)
+
+        # Hidden layers with clipped ReLU
+        x = torch.clamp(self.l2(x), 0.0, 1.0)
+        x = torch.clamp(self.l3(x), 0.0, 1.0)
+        x = self.l4(x)
+
+        return x
+
+    def to_inference_model(self) -> dict:
+        """Convert to state dict compatible with nn_inference.DNNNetwork."""
+        return {
+            'l1.weight': self.l1.weight.data,
+            'l1.bias': self.l1.bias.data,
+            'l2.weight': self.l2.weight.data,
+            'l2.bias': self.l2.bias.data,
+            'l3.weight': self.l3.weight.data,
+            'l3.bias': self.l3.bias.data,
+            'l4.weight': self.l4.weight.data,
+            'l4.bias': self.l4.bias.data,
+        }
+
+    def load_from_inference_model(self, state_dict: dict):
+        """Load weights from standard DNNNetwork state dict."""
+        self.l1.weight.data = state_dict['l1.weight']
+        self.l1.bias.data = state_dict['l1.bias']
+        self.l2.weight.data = state_dict['l2.weight']
+        self.l2.bias.data = state_dict['l2.bias']
+        self.l3.weight.data = state_dict['l3.weight']
+        self.l3.bias.data = state_dict['l3.bias']
+        self.l4.weight.data = state_dict['l4.weight']
+        self.l4.bias.data = state_dict['l4.bias']
+
+
 # =============================================================================
 # PyTorch Dataset Implementation (Multiprocessing-friendly)
 # =============================================================================
@@ -720,6 +801,68 @@ def collate_dnn_dense(batch: List[Dict]) -> Tuple:
     return onehot, targets_t
 
 
+def collate_dnn_sparse_coo(batch: List[Dict]) -> Tuple:
+    """
+    Collate function for DNN batches using sparse COO tensors.
+
+    This creates sparse COO tensors with dense gradients - recommended approach.
+    """
+    batch_size = len(batch)
+
+    # Extract feature lists and scores
+    features_list = []
+    scores = np.empty(batch_size, dtype=np.float32)
+
+    for i, pos in enumerate(batch):
+        features_list.append(pos['features'])
+        scores[i] = pos['score_cp']
+
+    # Count total active features
+    total_active = sum(len(features) for features in features_list)
+
+    if total_active == 0:
+        # Edge case: no active features
+        indices = torch.empty((2, 0), dtype=torch.long)
+        values = torch.empty(0, dtype=torch.float32)
+    else:
+        # Pre-allocate arrays for indices
+        position_indices = np.empty(total_active, dtype=np.int64)
+        feature_indices = np.empty(total_active, dtype=np.int64)
+
+        offset = 0
+        for pos_idx, features in enumerate(features_list):
+            n = len(features)
+            if n > 0:
+                position_indices[offset:offset + n] = pos_idx
+                # Sort feature indices within each position (required for coalesced)
+                sorted_features = sorted(features)
+                feature_indices[offset:offset + n] = sorted_features
+                offset += n
+
+        # Create indices tensor: shape [2, total_active]
+        indices = torch.tensor(
+            np.stack([position_indices, feature_indices], axis=0),
+            dtype=torch.long
+        )
+
+        # Values are all 1.0 (binary features)
+        values = torch.ones(total_active, dtype=torch.float32)
+
+    # Create sparse COO tensor
+    features_sparse = torch.sparse_coo_tensor(
+        indices,
+        values,
+        size=(batch_size, DNN_INPUT_SIZE),
+        is_coalesced=True
+    )
+
+    # Create dense target tensor
+    targets = np.tanh(scores / TANH_SCALE).astype(np.float32)
+    targets_t = torch.from_numpy(targets).unsqueeze(1)
+
+    return features_sparse, targets_t
+
+
 def collate_nnue_sparse(batch: List[Dict]) -> Tuple:
     """Collate function for NNUE sparse (EmbeddingBag) batches."""
     batch_size = len(batch)
@@ -792,8 +935,9 @@ def collate_nnue_dense(batch: List[Dict]) -> Tuple:
 def get_collate_fn(nn_type: str, use_sparse_coo: bool, use_embedding_bag: bool):
     """Get the appropriate collate function for the network type and mode."""
     if nn_type.upper() == "DNN":
-        # DNN doesn't support sparse COO (would need separate implementation)
-        if use_embedding_bag:
+        if use_sparse_coo:
+            return collate_dnn_sparse_coo
+        elif use_embedding_bag:
             return collate_dnn_sparse
         else:
             return collate_dnn_dense
@@ -863,7 +1007,7 @@ def is_cpp_loader_available() -> bool:
         return _cpp_loader_available
 
     try:
-        from batch_loader import CppBatchLoader
+        from nnue_batch_loader import CppBatchLoader
         _cpp_loader_available = True
     except (ImportError, RuntimeError) as e:
         _cpp_loader_available = False
@@ -882,14 +1026,67 @@ def create_cpp_data_loader(
         num_features: int = NNUE_INPUT_SIZE
 ):
     """
-    Create a C++ batch loader for high-performance training.
+    Create a C++ batch loader for high-performance NNUE training.
 
     This is significantly faster than the Python DataLoader, especially
     on systems with limited CPU cores.
     """
-    from batch_loader import CppBatchLoader
+    from nnue_batch_loader import CppBatchLoader
 
     return CppBatchLoader(
+        shard_paths=shard_files,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        num_features=num_features,
+        shuffle=shuffle,
+        seed=seed,
+        device=device,
+        max_positions=max_positions,
+        tanh_scale=TANH_SCALE
+    )
+
+
+# =============================================================================
+# DNN C++ Batch Loader (High Performance)
+# =============================================================================
+
+_dnn_cpp_loader_available = None
+
+
+def is_dnn_cpp_loader_available() -> bool:
+    """Check if the DNN C++ batch loader is available."""
+    global _dnn_cpp_loader_available
+    if _dnn_cpp_loader_available is not None:
+        return _dnn_cpp_loader_available
+
+    try:
+        from dnn_batch_loader import DNNCppBatchLoader
+        _dnn_cpp_loader_available = True
+    except (ImportError, RuntimeError) as e:
+        _dnn_cpp_loader_available = False
+
+    return _dnn_cpp_loader_available
+
+
+def create_dnn_cpp_data_loader(
+        shard_files: List[str],
+        batch_size: int,
+        device: torch.device,
+        num_workers: int = NUM_WORKERS,
+        shuffle: bool = True,
+        max_positions: Optional[int] = None,
+        seed: Optional[int] = None,
+        num_features: int = DNN_INPUT_SIZE
+):
+    """
+    Create a C++ batch loader for high-performance DNN training.
+
+    This is significantly faster than the Python DataLoader, especially
+    on systems with limited CPU cores.
+    """
+    from dnn_batch_loader import DNNCppBatchLoader
+
+    return DNNCppBatchLoader(
         shard_paths=shard_files,
         batch_size=batch_size,
         num_workers=num_workers,
@@ -932,7 +1129,13 @@ class Trainer:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
-        self.use_cpp_loader = use_cpp_loader and is_cpp_loader_available() and nn_type.upper() == "NNUE"
+
+        # Determine if C++ loader is available for the given network type
+        if nn_type.upper() == "NNUE":
+            self.use_cpp_loader = use_cpp_loader and is_cpp_loader_available()
+        else:  # DNN
+            self.use_cpp_loader = use_cpp_loader and is_dnn_cpp_loader_available()
+
         self.use_sparse_coo = use_sparse_coo
         self.use_embedding_bag = use_embedding_bag
 
@@ -992,7 +1195,14 @@ class Trainer:
     def _move_batch_to_device(self, batch):
         """Move batch tensors to the target device."""
         if self.nn_type == "DNN":
-            if self.use_embedding_bag:
+            if self.use_sparse_coo:
+                # Sparse COO batch: (features_sparse, targets)
+                features_sparse, targets = batch
+                return (
+                    features_sparse.to(self.device),
+                    targets.to(self.device, non_blocking=True)
+                )
+            elif self.use_embedding_bag:
                 indices, offsets, targets = batch
                 return (
                     indices.to(self.device, non_blocking=True),
@@ -1036,7 +1246,11 @@ class Trainer:
 
     def _forward_dnn(self, batch):
         """Forward pass for DNN."""
-        if self.use_embedding_bag:
+        if self.use_sparse_coo:
+            # Sparse COO batch: (features_sparse, targets)
+            features_sparse, targets = batch
+            outputs = self.model(features_sparse)
+        elif self.use_embedding_bag:
             indices, offsets, targets = batch
             outputs = self.model(indices, offsets)
         else:
@@ -1069,16 +1283,28 @@ class Trainer:
 
         # Create appropriate loader
         if self.use_cpp_loader:
-            loader = create_cpp_data_loader(
-                self.train_shards,
-                self.batch_size,
-                self.device,
-                num_workers=self.num_workers,
-                shuffle=True,
-                max_positions=positions_per_epoch,
-                seed=self.current_epoch,
-                num_features=NNUE_INPUT_SIZE
-            )
+            if self.nn_type == "NNUE":
+                loader = create_cpp_data_loader(
+                    self.train_shards,
+                    self.batch_size,
+                    self.device,
+                    num_workers=self.num_workers,
+                    shuffle=True,
+                    max_positions=positions_per_epoch,
+                    seed=self.current_epoch,
+                    num_features=NNUE_INPUT_SIZE
+                )
+            else:  # DNN
+                loader = create_dnn_cpp_data_loader(
+                    self.train_shards,
+                    self.batch_size,
+                    self.device,
+                    num_workers=self.num_workers,
+                    shuffle=True,
+                    max_positions=positions_per_epoch,
+                    seed=self.current_epoch,
+                    num_features=DNN_INPUT_SIZE
+                )
         else:
             loader = create_data_loader(
                 self.train_shards,
@@ -1105,10 +1331,16 @@ class Trainer:
             if positions_seen > positions_per_epoch:
                 break
 
-            # C++ loader always returns sparse COO format
+            # Handle different batch formats
             if self.use_cpp_loader:
-                white_sparse, black_sparse, stm, targets = batch
-                outputs = self.model(white_sparse, black_sparse, stm)
+                if self.nn_type == "NNUE":
+                    # NNUE C++ loader returns: (white_sparse, black_sparse, stm, targets)
+                    white_sparse, black_sparse, stm, targets = batch
+                    outputs = self.model(white_sparse, black_sparse, stm)
+                else:  # DNN
+                    # DNN C++ loader returns: (features_sparse, targets)
+                    features_sparse, targets = batch
+                    outputs = self.model(features_sparse)
             elif self.nn_type == "DNN":
                 outputs, targets = self._forward_dnn(batch)
             else:
@@ -1158,15 +1390,26 @@ class Trainer:
 
         # Create appropriate loader
         if self.use_cpp_loader:
-            loader = create_cpp_data_loader(
-                self.val_shards,
-                self.batch_size,
-                self.device,
-                num_workers=self.num_workers,
-                shuffle=False,
-                max_positions=max_positions,
-                num_features=NNUE_INPUT_SIZE
-            )
+            if self.nn_type == "NNUE":
+                loader = create_cpp_data_loader(
+                    self.val_shards,
+                    self.batch_size,
+                    self.device,
+                    num_workers=self.num_workers,
+                    shuffle=False,
+                    max_positions=max_positions,
+                    num_features=NNUE_INPUT_SIZE
+                )
+            else:  # DNN
+                loader = create_dnn_cpp_data_loader(
+                    self.val_shards,
+                    self.batch_size,
+                    self.device,
+                    num_workers=self.num_workers,
+                    shuffle=False,
+                    max_positions=max_positions,
+                    num_features=DNN_INPUT_SIZE
+                )
         else:
             loader = create_data_loader(
                 self.val_shards,
@@ -1191,10 +1434,16 @@ class Trainer:
                 if positions_seen > max_positions:
                     break
 
-                # C++ loader always returns sparse COO format
+                # Handle different batch formats
                 if self.use_cpp_loader:
-                    white_sparse, black_sparse, stm, targets = batch
-                    outputs = self.model(white_sparse, black_sparse, stm)
+                    if self.nn_type == "NNUE":
+                        # NNUE C++ loader returns: (white_sparse, black_sparse, stm, targets)
+                        white_sparse, black_sparse, stm, targets = batch
+                        outputs = self.model(white_sparse, black_sparse, stm)
+                    else:  # DNN
+                        # DNN C++ loader returns: (features_sparse, targets)
+                        features_sparse, targets = batch
+                        outputs = self.model(features_sparse)
                 elif self.nn_type == "DNN":
                     outputs, targets = self._forward_dnn(batch)
                 else:
@@ -1492,8 +1741,12 @@ Performance Notes:
     print(f"Pin memory: {device.type == 'cuda'}")
 
     # Determine training mode (priority: CPP_LOADER > SPARSE_COO > EMBEDDING_BAG > DENSE)
-    use_cpp_loader = CPP_LOADER and args.nn_type == "NNUE" and is_cpp_loader_available()
-    use_sparse_coo = SPARSE_COO and args.nn_type == "NNUE" and not use_cpp_loader
+    if args.nn_type == "NNUE":
+        use_cpp_loader = CPP_LOADER and is_cpp_loader_available()
+    else:  # DNN
+        use_cpp_loader = CPP_LOADER and is_dnn_cpp_loader_available()
+
+    use_sparse_coo = SPARSE_COO and not use_cpp_loader
     use_embedding_bag = EMBEDDING_BAG and not use_sparse_coo and not use_cpp_loader
 
     # Print training mode
@@ -1507,12 +1760,16 @@ Performance Notes:
         print(f"Training mode: Dense one-hot vectors (high memory usage)")
 
     # Show fallback info if C++ loader requested but not available
-    if CPP_LOADER and args.nn_type == "NNUE" and not is_cpp_loader_available():
-        print(f"Note: C++ loader not available, falling back to Python loader")
-        print(f"      Build with: cd cpp_batch_loader && ./build.sh")
+    if CPP_LOADER:
+        if args.nn_type == "NNUE" and not is_cpp_loader_available():
+            print(f"Note: C++ NNUE loader not available, falling back to Python loader")
+            print(f"      Build with: cd cpp_batch_loader && ./build.sh")
+        elif args.nn_type == "DNN" and not is_dnn_cpp_loader_available():
+            print(f"Note: C++ DNN loader not available, falling back to Python loader")
+            print(f"      Build with: cd cpp_batch_loader && ./build.sh")
 
     # Create training model based on mode
-    # C++ loader uses sparse COO format, so use NNUENetworkSparseCOO
+    # C++ loader and sparse COO both use sparse COO format
     if args.nn_type == "NNUE":
         if use_cpp_loader or use_sparse_coo:
             model = NNUENetworkSparseCOO(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
@@ -1520,9 +1777,10 @@ Performance Notes:
             model = NNUENetworkSparse(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
         else:
             model = NNUENetworkDense(NNUE_INPUT_SIZE, NNUE_HIDDEN_SIZE)
-    else:
-        # DNN - no sparse COO support (would need separate implementation)
-        if use_embedding_bag:
+    else:  # DNN
+        if use_cpp_loader or use_sparse_coo:
+            model = DNNNetworkSparseCOO(DNN_INPUT_SIZE)
+        elif use_embedding_bag:
             model = DNNNetworkSparse(DNN_INPUT_SIZE)
         else:
             model = DNNNetworkDense(DNN_INPUT_SIZE)

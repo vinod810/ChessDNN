@@ -1,5 +1,5 @@
 """
-batch_loader.py - Python wrapper for the C++ batch loader
+nnue_batch_loader.py - Python wrapper for the C++ batch loader
 
 This provides a high-performance data loading pipeline for NNUE training
 by using a multi-threaded C++ backend.
@@ -21,7 +21,6 @@ Usage:
 """
 
 import ctypes
-import os
 import numpy as np
 import torch
 from pathlib import Path
@@ -36,15 +35,15 @@ def _find_library() -> str:
     # Search paths in order of preference
     search_paths = [
         # Same directory as this file
-        Path(__file__).parent / "libbatch_loader.so",
-        Path(__file__).parent / "build" / "libbatch_loader.so",
+        Path(__file__).parent / "libnnue_batch_loader.so",
+        Path(__file__).parent / "build" / "libnnue_batch_loader.so",
         # Current working directory
-        Path.cwd() / "libbatch_loader.so",
-        Path.cwd() / "build" / "libbatch_loader.so",
-        Path.cwd() / "cpp_batch_loader" / "build" / "libbatch_loader.so",
+        Path.cwd() / "libnnue_batch_loader.so",
+        Path.cwd() / "build" / "libnnue_batch_loader.so",
+        Path.cwd() / "cpp_batch_loader" / "build" / "libnnue_batch_loader.so",
         # System paths
-        Path("/usr/local/lib/libbatch_loader.so"),
-        Path("/usr/lib/libbatch_loader.so"),
+        Path("/usr/local/lib/libnnue_batch_loader.so"),
+        Path("/usr/lib/libnnue_batch_loader.so"),
     ]
     
     for path in search_paths:
@@ -52,7 +51,7 @@ def _find_library() -> str:
             return str(path)
     
     raise RuntimeError(
-        "Could not find libbatch_loader.so. Please build it first:\n"
+        "Could not find libnnue_batch_loader.so. Please build it first:\n"
         "  cd cpp_batch_loader && mkdir build && cd build\n"
         "  cmake -DCMAKE_BUILD_TYPE=Release ..\n"
         "  make -j$(nproc)"
@@ -427,7 +426,7 @@ if __name__ == "__main__":
     
     if not shard_files:
         print("No shard files found. Please provide path to .bin.zst files.")
-        print("Usage: python batch_loader.py [shard_pattern]")
+        print("Usage: python nnue_batch_loader.py [shard_pattern]")
         exit(1)
     
     print(f"Found {len(shard_files)} shard files")
