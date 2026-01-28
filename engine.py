@@ -1,5 +1,4 @@
 import importlib
-import os
 import random
 import re
 import time
@@ -13,7 +12,7 @@ from  config import *
 
 from cached_board import CachedBoard, move_to_int
 from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
-from config import MAX_SCORE
+from config import MAX_SCORE, SOFT_STOP_DIVISOR
 
 CURR_DIR = Path(__file__).resolve().parent
 HOME_DIR = "ChessDNN"
@@ -494,7 +493,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             return evaluate_classical(board), []
 
     # -------- EARLIER soft stop in QS - honor at shallower depth --------
-    if TimeControl.soft_stop and q_depth > MAX_QS_DEPTH // 3:  # Changed from // 2
+    if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // SOFT_STOP_DIVISOR):  # Changed from // 2
         _qs_stats["time_cutoffs"] += 1
         _diag_warn("qs_time_cutoff", f"QS soft-stopped at depth {q_depth}")
         if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL:
@@ -535,7 +534,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     best_pv = []
     best_score = -MAX_SCORE  # ✅ Track best score separately
 
-    # Stand-pat is not valid when in check. It is likely that there will wil a move that is better
+    # Stand-pat is not valid when in check. It is likely that there will be a move that is better
     # than stand-pat
     if not is_check:
         is_dnn_eval = False
@@ -545,6 +544,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         else:
             stand_pat = evaluate_classical(board)
 
+        # if classical evaluation of stand_pat is close to beta, use NN evaluation.
         if (not is_dnn_eval and IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
                 and abs(stand_pat - beta) < QS_DELTA_MAX_NN_EVAL):
@@ -555,10 +555,11 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             kpi['beta_cutoffs'] += 1
             return stand_pat, []  # ✅ Return stand_pat, not beta
 
-        # Big delta pruning - can't possibly reach alpha
+        # stand_pat too low - can't possibly reach alpha
         if stand_pat + PIECE_VALUES[chess.QUEEN] < alpha:
             return stand_pat, []  # ✅ Return stand_pat (it's the best we can do)
 
+        # If stand_pat is going to be alpha or stan_pat and alpha are close, use NN evaluation.
         if (not is_dnn_eval and IS_NN_ENABLED
                 and q_depth <= QS_DEPTH_MAX_NN_EVAL
                 and abs(stand_pat) < STAND_PAT_MAX_NN_EVAL
@@ -569,29 +570,36 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         if stand_pat > alpha:
             alpha = stand_pat
 
-    moves_searched = 0
-
     # -------- DYNAMIC move limit based on depth AND time pressure --------
+    if q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_Q1_DIVISOR):
+        move_limit = MAX_QS_MOVES_Q1
+    elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_Q2_DIVISOR):
+        move_limit = MAX_QS_MOVES_Q2
+    elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_Q3_DIVISOR):
+        move_limit = MAX_QS_MOVES_Q3
+    else:
+        move_limit = MAX_QS_MOVES_Q4
+
     time_critical = TimeControl.soft_stop or (
             TimeControl.time_limit and TimeControl.start_time and
-            (time.perf_counter() - TimeControl.start_time) > TimeControl.time_limit * 0.8  # FIX: Increased from 0.7
+            (time.perf_counter() - TimeControl.start_time) > TimeControl.time_limit * TIME_CRITICAL_FACTOR
     )
-
     if time_critical:
-        move_limit = MAX_QS_MOVES_TIME_CRITICAL  # Time critical (5 moves)
-    elif q_depth > MAX_QS_DEPTH // 2:
-        move_limit = MAX_QS_MOVES_DEEP  # Medium (5 moves)
-    else:
-        move_limit = MAX_QS_MOVES_PER_PLY  # Normal (10 moves)
+        move_limit = min(MAX_QS_MOVES_TIME_CRITICAL,  move_limit) # Time critical (5 moves)
+    #elif q_depth > MAX_QS_DEPTH // 2:
+     #   move_limit = MAX_QS_MOVES_DEEP  # Medium (5 moves)
+    #else:
+     #   move_limit = MAX_QS_MOVES_PER_PLY  # Normal (10 moves)
 
     # FIX: Never use less than MIN_QS_MOVES_SHALLOW at shallow QS depths (1-2)
     # These shallow evaluations are critical for score accuracy
-    if q_depth <= 2:
-        move_limit = max(move_limit, MIN_QS_MOVES_SHALLOW)
+    #if q_depth <= 2:
+     #   move_limit = max(move_limit, MIN_QS_MOVES_SHALLOW)
 
     # Pre-compute move info for this position
     board.precompute_move_info()
 
+    moves_searched = 0
     for move in ordered_moves_q_search(board):
         # -------- NEW: Enforce move limit to prevent explosion --------
         if not is_check and moves_searched >= move_limit:
@@ -601,12 +609,11 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         if not is_check:
             # Use cached is_capture
             is_capture_move = board.is_capture_cached(move)
-            # If the move gives check and depth < TACTICAL_QS_MAX_DEPTH, go ahead with
-            # evaluation
+            # if the move is not a capture then if the move gives check and depth < TACTICAL_QS_MAX_DEPTH,
+            # go ahead with exploration; otherwise skip the move
             if not is_capture_move:
                 if q_depth > TACTICAL_QS_MAX_DEPTH:
                     continue
-                # Use cached gives_check
                 if not board.gives_check_cached(move):
                     continue
 
@@ -616,7 +623,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
                 victim_type = board.get_victim_type(move)
                 if victim_type:
                     gain = PIECE_VALUES[victim_type]
-                    if best_score + gain + DELTA_PRUNING_MARGIN < alpha:  # ✅ Use best_score
+                    if best_score + gain + DELTA_PRUNING_QS_MARGIN < alpha:  # ✅ Use best_score
                         continue
 
         should_update_nn = q_depth <= QS_DEPTH_MAX_NN_EVAL
@@ -640,7 +647,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             if TimeControl.stop_search:
                 break  # Exit loop gracefully, return best_score below
             # Also check soft_stop in deep QS
-            if TimeControl.soft_stop and q_depth > MAX_QS_DEPTH // 2:
+            if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // SOFT_STOP_DIVISOR):
                 _qs_stats["time_cutoffs"] += 1
                 break
 

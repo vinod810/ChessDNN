@@ -14,6 +14,7 @@ OUTFILE_TEMPLATE="/tmp/fileXXXXXX.pgn"
 OUTFILE=$(mktemp --dry-run "$OUTFILE_TEMPLATE")
 echo "PGN File: $OUTFILE"
 #python -c 'from engine import dump_parameters; dump_parameters()'
+python3 -c "import config"
 
 ~/Temp/cutechess/build/cutechess-cli \
 -engine cmd="$CMD_DIR"/../uci.sh name="$1"  \

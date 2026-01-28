@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 
 # Track which parameters were overridden from environment
 _overridden_params = []
@@ -68,24 +69,36 @@ QS_DELTA_MAX_NN_EVAL = _env_int('QS_DELTA_MAX_NN_EVAL', 75)  # Score difference,
 STAND_PAT_MAX_NN_EVAL = _env_int('STAND_PAT_MAX_NN_EVAL', 200)  # Absolute value of stand-pat, below it will trigger a NN evaluation.
 
 # Limit moves examined per QS ply to prevent explosion
-MAX_QS_DEPTH = _env_int('MAX_QS_DEPTH', 10)  # REDUCED from 15 to prevent search explosion
-MAX_QS_MOVES_PER_PLY = _env_int('MAX_QS_MOVES_PER_PLY', 10)  # REDUCED from 12 - Maximum captures to examine at each QS depth
-MAX_QS_MOVES_DEEP = _env_int('MAX_QS_MOVES_DEEP', 5)  # REDUCED from 6
+MAX_QS_DEPTH = _env_int('MAX_QS_DEPTH', 22)  # REDUCED from 15 to prevent search explosion
+MAX_QS_MOVES_Q1 = _env_int('MAX_QS_MOVES_Q1', 10)
+MAX_QS_MOVES_Q2 = _env_int('MAX_QS_MOVES_Q2', 5)
+MAX_QS_MOVES_Q3 = _env_int('MAX_QS_MOVES_Q3', 2)
+MAX_QS_MOVES_Q4 = _env_int('MAX_QS_MOVES_Q4', 1)
+MAX_QS_MOVES_Q1_DIVISOR = _env_float('MAX_QS_MOVES_Q1_DIVISOR', 4.0) # 0.25
+MAX_QS_MOVES_Q2_DIVISOR = _env_float('MAX_QS_MOVES_Q2_DIVISOR', 2.0) # 0.5
+MAX_QS_MOVES_Q3_DIVISOR = _env_float('MAX_QS_MOVES_Q3_DIVISOR', 1.33) # 0.75
+SOFT_STOP_DIVISOR = _env_float('SOFT_STOP_DIVISOR', 7.0)
+#MAX_QS_MOVES_PER_PLY = _env_int('MAX_QS_MOVES_PER_PLY', 10)  # REDUCED from 12 - Maximum captures to examine at each QS depth
+#MAX_QS_MOVES_DEEP = _env_int('MAX_QS_MOVES_DEEP', 5)  # REDUCED from 6
+TIME_CRITICAL_FACTOR = _env_float('TIME_CRITICAL_FACTOR', 0.88)
 MAX_QS_MOVES_TIME_CRITICAL = _env_int('MAX_QS_MOVES_TIME_CRITICAL', 5)  # FIX: Increased from 3 to 5
-MIN_QS_MOVES_SHALLOW = _env_int('MIN_QS_MOVES_SHALLOW', 6)  # NEW: Minimum moves at QS depth 1-2
-
-QS_TT_SUPPORTED = _env_bool('QS_TT_SUPPORTED', True)
+#MIN_QS_MOVES_SHALLOW = _env_int('MIN_QS_MOVES_SHALLOW', 6)  # NEW: Minimum moves at QS depth 1-2
 DELTA_PRUNING_QS_MIN_DEPTH = _env_int('DELTA_PRUNING_QS_MIN_DEPTH', 5)  # REDUCED from 6
-DELTA_PRUNING_MARGIN = _env_int('DELTA_PRUNING_MARGIN', 75)
-TACTICAL_QS_MAX_DEPTH = _env_int('TACTICAL_QS_MAX_DEPTH', 4)  # REDUCED from 5
-
+DELTA_PRUNING_QS_MARGIN = _env_int('DELTA_PRUNING_QS_MARGIN', 75)
+TACTICAL_QS_MAX_DEPTH = _env_int('TACTICAL_QS_MAX_DEPTH', 5)  # REDUCED from 5
 # Time check frequency in QS - more aggressive
 QS_TIME_CHECK_INTERVAL = _env_int('QS_TIME_CHECK_INTERVAL', 25)  # REDUCED from 50
-
 # Time budget allocation
-QS_TIME_BUDGET_FRACTION = _env_float('QS_TIME_BUDGET_FRACTION', 0.25)  # FIX V4: Reduced from 0.35
-MIN_MAIN_SEARCH_RESERVE = _env_float('MIN_MAIN_SEARCH_RESERVE', 0.3)  # NEW: Always reserve 30% of time
-EMERGENCY_TIME_RESERVE = _env_float('EMERGENCY_TIME_RESERVE', 0.5)  # FIX V4: Always keep at least 0.5s
+QS_TIME_BUDGET_FRACTION = _env_float('QS_TIME_BUDGET_FRACTION', 0.35)  # FIX V4: Reduced from 0.35
+#MIN_MAIN_SEARCH_RESERVE = _env_float('MIN_MAIN_SEARCH_RESERVE', 0.30)  # NEW: Always reserve 30% of time
+QS_TT_SUPPORTED = _env_bool('QS_TT_SUPPORTED', False)
+
+EMERGENCY_TIME_RESERVE = _env_float('EMERGENCY_TIME_RESERVE', 0.75)  # FIX V4: Always keep at least 0.5s
+# Minimum depth requirements
+MIN_NEGAMAX_DEPTH = _env_int('MIN_NEGAMAX_DEPTH', 2)  # Minimum depth before soft_stop is honored
+MIN_ACCEPTABLE_DEPTH = _env_int('MIN_ACCEPTABLE_DEPTH', 4)  # NEW: Preferred minimum depth
+TACTICAL_MIN_DEPTH = _env_int('TACTICAL_MIN_DEPTH', 5)  # NEW: Minimum depth for tactical positions
+UNSTABLE_MIN_DEPTH = _env_int('UNSTABLE_MIN_DEPTH', 6)  # FIX V4: Minimum depth when score instability
 
 ASPIRATION_WINDOW = _env_int('ASPIRATION_WINDOW', 75)  # FIX V4: Increased from 50
 MAX_AW_RETRIES = _env_int('MAX_AW_RETRIES', 2)  # Base retries (tactical positions get +1)
@@ -131,12 +144,6 @@ RAZORING_MAX_DEPTH = _env_int('RAZORING_MAX_DEPTH', 2)  # Only apply at depth <=
 # Time management
 ESTIMATED_BRANCHING_FACTOR = _env_float('ESTIMATED_BRANCHING_FACTOR', 3.5)
 TIME_SAFETY_MARGIN = _env_float('TIME_SAFETY_MARGIN', 0.55)  # Only start new depth if 70%+ time available
-
-# Minimum depth requirements
-MIN_NEGAMAX_DEPTH = _env_int('MIN_NEGAMAX_DEPTH', 2)  # Minimum depth before soft_stop is honored
-MIN_ACCEPTABLE_DEPTH = _env_int('MIN_ACCEPTABLE_DEPTH', 4)  # NEW: Preferred minimum depth
-TACTICAL_MIN_DEPTH = _env_int('TACTICAL_MIN_DEPTH', 5)  # NEW: Minimum depth for tactical positions
-UNSTABLE_MIN_DEPTH = _env_int('UNSTABLE_MIN_DEPTH', 6)  # FIX V4: Minimum depth when score instability
 
 MAX_NEGAMAX_DEPTH = _env_int('MAX_NEGAMAX_DEPTH', 20)
 MAX_SEARCH_TIME = _env_int('MAX_SEARCH_TIME', 30)

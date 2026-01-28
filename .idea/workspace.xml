@@ -4,10 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="CPP training">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="config.py to print overridden params">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/oldfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/oldfish.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
     </list>
@@ -141,7 +141,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-ca5e2b39c7df-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.308" />
+        <option value="bundled-python-sdk-3944b0c99280-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.30387.127" />
       </set>
     </attachedChunks>
   </component>
@@ -307,14 +307,6 @@
       <option name="presentableId" value="LOCAL-00111" />
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
-    </task>
-    <task id="LOCAL-00136" summary="pre-data - train split">
-      <option name="closed" value="true" />
-      <created>1768788605458</created>
-      <option name="number" value="00136" />
-      <option name="presentableId" value="LOCAL-00136" />
-      <option name="project" value="LOCAL" />
-      <updated>1768788605459</updated>
     </task>
     <task id="LOCAL-00137" summary="NN vs Stockfish test">
       <option name="closed" value="true" />
@@ -524,7 +516,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769545455370</updated>
     </task>
-    <option name="localTasksCounter" value="163" />
+    <task id="LOCAL-00163" summary="config.py to print overridden params">
+      <option name="closed" value="true" />
+      <created>1769548728009</created>
+      <option name="number" value="00163" />
+      <option name="presentableId" value="LOCAL-00163" />
+      <option name="project" value="LOCAL" />
+      <updated>1769548728009</updated>
+    </task>
+    <option name="localTasksCounter" value="164" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -539,7 +539,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Fixed bugs in DNN data. Refactoring. Untested code." />
     <MESSAGE value="Fixed bugs in DNN data. Refactoring. Partially tested code." />
     <MESSAGE value="Builds work. Convergence not yet verified." />
     <MESSAGE value="NNUE and DNN converging well." />
@@ -564,7 +563,8 @@
     <MESSAGE value="NN optimization" />
     <MESSAGE value="Pytorch COO training" />
     <MESSAGE value="CPP training" />
-    <option name="LAST_COMMIT_MESSAGE" value="CPP training" />
+    <MESSAGE value="config.py to print overridden params" />
+    <option name="LAST_COMMIT_MESSAGE" value="config.py to print overridden params" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -576,6 +576,11 @@
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>
           <option name="timeStamp" value="5" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/config.py</url>
+          <line>81</line>
+          <option name="timeStamp" value="6" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
