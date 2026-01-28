@@ -30,6 +30,7 @@ Larger DNN netwrok Archtectures are better in positional play than smaller archi
 ## Getting Started
 * Clone the repository to your computer
 * Set up the conda environment using the environment.yml file
+* Run ./bbuild.sh in the main director and sub directories
 
 ## Executing program
 * You can play against this chess program using PyChess or Scid Chess GUI.

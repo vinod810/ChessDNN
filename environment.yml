@@ -1,27 +1,9 @@
 name: neurofish
 channels:
-  - conda-forge
   - defaults
 dependencies:
-  # Python version
-  - python>=3.10
-  - cython
-
-  # Core dependencies
   - numpy
   - torch
-  - pybind11
-
-  # Chess library
   - python-chess
-
-  # Data processing
   - zstandard
-
-  # Optional: Numba for JIT compilation (performance optimization)
-  - numba
-
-  # Pip dependencies (if any conda packages unavailable)
-  # - pip:
-  #   - package-name
-  - chess
+  - cython
