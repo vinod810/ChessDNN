@@ -4,12 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="DNN COO and Dataloader">
-      <change afterPath="$PROJECT_DIR$/test/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/utils/README.md" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="README  for sub dirs">
+      <change afterPath="$PROJECT_DIR$/parameter_tuning_guide.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/time_depth_management_guide.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/environment.yml" beforeDir="false" afterPath="$PROJECT_DIR$/environment.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -308,14 +309,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00140" summary="Builds work. Convergence not yet verified.">
-      <option name="closed" value="true" />
-      <created>1768871921873</created>
-      <option name="number" value="00140" />
-      <option name="presentableId" value="LOCAL-00140" />
-      <option name="project" value="LOCAL" />
-      <updated>1768871921874</updated>
-    </task>
     <task id="LOCAL-00141" summary="NNUE and DNN converging well.">
       <option name="closed" value="true" />
       <created>1768889324764</created>
@@ -524,7 +517,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769612363678</updated>
     </task>
-    <option name="localTasksCounter" value="167" />
+    <task id="LOCAL-00167" summary="README  for sub dirs">
+      <option name="closed" value="true" />
+      <created>1769616724421</created>
+      <option name="number" value="00167" />
+      <option name="presentableId" value="LOCAL-00167" />
+      <option name="project" value="LOCAL" />
+      <updated>1769616724421</updated>
+    </task>
+    <option name="localTasksCounter" value="168" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -539,7 +540,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="NNUE and DNN converging well." />
     <MESSAGE value="Removed multiple is_game_over()" />
     <MESSAGE value="Cached stockfish NNUE evals" />
     <MESSAGE value="Quantization benchmark" />
@@ -564,7 +564,8 @@
     <MESSAGE value="config.py to print overridden params" />
     <MESSAGE value="Parameter optimization" />
     <MESSAGE value="DNN COO and Dataloader" />
-    <option name="LAST_COMMIT_MESSAGE" value="DNN COO and Dataloader" />
+    <MESSAGE value="README  for sub dirs" />
+    <option name="LAST_COMMIT_MESSAGE" value="README  for sub dirs" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -576,11 +577,6 @@
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>
           <option name="timeStamp" value="5" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/config.py</url>
-          <line>81</line>
-          <option name="timeStamp" value="6" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

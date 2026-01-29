@@ -55,15 +55,15 @@ debug_mode = _env_bool('DEBUG_MODE', False)  # Runtime toggle via UCI "debug on/
 MAX_MP_CORES = _env_int('MAX_MP_CORES', 1)  # 1 or less disables multiprocessing, UCI option "Threads"
 IS_SHARED_TT_MP = _env_bool('IS_SHARED_TT_MP', False)  # Whether to share TT across workers in MP mode
 IS_BLAS_ENABLED = _env_bool('IS_BLAS_ENABLED', False)
-
 IS_NN_ENABLED = _env_bool('IS_NN_ENABLED', True)
 NN_TYPE = _env_str('NN_TYPE', "NNUE")
+# TODO Implement quantization for DNN
 L1_QUANTIZATION = _env_str('L1_QUANTIZATION', "NONE")  # Options: "NONE" (FP32), "INT8", "INT16"
 FULL_NN_EVAL_FREQ = _env_int('FULL_NN_EVAL_FREQ', 3000)  # Increase to 50_000 after initial testing
 
 # Note when NN related parameters are optimized, use real games as positional understanding will be reflected.
 # The non-NN parameters are primarily about tactics, and they can be quickly tuned using test positions.
-QS_DEPTH_MIN_NN_EVAL = _env_int('QS_DEPTH_MIN_NN_EVAL', 5) # TODO test higher values
+QS_DEPTH_MIN_NN_EVAL = _env_int('QS_DEPTH_MIN_NN_EVAL', 6) #
 QS_DEPTH_MAX_NN_EVAL = _env_int('QS_DEPTH_MAX_NN_EVAL', 999)  # NN evaluation is allowed at all QS depths
 QS_DELTA_MAX_NN_EVAL = _env_int('QS_DELTA_MAX_NN_EVAL', 75)  # Score difference, below it will trigger a NN evaluation
 STAND_PAT_MAX_NN_EVAL = _env_int('STAND_PAT_MAX_NN_EVAL', 200)  # Absolute value of stand-pat, below it will trigger a NN evaluation.
@@ -77,15 +77,15 @@ MAX_QS_MOVES_Q4 = _env_int('MAX_QS_MOVES_Q4', 1)
 MAX_QS_MOVES_Q1_DIVISOR = _env_float('MAX_QS_MOVES_Q1_DIVISOR', 4.0) # 0.25
 MAX_QS_MOVES_Q2_DIVISOR = _env_float('MAX_QS_MOVES_Q2_DIVISOR', 2.0) # 0.5
 MAX_QS_MOVES_Q3_DIVISOR = _env_float('MAX_QS_MOVES_Q3_DIVISOR', 1.33) # 0.75
-SOFT_STOP_DIVISOR = _env_float('SOFT_STOP_DIVISOR', 7.0)
+QS_SOFT_STOP_DIVISOR = _env_float('QS_SOFT_STOP_DIVISOR', 7.0)
 #MAX_QS_MOVES_PER_PLY = _env_int('MAX_QS_MOVES_PER_PLY', 10)  # REDUCED from 12 - Maximum captures to examine at each QS depth
 #MAX_QS_MOVES_DEEP = _env_int('MAX_QS_MOVES_DEEP', 5)  # REDUCED from 6
-TIME_CRITICAL_FACTOR = _env_float('TIME_CRITICAL_FACTOR', 0.88)
+QS_TIME_CRITICAL_FACTOR = _env_float('QS_TIME_CRITICAL_FACTOR', 0.88)
 MAX_QS_MOVES_TIME_CRITICAL = _env_int('MAX_QS_MOVES_TIME_CRITICAL', 5)  # FIX: Increased from 3 to 5
 #MIN_QS_MOVES_SHALLOW = _env_int('MIN_QS_MOVES_SHALLOW', 6)  # NEW: Minimum moves at QS depth 1-2
 DELTA_PRUNING_QS_MIN_DEPTH = _env_int('DELTA_PRUNING_QS_MIN_DEPTH', 5)  # REDUCED from 6
 DELTA_PRUNING_QS_MARGIN = _env_int('DELTA_PRUNING_QS_MARGIN', 75)
-TACTICAL_QS_MAX_DEPTH = _env_int('TACTICAL_QS_MAX_DEPTH', 5)  # REDUCED from 5
+CHECK_QS_MAX_DEPTH = _env_int('CHECK_QS_MAX_DEPTH', 5)  # REDUCED from 5
 # Time check frequency in QS - more aggressive
 QS_TIME_CHECK_INTERVAL = _env_int('QS_TIME_CHECK_INTERVAL', 25)  # REDUCED from 50
 # Time budget allocation
@@ -93,12 +93,18 @@ QS_TIME_BUDGET_FRACTION = _env_float('QS_TIME_BUDGET_FRACTION', 0.35)  # FIX V4:
 #MIN_MAIN_SEARCH_RESERVE = _env_float('MIN_MAIN_SEARCH_RESERVE', 0.30)  # NEW: Always reserve 30% of time
 QS_TT_SUPPORTED = _env_bool('QS_TT_SUPPORTED', False)
 
-EMERGENCY_TIME_RESERVE = _env_float('EMERGENCY_TIME_RESERVE', 0.75)  # FIX V4: Always keep at least 0.5s
 # Minimum depth requirements
-MIN_NEGAMAX_DEPTH = _env_int('MIN_NEGAMAX_DEPTH', 2)  # Minimum depth before soft_stop is honored
-MIN_ACCEPTABLE_DEPTH = _env_int('MIN_ACCEPTABLE_DEPTH', 4)  # NEW: Preferred minimum depth
+# Tuning of depth adjustment should be done playing against stockfish (not using engine_test.py)
+MIN_NEGAMAX_DEPTH = _env_int('MIN_NEGAMAX_DEPTH', 3)  # Minimum depth before soft_stop is honored
+MIN_PREFERRED_DEPTH = _env_int('MIN_PREFERRED_DEPTH', 5)  # NEW: Preferred minimum depth
 TACTICAL_MIN_DEPTH = _env_int('TACTICAL_MIN_DEPTH', 5)  # NEW: Minimum depth for tactical positions
-UNSTABLE_MIN_DEPTH = _env_int('UNSTABLE_MIN_DEPTH', 6)  # FIX V4: Minimum depth when score instability
+UNSTABLE_MIN_DEPTH = _env_int('UNSTABLE_MIN_DEPTH', 5)  # FIX V4: Minimum depth when score instability
+
+# Time management
+# Tuning of time management should be done playing against stockfish (not using engine_test.py)
+EMERGENCY_TIME_RESERVE = _env_float('EMERGENCY_TIME_RESERVE', 0.50)  # FIX V4: Always keep at least 0.5s
+ESTIMATED_BRANCHING_FACTOR = _env_float('ESTIMATED_BRANCHING_FACTOR', 4.0)
+TIME_SAFETY_MARGIN_RATIO = _env_float('TIME_SAFETY_MARGIN_RATIO', 0.45)  # Only start new depth if 70%+ time available
 
 ASPIRATION_WINDOW = _env_int('ASPIRATION_WINDOW', 75)  # FIX V4: Increased from 50
 MAX_AW_RETRIES = _env_int('MAX_AW_RETRIES', 2)  # Base retries (tactical positions get +1)
@@ -140,10 +146,6 @@ if _razoring_env:
 else:
     RAZORING_MARGIN = _razoring_default
 RAZORING_MAX_DEPTH = _env_int('RAZORING_MAX_DEPTH', 2)  # Only apply at depth <= 2
-
-# Time management
-ESTIMATED_BRANCHING_FACTOR = _env_float('ESTIMATED_BRANCHING_FACTOR', 3.5)
-TIME_SAFETY_MARGIN = _env_float('TIME_SAFETY_MARGIN', 0.55)  # Only start new depth if 70%+ time available
 
 MAX_NEGAMAX_DEPTH = _env_int('MAX_NEGAMAX_DEPTH', 20)
 MAX_SEARCH_TIME = _env_int('MAX_SEARCH_TIME', 30)

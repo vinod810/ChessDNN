@@ -73,13 +73,13 @@ QS_DEPTH_MIN_NN_EVAL 100 games against SF-2100
 2,2193
 3,2167
 4,2124
-5,2223*
-6,
-7
-9
-12
-16
-99
+5,2223
+6,2230*
+7,2145
+9,2192
+12,2167
+16,2192
+99,2167
 
 QS_DEPTH_MAX_NN_EVAL 60 games again SF-2300
 2 - 2153
@@ -118,4 +118,17 @@ INT16:2130
 IS_BLAS_ENABLED, 30 games, SF-2200
 True: 2246
 False: 2223
+
+DNN vs NNUE
+Test, Measurement, DNN, NNUE
+Time per evaluation, Milliseconds,
+Stockfish depth 20+, MAE - Difference capped at 100CP,
+Stockfish depth 20+, MSE - tanh(CP/410)
+Stockfish NNUE positional evaluation: MAE - Difference capped at 100 CP,
+Stockfish NNUE positional evaluation, MSE - tanh(CP/410),
+Classical piece square evaluation, MAE - ELO,
+
+
+
+
 

@@ -12,7 +12,7 @@ from  config import *
 
 from cached_board import CachedBoard, move_to_int
 from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
-from config import MAX_SCORE, SOFT_STOP_DIVISOR
+from config import MAX_SCORE, QS_SOFT_STOP_DIVISOR
 
 CURR_DIR = Path(__file__).resolve().parent
 HOME_DIR = "ChessDNN"
@@ -493,7 +493,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             return evaluate_classical(board), []
 
     # -------- EARLIER soft stop in QS - honor at shallower depth --------
-    if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // SOFT_STOP_DIVISOR):  # Changed from // 2
+    if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // QS_SOFT_STOP_DIVISOR):  # Changed from // 2
         _qs_stats["time_cutoffs"] += 1
         _diag_warn("qs_time_cutoff", f"QS soft-stopped at depth {q_depth}")
         if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL:
@@ -582,7 +582,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
     time_critical = TimeControl.soft_stop or (
             TimeControl.time_limit and TimeControl.start_time and
-            (time.perf_counter() - TimeControl.start_time) > TimeControl.time_limit * TIME_CRITICAL_FACTOR
+            (time.perf_counter() - TimeControl.start_time) > TimeControl.time_limit * QS_TIME_CRITICAL_FACTOR
     )
     if time_critical:
         move_limit = min(MAX_QS_MOVES_TIME_CRITICAL,  move_limit) # Time critical (5 moves)
@@ -612,7 +612,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             # if the move is not a capture then if the move gives check and depth < TACTICAL_QS_MAX_DEPTH,
             # go ahead with exploration; otherwise skip the move
             if not is_capture_move:
-                if q_depth > TACTICAL_QS_MAX_DEPTH:
+                if q_depth > CHECK_QS_MAX_DEPTH:
                     continue
                 if not board.gives_check_cached(move):
                     continue
@@ -647,7 +647,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             if TimeControl.stop_search:
                 break  # Exit loop gracefully, return best_score below
             # Also check soft_stop in deep QS
-            if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // SOFT_STOP_DIVISOR):
+            if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // QS_SOFT_STOP_DIVISOR):
                 _qs_stats["time_cutoffs"] += 1
                 break
 
@@ -1225,7 +1225,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         elif is_tactical_position:
             current_min_depth = TACTICAL_MIN_DEPTH  # Higher minimum for tactical
         else:
-            current_min_depth = MIN_ACCEPTABLE_DEPTH  # Normal minimum
+            current_min_depth = MIN_PREFERRED_DEPTH  # Normal minimum
 
         # Check if we should stop (but respect minimum depths)
         if depth > current_min_depth and should_stop_search(depth):
@@ -1234,11 +1234,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
         # NEW: If we haven't reached minimum acceptable depth, clear soft_stop to force deeper search
         if depth <= current_min_depth and TimeControl.soft_stop and not TimeControl.stop_search:
-            if max_completed_depth > 0 and max_completed_depth < MIN_ACCEPTABLE_DEPTH:
+            if max_completed_depth > 0 and max_completed_depth < MIN_PREFERRED_DEPTH:
                 TimeControl.soft_stop = False
                 _diag["min_depth_forced"] += 1
                 diag_print(
-                    f"MIN_DEPTH: Forcing depth {depth}, only completed {max_completed_depth}, need {MIN_ACCEPTABLE_DEPTH}")
+                    f"MIN_DEPTH: Forcing depth {depth}, only completed {max_completed_depth}, need {MIN_PREFERRED_DEPTH}")
 
         # After MIN_DEPTH, check if we have enough time to likely complete the next depth
         if depth > MIN_NEGAMAX_DEPTH and time_limit is not None and last_depth_time > 0:
@@ -1247,13 +1247,13 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
             estimated_next_depth_time = last_depth_time * ESTIMATED_BRANCHING_FACTOR
 
             # Only apply time estimation if we've reached minimum acceptable depth
-            if max_completed_depth >= MIN_ACCEPTABLE_DEPTH:
-                if remaining < estimated_next_depth_time * TIME_SAFETY_MARGIN:
+            if max_completed_depth >= MIN_PREFERRED_DEPTH:
+                if remaining < estimated_next_depth_time * TIME_SAFETY_MARGIN_RATIO:
                     # Not enough time to likely complete this depth
                     break
 
             # FIX V4: Emergency reserve - stop if we're eating into the reserve
-            if remaining < EMERGENCY_TIME_RESERVE and max_completed_depth >= MIN_ACCEPTABLE_DEPTH:
+            if remaining < EMERGENCY_TIME_RESERVE and max_completed_depth >= MIN_PREFERRED_DEPTH:
                 _diag["emergency_reserve_stop"] += 1
                 diag_print(f"EMERGENCY_RESERVE: Only {remaining:.2f}s left, stopping at depth {max_completed_depth}")
                 break
@@ -1304,7 +1304,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     search_aborted = True
                     break
                 # FIX: Only honor soft_stop mid-depth after reaching MIN_ACCEPTABLE_DEPTH
-                if TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH:
+                if TimeControl.soft_stop and max_completed_depth >= MIN_PREFERRED_DEPTH:
                     _diag_warn("mid_depth_abort",
                                f"Aborting depth {depth} mid-search (completed={max_completed_depth})")
                     search_aborted = True
@@ -1332,7 +1332,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
                 # Check if search was aborted during negamax
                 # FIX: Only honor soft_stop after reaching MIN_ACCEPTABLE_DEPTH
-                if TimeControl.stop_search or (TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH):
+                if TimeControl.stop_search or (TimeControl.soft_stop and max_completed_depth >= MIN_PREFERRED_DEPTH):
                     search_aborted = True
                     # Still save this move's result if it's our only one
                     if current_best_move is None:
@@ -1405,7 +1405,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                         search_aborted = True
                         break
                     # FIX: Only honor soft_stop after reaching MIN_ACCEPTABLE_DEPTH
-                    if TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH:
+                    if TimeControl.soft_stop and max_completed_depth >= MIN_PREFERRED_DEPTH:
                         search_aborted = True
                         break
 
@@ -1418,7 +1418,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     # Check if search was aborted during negamax
                     # FIX: Only honor soft_stop after reaching MIN_ACCEPTABLE_DEPTH
                     if TimeControl.stop_search or (
-                            TimeControl.soft_stop and max_completed_depth >= MIN_ACCEPTABLE_DEPTH):
+                            TimeControl.soft_stop and max_completed_depth >= MIN_PREFERRED_DEPTH):
                         search_aborted = True
                         if current_best_move is None:
                             current_best_move = move
