@@ -139,6 +139,6 @@ echo ""
 #echo "Or copy them to the same directory as your Python scripts:"
 #echo "  cp ${BUILD_DIR}/lib*.so /path/to/your/project/"
 echo "Copying ${BUILD_DIR}/lib*.so to the libs directory.."
-cp ${BUILD_DIR}/lib*.so ../../libs/
+cp ${BUILD_DIR}/lib*.so ../../../libs/
 print_status "Done!"
 echo ""

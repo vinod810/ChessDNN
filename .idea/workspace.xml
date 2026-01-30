@@ -4,16 +4,17 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Reorganizing in to nn_train and libs sub dirs.">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimization replaced Chess.Move by int WAC 265/300">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_board/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/build.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_nn_build/build.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/build.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/prepare_data.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/dnn_batch_loader.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/dnn_batch_loader.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/dnn_batch_loader.h" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/dnn_batch_loader.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/nnue_batch_loader.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/nnue_batch_loader.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/nnue_batch_loader.h" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/nnue_batch_loader.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train/cpp_nn_train/build/CMakeFiles/CMakeConfigureLog.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/build/CMakeFiles/CMakeConfigureLog.yaml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -83,11 +84,11 @@
       <recent name="$PROJECT_DIR$/test" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/nn_train" />
       <recent name="$PROJECT_DIR$/libs" />
       <recent name="$PROJECT_DIR$/utils" />
       <recent name="$PROJECT_DIR$/test" />
-      <recent name="$PROJECT_DIR$/chess_cpp_integration" />
     </key>
   </component>
   <component name="RunManager" selected="Python.nn_tests">
@@ -314,14 +315,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00144" summary="Quantization benchmark">
-      <option name="closed" value="true" />
-      <created>1768959387326</created>
-      <option name="number" value="00144" />
-      <option name="presentableId" value="LOCAL-00144" />
-      <option name="project" value="LOCAL" />
-      <updated>1768959387327</updated>
-    </task>
     <task id="LOCAL-00145" summary="Before quantization">
       <option name="closed" value="true" />
       <created>1769002175416</created>
@@ -530,7 +523,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769735348252</updated>
     </task>
-    <option name="localTasksCounter" value="171" />
+    <task id="LOCAL-00171" summary="Optimization replaced Chess.Move by int WAC 265/300">
+      <option name="closed" value="true" />
+      <created>1769743603892</created>
+      <option name="number" value="00171" />
+      <option name="presentableId" value="LOCAL-00171" />
+      <option name="project" value="LOCAL" />
+      <updated>1769743603892</updated>
+    </task>
+    <option name="localTasksCounter" value="172" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -545,7 +546,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Before quantization" />
     <MESSAGE value="Quantization, functional test ok, performance test - TBD" />
     <MESSAGE value="Fixed nn_tests.py" />
     <MESSAGE value="Fixed cached_board.py to handle C++ board" />
@@ -570,7 +570,8 @@
     <MESSAGE value="Guides for optimization" />
     <MESSAGE value="Before cProfile" />
     <MESSAGE value="Reorganizing in to nn_train and libs sub dirs." />
-    <option name="LAST_COMMIT_MESSAGE" value="Reorganizing in to nn_train and libs sub dirs." />
+    <MESSAGE value="Optimization replaced Chess.Move by int WAC 265/300" />
+    <option name="LAST_COMMIT_MESSAGE" value="Optimization replaced Chess.Move by int WAC 265/300" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
