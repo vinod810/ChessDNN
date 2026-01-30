@@ -63,7 +63,7 @@ FULL_NN_EVAL_FREQ = _env_int('FULL_NN_EVAL_FREQ', 3000)  # Increase to 50_000 af
 
 # Note when NN related parameters are optimized, use real games as positional understanding will be reflected.
 # The non-NN parameters are primarily about tactics, and they can be quickly tuned using test positions.
-QS_DEPTH_MIN_NN_EVAL = _env_int('QS_DEPTH_MIN_NN_EVAL', 6) #
+QS_DEPTH_MIN_NN_EVAL = _env_int('QS_DEPTH_MIN_NN_EVAL', 7) #
 QS_DEPTH_MAX_NN_EVAL = _env_int('QS_DEPTH_MAX_NN_EVAL', 999)  # NN evaluation is allowed at all QS depths
 QS_DELTA_MAX_NN_EVAL = _env_int('QS_DELTA_MAX_NN_EVAL', 75)  # Score difference, below it will trigger a NN evaluation
 STAND_PAT_MAX_NN_EVAL = _env_int('STAND_PAT_MAX_NN_EVAL', 200)  # Absolute value of stand-pat, below it will trigger a NN evaluation.

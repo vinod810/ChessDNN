@@ -4,17 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimization replaced Chess.Move by int WAC 265/300">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="README for nn_train">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/build.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/dnn_batch_loader.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/dnn_batch_loader.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/dnn_batch_loader.h" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/dnn_batch_loader.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/nnue_batch_loader.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/nnue_batch_loader.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/nnue_batch_loader.h" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/nnue_batch_loader.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/build.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train/cpp_nn_train/build/CMakeFiles/CMakeConfigureLog.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/cpp_nn_train/build/CMakeFiles/CMakeConfigureLog.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -315,14 +307,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00145" summary="Before quantization">
-      <option name="closed" value="true" />
-      <created>1769002175416</created>
-      <option name="number" value="00145" />
-      <option name="presentableId" value="LOCAL-00145" />
-      <option name="project" value="LOCAL" />
-      <updated>1769002175416</updated>
-    </task>
     <task id="LOCAL-00146" summary="Quantization, functional test ok, performance test - TBD">
       <option name="closed" value="true" />
       <created>1769010176594</created>
@@ -531,7 +515,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769743603892</updated>
     </task>
-    <option name="localTasksCounter" value="172" />
+    <task id="LOCAL-00172" summary="README for nn_train">
+      <option name="closed" value="true" />
+      <created>1769746369432</created>
+      <option name="number" value="00172" />
+      <option name="presentableId" value="LOCAL-00172" />
+      <option name="project" value="LOCAL" />
+      <updated>1769746369432</updated>
+    </task>
+    <option name="localTasksCounter" value="173" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -546,7 +538,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Quantization, functional test ok, performance test - TBD" />
     <MESSAGE value="Fixed nn_tests.py" />
     <MESSAGE value="Fixed cached_board.py to handle C++ board" />
     <MESSAGE value="Pondering" />
@@ -571,7 +562,8 @@
     <MESSAGE value="Before cProfile" />
     <MESSAGE value="Reorganizing in to nn_train and libs sub dirs." />
     <MESSAGE value="Optimization replaced Chess.Move by int WAC 265/300" />
-    <option name="LAST_COMMIT_MESSAGE" value="Optimization replaced Chess.Move by int WAC 265/300" />
+    <MESSAGE value="README for nn_train" />
+    <option name="LAST_COMMIT_MESSAGE" value="README for nn_train" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
