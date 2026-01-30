@@ -4,7 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimization WAC: 265/300">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimization WAC 263/300">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -306,14 +307,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00150" summary="Training/Eval not to use diagnostic rec">
-      <option name="closed" value="true" />
-      <created>1769173012540</created>
-      <option name="number" value="00150" />
-      <option name="presentableId" value="LOCAL-00150" />
-      <option name="project" value="LOCAL" />
-      <updated>1769173012541</updated>
-    </task>
     <task id="LOCAL-00151" summary="Multi processing. mp_search.py works">
       <option name="closed" value="true" />
       <created>1769212154602</created>
@@ -522,7 +515,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769780513971</updated>
     </task>
-    <option name="localTasksCounter" value="177" />
+    <task id="LOCAL-00177" summary="Optimization WAC 263/300">
+      <option name="closed" value="true" />
+      <created>1769781698405</created>
+      <option name="number" value="00177" />
+      <option name="presentableId" value="LOCAL-00177" />
+      <option name="project" value="LOCAL" />
+      <updated>1769781698405</updated>
+    </task>
+    <option name="localTasksCounter" value="178" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -537,7 +538,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Multi processing. mp_search.py works" />
     <MESSAGE value="Multi processing, tests, UCI" />
     <MESSAGE value="Fixes for QS explosion" />
     <MESSAGE value="Blunders reduced. Occasionaly stalls" />
@@ -562,7 +562,8 @@
     <MESSAGE value="Int Move WAC: 259/300" />
     <MESSAGE value="Optimization WAC: 268/300" />
     <MESSAGE value="Optimization WAC: 265/300" />
-    <option name="LAST_COMMIT_MESSAGE" value="Optimization WAC: 265/300" />
+    <MESSAGE value="Optimization WAC 263/300" />
+    <option name="LAST_COMMIT_MESSAGE" value="Optimization WAC 263/300" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

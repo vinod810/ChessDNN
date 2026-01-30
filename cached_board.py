@@ -502,6 +502,22 @@ class CachedBoard:
             return chess.Piece(piece_opt.piece_type, piece_opt.color) if piece_opt else None
         return piece_opt
 
+    def piece_type_at(self, square: int) -> Optional[int]:
+        """
+        PHASE 3.3: Get piece type at square without creating chess.Piece object.
+        
+        This is faster than piece_at() when you only need the piece type,
+        as it avoids chess.Piece object creation overhead.
+        
+        Returns:
+            Piece type (1-6) or None if square is empty
+        """
+        piece_opt = self._board.piece_at(square)
+        # Use same pattern as piece_at - C++ backend may return falsy non-None
+        if self._use_cpp:
+            return piece_opt.piece_type if piece_opt else None
+        return piece_opt.piece_type if piece_opt else None
+
     def king(self, color: bool) -> Optional[int]:
         result = self._board.king(color)
         return result if (not self._use_cpp or result >= 0) else None
@@ -730,6 +746,9 @@ class CachedBoard:
         PHASE 3.2: gives_check is computed during get_legal_moves_int() for
         C++ backend. We MUST call get_legal_moves_int() BEFORE checking if
         move_gives_check_int is populated.
+        
+        PHASE 3.3: Uses piece_type_at() instead of piece_at() to avoid
+        chess.Piece object creation overhead.
         """
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_is_capture_int is not None:
@@ -752,6 +771,9 @@ class CachedBoard:
 
         occupied = self.occupied
         ep_square = self.ep_square
+        
+        # PHASE 3.3: Use local reference to avoid repeated attribute lookup
+        piece_type_at = self.piece_type_at
 
         for move_int in legal_moves_int:
             from_sq = move_int & 0x3F
@@ -776,19 +798,17 @@ class CachedBoard:
                     py_move = int_to_move(move_int)
                     cache.move_gives_check_int[move_int] = self._board.gives_check(py_move)
 
-            # Get victim type
+            # PHASE 3.3: Get victim type using piece_type_at (no object creation)
             if is_cap:
                 if is_ep:
                     cache.move_victim_type_int[move_int] = chess.PAWN
                 else:
-                    piece = self.piece_at(to_sq)
-                    cache.move_victim_type_int[move_int] = piece.piece_type if piece else None
+                    cache.move_victim_type_int[move_int] = piece_type_at(to_sq)
             else:
                 cache.move_victim_type_int[move_int] = None
 
-            # Get attacker type
-            attacker = self.piece_at(from_sq)
-            cache.move_attacker_type_int[move_int] = attacker.piece_type if attacker else None
+            # PHASE 3.3: Get attacker type using piece_type_at (no object creation)
+            cache.move_attacker_type_int[move_int] = piece_type_at(from_sq)
 
     def _int_to_cpp_move(self, move_int: int):
         """
