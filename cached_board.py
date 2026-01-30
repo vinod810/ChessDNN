@@ -727,8 +727,9 @@ class CachedBoard:
         - Integer dictionary keys are faster to hash and compare
         - Combines with get_legal_moves_int() for zero-object move generation
 
-        PHASE 3: gives_check is now computed during get_legal_moves_int() for
-        C++ backend to avoid redundant int→C++ move conversion.
+        PHASE 3.2: gives_check is computed during get_legal_moves_int() for
+        C++ backend. We MUST call get_legal_moves_int() BEFORE checking if
+        move_gives_check_int is populated.
         """
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_is_capture_int is not None:
@@ -738,15 +739,17 @@ class CachedBoard:
         cache.move_victim_type_int = {}
         cache.move_attacker_type_int = {}
 
-        # PHASE 3: Only initialize gives_check_int if not already populated
-        # (it may have been pre-computed in get_legal_moves_int)
+        # PHASE 3.2 FIX: Call get_legal_moves_int FIRST - this populates
+        # move_gives_check_int for C++ backend, avoiding redundant conversion
+        legal_moves_int = self.get_legal_moves_int()
+        
+        # NOW check if gives_check was already computed during move generation
         if cache.move_gives_check_int is None:
             cache.move_gives_check_int = {}
             needs_gives_check = True
         else:
             needs_gives_check = False
 
-        legal_moves_int = self.get_legal_moves_int()
         occupied = self.occupied
         ep_square = self.ep_square
 
@@ -763,7 +766,7 @@ class CachedBoard:
             is_cap = bool(occupied & (1 << to_sq)) or is_ep
             cache.move_is_capture_int[move_int] = is_cap
 
-            # PHASE 3: Only compute gives_check if not already done
+            # PHASE 3.2: Only compute gives_check if not already done
             if needs_gives_check:
                 if self._use_cpp:
                     # Convert int to C++ move for gives_check call
