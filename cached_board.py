@@ -606,6 +606,9 @@ class CachedBoard:
         """
         PHASE 1 OPTIMIZATION: Return legal moves as integers.
 
+        PHASE 3: Also computes gives_check during generation to avoid
+        redundant int→C++ move conversion in precompute_move_info_int.
+
         This avoids chess.Move object creation, providing significant speedup:
         - No object allocation (~56 bytes saved per move)
         - Faster hashing (int hash vs tuple creation)
@@ -620,9 +623,37 @@ class CachedBoard:
         cache = self._cache_stack[-1]  # Inlined
         if cache.legal_moves_int is None:
             if self._use_cpp:
-                cache.legal_moves_int = [
-                    self._cpp_move_to_int(m) for m in self._board.legal_moves()
-                ]
+                # PHASE 3: Compute gives_check while we have C++ moves
+                # This avoids redundant int→C++ conversion later
+                cpp_moves = self._board.legal_moves()
+                result = []
+                gives_check_cache = {}
+                board = self._board
+
+                for m in cpp_moves:
+                    from_sq = m.from_square
+                    to_sq = m.to_square
+                    promo = m.promotion if m.promotion > 0 else 0
+
+                    # Only check castling for potential king moves
+                    if promo == 0 and (from_sq == 4 or from_sq == 60):
+                        if board.is_castling(m):
+                            if from_sq == 4:  # E1
+                                if to_sq == 7: to_sq = 6      # H1 -> G1
+                                elif to_sq == 0: to_sq = 2    # A1 -> C1
+                            else:  # E8
+                                if to_sq == 63: to_sq = 62    # H8 -> G8
+                                elif to_sq == 56: to_sq = 58  # A8 -> C8
+
+                    move_int = from_sq | (to_sq << 6) | (promo << 12)
+                    result.append(move_int)
+
+                    # Compute gives_check while we have the C++ move
+                    gives_check_cache[move_int] = board.gives_check(m)
+
+                cache.legal_moves_int = result
+                # Pre-populate move_gives_check_int to avoid redundant conversion later
+                cache.move_gives_check_int = gives_check_cache
             else:
                 cache.legal_moves_int = [
                     move_to_int(m) for m in self._board.legal_moves
@@ -695,15 +726,25 @@ class CachedBoard:
         - No chess.Move object creation or hashing
         - Integer dictionary keys are faster to hash and compare
         - Combines with get_legal_moves_int() for zero-object move generation
+
+        PHASE 3: gives_check is now computed during get_legal_moves_int() for
+        C++ backend to avoid redundant int→C++ move conversion.
         """
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_is_capture_int is not None:
             return
 
         cache.move_is_capture_int = {}
-        cache.move_gives_check_int = {}
         cache.move_victim_type_int = {}
         cache.move_attacker_type_int = {}
+
+        # PHASE 3: Only initialize gives_check_int if not already populated
+        # (it may have been pre-computed in get_legal_moves_int)
+        if cache.move_gives_check_int is None:
+            cache.move_gives_check_int = {}
+            needs_gives_check = True
+        else:
+            needs_gives_check = False
 
         legal_moves_int = self.get_legal_moves_int()
         occupied = self.occupied
@@ -722,14 +763,15 @@ class CachedBoard:
             is_cap = bool(occupied & (1 << to_sq)) or is_ep
             cache.move_is_capture_int[move_int] = is_cap
 
-            # Get gives_check from C++ backend
-            if self._use_cpp:
-                # Convert int to C++ move for gives_check call
-                cpp_move = self._int_to_cpp_move(move_int)
-                cache.move_gives_check_int[move_int] = self._board.gives_check(cpp_move)
-            else:
-                py_move = int_to_move(move_int)
-                cache.move_gives_check_int[move_int] = self._board.gives_check(py_move)
+            # PHASE 3: Only compute gives_check if not already done
+            if needs_gives_check:
+                if self._use_cpp:
+                    # Convert int to C++ move for gives_check call
+                    cpp_move = self._int_to_cpp_move(move_int)
+                    cache.move_gives_check_int[move_int] = self._board.gives_check(cpp_move)
+                else:
+                    py_move = int_to_move(move_int)
+                    cache.move_gives_check_int[move_int] = self._board.gives_check(py_move)
 
             # Get victim type
             if is_cap:

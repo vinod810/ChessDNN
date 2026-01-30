@@ -71,6 +71,29 @@ OUTPUT_SIZE = 1
 # Pre-computed lookup tables
 _FLIPPED_SQUARES = np.array([(7 - (sq // 8)) * 8 + (sq % 8) for sq in range(64)], dtype=np.int32)
 
+# PHASE 3: Pre-computed NNUE feature index table
+# Shape: [64 king squares][64 piece squares][10 piece indices]
+# piece_idx = (piece_type - 1) + (1 if friendly else 0) * 5
+# Feature = king_sq * 640 + piece_sq * 10 + piece_idx
+_NNUE_FEATURE_TABLE = np.empty((64, 64, 10), dtype=np.int32)
+for _ksq in range(64):
+    for _psq in range(64):
+        for _pidx in range(10):
+            _NNUE_FEATURE_TABLE[_ksq, _psq, _pidx] = _ksq * 640 + _psq * 10 + _pidx
+
+# Piece index lookup: [piece_type 1-5][is_friendly 0-1] -> piece_idx
+# piece_type: PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5
+# KING=6 returns -1 (not in NNUE features)
+_PIECE_INDEX_TABLE = np.array([
+    [-1, -1],  # Invalid (piece_type 0)
+    [0, 5],    # PAWN: enemy=0, friendly=5
+    [1, 6],    # KNIGHT: enemy=1, friendly=6
+    [2, 7],    # BISHOP: enemy=2, friendly=7
+    [3, 8],    # ROOK: enemy=3, friendly=8
+    [4, 9],    # QUEEN: enemy=4, friendly=9
+    [-1, -1],  # KING: not in features
+], dtype=np.int8)
+
 # Piece type mapping (shared by DNN and NNUE):
 # Uses piece_type - 1 since chess.PAWN=1, chess.KNIGHT=2, chess.BISHOP=3, chess.ROOK=4, chess.QUEEN=5, chess.KING=6
 # This gives: P=0, N=1, B=2, R=3, Q=4, K=5
@@ -90,19 +113,18 @@ class NNUEFeatures:
 
     @staticmethod
     def get_piece_index(piece_type: int, is_friendly_piece: bool) -> int:
-        if piece_type == chess.KING:
+        """PHASE 3: Use lookup table instead of computation."""
+        if piece_type < 1 or piece_type > 5:  # Only P, N, B, R, Q (not K)
             return -1
-        type_idx = piece_type - 1
-        # Enemy features first
-        color_idx = 1 if is_friendly_piece else 0
-        return type_idx + color_idx * PIECE_TYPES
+        return int(_PIECE_INDEX_TABLE[piece_type, 1 if is_friendly_piece else 0])
 
     @staticmethod
     def get_feature_index(king_sq: int, piece_sq: int, piece_type: int, is_friendly_piece: bool) -> int:
-        piece_idx = NNUEFeatures.get_piece_index(piece_type, is_friendly_piece)
-        if piece_idx == -1:
+        """PHASE 3: Use lookup table instead of computation."""
+        if piece_type < 1 or piece_type > 5:  # Only P, N, B, R, Q (not K)
             return -1
-        return king_sq * 640 + piece_sq * 10 + piece_idx
+        piece_idx = _PIECE_INDEX_TABLE[piece_type, 1 if is_friendly_piece else 0]
+        return int(_NNUE_FEATURE_TABLE[king_sq, piece_sq, piece_idx])
 
     @staticmethod
     def flip_square(square: int) -> int:
@@ -206,13 +228,17 @@ class NNUEIncrementalUpdater:
 
     def _get_feature_for_perspective(self, perspective: bool, piece_sq: int,
                                      piece_type: int, is_friendly_piece: bool) -> int:
+        """PHASE 3: Inlined lookup table access for speed."""
+        if piece_type < 1 or piece_type > 5:  # Skip kings
+            return -1
         if perspective:
             king_sq = self.white_king_sq
+            piece_idx = _PIECE_INDEX_TABLE[piece_type, 1 if is_friendly_piece else 0]
         else:
-            king_sq = int(_FLIPPED_SQUARES[self.black_king_sq])
-            piece_sq = int(_FLIPPED_SQUARES[piece_sq])
-            is_friendly_piece = not is_friendly_piece
-        return NNUEFeatures.get_feature_index(king_sq, piece_sq, piece_type, is_friendly_piece)
+            king_sq = _FLIPPED_SQUARES[self.black_king_sq]
+            piece_sq = _FLIPPED_SQUARES[piece_sq]
+            piece_idx = _PIECE_INDEX_TABLE[piece_type, 0 if is_friendly_piece else 1]  # Flipped
+        return int(_NNUE_FEATURE_TABLE[king_sq, piece_sq, piece_idx])
 
     def _remove_piece_features(self, square: int, piece_type: int, piece_color: bool,
                                change_record: Dict):
