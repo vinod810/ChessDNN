@@ -22,7 +22,7 @@ from config import L1_QUANTIZATION
 
 # Try to import Cython-optimized operations
 try:
-    from nn_ops_fast import (
+    from libs.nn_ops_fast import (
         dnn_evaluate_incremental as _cy_dnn_eval,
         nnue_evaluate_incremental as _cy_nnue_eval,
         nnue_evaluate_incremental_int8 as _cy_nnue_eval_int8,

@@ -16,7 +16,7 @@ import os
 import argparse
 import numpy as np
 
-from prepare_data import MAX_MATE_DEPTH, MATE_FACTOR, MAX_NON_MATE_SCORE
+from nn_train.prepare_data import MAX_MATE_DEPTH, MATE_FACTOR, MAX_NON_MATE_SCORE
 
 # Check what TANH_SCALE is set to
 try:
@@ -30,7 +30,7 @@ except ImportError:
     MAX_SCORE = 10000
 
 import chess
-from shard_io import ShardReader, find_shards
+from nn_train.shard_io import ShardReader, find_shards
 
 
 def dnn_fen_to_sparse_planes(fen: str) -> list[int]:
@@ -334,7 +334,7 @@ def test_cp_integrity(nn_type: str, num_positions: int = 10, data_dir: str = "da
     import math
     from pathlib import Path
     import chess.engine
-    from shard_io import ShardReader, find_shards
+    from nn_train.shard_io import ShardReader, find_shards
 
     print("\n" + "=" * 70)
     print(f"{nn_type} CP Integrity Test")

@@ -126,7 +126,7 @@ Note: C++ loader not available, falling back to Python loader
 ### Standalone NNUE Usage
 
 ```python
-from nnue_batch_loader import CppBatchLoader
+from nn_train.nnue_batch_loader import CppBatchLoader
 import torch
 
 loader = CppBatchLoader(
@@ -147,14 +147,14 @@ for white_sparse, black_sparse, stm, targets in loader:
 ### Standalone DNN Usage
 
 ```python
-from dnn_batch_loader import DNNCppBatchLoader
+from nn_train.dnn_batch_loader import DNNCppBatchLoader
 import torch
 
 loader = DNNCppBatchLoader(
     shard_paths=["data/dnn/shard_001.bin.zst", "data/dnn/shard_002.bin.zst"],
     batch_size=16384,
-    num_workers=4,          # C++ threads (not Python processes)
-    num_features=768,       # DNN feature count
+    num_workers=4,  # C++ threads (not Python processes)
+    num_features=768,  # DNN feature count
     shuffle=True,
     device=torch.device("cuda")
 )

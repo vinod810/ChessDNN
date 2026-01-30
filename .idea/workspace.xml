@@ -4,8 +4,23 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Guides for optimization">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Before cProfile">
+      <change afterPath="$PROJECT_DIR$/libs/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/nn_train/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_nn_build/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dnn_batch_loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/dnn_batch_loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nnue_batch_loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/nnue_batch_loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/prepare_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/shard_io.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/shard_io.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/data_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/data_test.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/quantize_analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/quantize_analysis.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/sf_static_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/sf_static_eval.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -50,34 +65,36 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.best_move.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.nn_tests.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;SHELLCHECK.PATH&quot;: &quot;/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/home/eapen/Documents/Projects/ChessDNN/config.py&quot;,
-    &quot;run.code.analysis.last.selected.profile&quot;: &quot;pProject Default&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.best_move.executor": "Debug",
+    "Python.nn_tests.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "SHELLCHECK.PATH": "/home/eapen/.local/share/JetBrains/PyCharm2025.3/Shell Script/shellcheck",
+    "git-widget-placeholder": "master",
+    "last_opened_file_path": "/home/eapen/Documents/Projects/ChessDNN/nn_train",
+    "run.code.analysis.last.selected.profile": "pProject Default",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/nn_train" />
+      <recent name="$PROJECT_DIR$/libs" />
       <recent name="$PROJECT_DIR$/utils" />
       <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/test" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/nn_train" />
+      <recent name="$PROJECT_DIR$/libs" />
       <recent name="$PROJECT_DIR$/utils" />
       <recent name="$PROJECT_DIR$/test" />
       <recent name="$PROJECT_DIR$/chess_cpp_integration" />
-      <recent name="C:\ChessDNN\utils" />
-      <recent name="$PROJECT_DIR$" />
     </key>
   </component>
   <component name="RunManager" selected="Python.nn_tests">
@@ -304,14 +321,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00142" summary="Removed multiple is_game_over()">
-      <option name="closed" value="true" />
-      <created>1768921922667</created>
-      <option name="number" value="00142" />
-      <option name="presentableId" value="LOCAL-00142" />
-      <option name="project" value="LOCAL" />
-      <updated>1768921922667</updated>
-    </task>
     <task id="LOCAL-00143" summary="Cached stockfish NNUE evals">
       <option name="closed" value="true" />
       <created>1768957831145</created>
@@ -520,7 +529,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769720729175</updated>
     </task>
-    <option name="localTasksCounter" value="169" />
+    <task id="LOCAL-00169" summary="Before cProfile">
+      <option name="closed" value="true" />
+      <created>1769733020935</created>
+      <option name="number" value="00169" />
+      <option name="presentableId" value="LOCAL-00169" />
+      <option name="project" value="LOCAL" />
+      <updated>1769733020935</updated>
+    </task>
+    <option name="localTasksCounter" value="170" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -535,7 +552,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Cached stockfish NNUE evals" />
     <MESSAGE value="Quantization benchmark" />
     <MESSAGE value="Before quantization" />
     <MESSAGE value="Quantization, functional test ok, performance test - TBD" />
@@ -560,7 +576,8 @@
     <MESSAGE value="DNN COO and Dataloader" />
     <MESSAGE value="README  for sub dirs" />
     <MESSAGE value="Guides for optimization" />
-    <option name="LAST_COMMIT_MESSAGE" value="Guides for optimization" />
+    <MESSAGE value="Before cProfile" />
+    <option name="LAST_COMMIT_MESSAGE" value="Before cProfile" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -572,6 +589,11 @@
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/engine.py</url>
           <option name="timeStamp" value="5" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/cached_board.py</url>
+          <line>12</line>
+          <option name="timeStamp" value="6" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

@@ -396,7 +396,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int = 1000
     Uses diagnostic records (with FEN) from binary shard files to compare
     model predictions against stored Stockfish evaluations.
     """
-    from shard_io import ShardReader, find_shards
+    from nn_train.shard_io import ShardReader, find_shards
 
     print("\n" + "=" * 70)
     print(f"{nn_type} Evaluation Accuracy Test")

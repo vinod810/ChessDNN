@@ -15,7 +15,7 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
 try:
-    import chess_cpp
+    import libs.chess_cpp as chess_cpp
     HAS_CPP_BACKEND = True
     print("✓ Using fast C++ chess backend (chess_cpp)", file=sys.stderr)
 except ImportError:

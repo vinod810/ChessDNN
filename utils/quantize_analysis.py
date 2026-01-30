@@ -44,7 +44,7 @@ except ImportError:
     pass
 
 try:
-    from shard_io import ShardReader, discover_shards
+    from nn_train.shard_io import ShardReader, discover_shards
 
     HAS_SHARD_IO = True
 except ImportError:

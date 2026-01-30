@@ -23,12 +23,11 @@ import struct
 import subprocess
 import random
 import os
-from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 from tqdm import tqdm
 
-from shard_io import ShardReader, discover_shards
+from nn_train.shard_io import ShardReader, discover_shards
 
 # Import MAX_SCORE from nn_inference
 try:
