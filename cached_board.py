@@ -134,6 +134,7 @@ def _get_pst_value(piece_type: int, square: int, color: bool, is_endgame: bool =
 class _CacheState:
     zobrist_hash: Optional[int] = None
     legal_moves: Optional[List[chess.Move]] = None
+    legal_moves_int: Optional[List[int]] = None  # Phase 1: Integer move list
     has_non_pawn_material: Optional[Dict[bool, bool]] = None
     is_check: Optional[bool] = None
     is_checkmate: Optional[bool] = None
@@ -144,6 +145,11 @@ class _CacheState:
     move_gives_check: Optional[Dict[chess.Move, bool]] = None
     move_victim_type: Optional[Dict[chess.Move, Optional[int]]] = None
     move_attacker_type: Optional[Dict[chess.Move, Optional[int]]] = None
+    # Phase 2: Integer-keyed move info caches
+    move_is_capture_int: Optional[Dict[int, bool]] = None
+    move_gives_check_int: Optional[Dict[int, bool]] = None
+    move_victim_type_int: Optional[Dict[int, Optional[int]]] = None
+    move_attacker_type_int: Optional[Dict[int, Optional[int]]] = None
 
 
 @dataclass(slots=True)
@@ -347,7 +353,10 @@ class CachedBoard:
     @property
     def ep_square(self) -> Optional[int]:
         ep = self._board.ep_square
-        return ep if ep >= 0 else None
+        # C++ backend returns -1 for no EP, python-chess returns None
+        if ep is None or (isinstance(ep, int) and ep < 0):
+            return None
+        return ep
 
     @property
     def move_stack(self) -> List[chess.Move]:
@@ -592,6 +601,220 @@ class CachedBoard:
             else:
                 cache.legal_moves = list(self._board.legal_moves)
         return cache.legal_moves
+
+    def get_legal_moves_int(self) -> List[int]:
+        """
+        PHASE 1 OPTIMIZATION: Return legal moves as integers.
+
+        This avoids chess.Move object creation, providing significant speedup:
+        - No object allocation (~56 bytes saved per move)
+        - Faster hashing (int hash vs tuple creation)
+        - Faster comparison (int vs object __eq__)
+
+        Returns:
+            List of integer move representations where:
+            - bits 0-5: from_square (0-63)
+            - bits 6-11: to_square (0-63)
+            - bits 12-15: promotion piece type (0 if none)
+        """
+        cache = self._cache_stack[-1]  # Inlined
+        if cache.legal_moves_int is None:
+            if self._use_cpp:
+                cache.legal_moves_int = [
+                    self._cpp_move_to_int(m) for m in self._board.legal_moves()
+                ]
+            else:
+                cache.legal_moves_int = [
+                    move_to_int(m) for m in self._board.legal_moves
+                ]
+        return cache.legal_moves_int
+
+    def _cpp_move_to_int(self, cpp_move) -> int:
+        """
+        Convert C++ move directly to integer, handling castling conversion.
+
+        The C++ backend uses king-to-rook for castling, but we use
+        king-to-destination (python-chess convention) in our integer format.
+        """
+        from_sq = cpp_move.from_square
+        to_sq = cpp_move.to_square
+        promo = cpp_move.promotion if cpp_move.promotion > 0 else 0
+
+        # Only check castling for potential king moves (optimization)
+        # E1=4, E8=60 are the only squares where castling can originate
+        if promo == 0 and (from_sq == 4 or from_sq == 60):
+            if self._board.is_castling(cpp_move):
+                # White castling (from E1=4)
+                if from_sq == 4:
+                    if to_sq == 7:    # H1 -> G1 (kingside)
+                        to_sq = 6
+                    elif to_sq == 0:  # A1 -> C1 (queenside)
+                        to_sq = 2
+                # Black castling (from E8=60)
+                else:
+                    if to_sq == 63:   # H8 -> G8 (kingside)
+                        to_sq = 62
+                    elif to_sq == 56: # A8 -> C8 (queenside)
+                        to_sq = 58
+
+        return from_sq | (to_sq << 6) | (promo << 12)
+
+    def is_castling_int(self, move_int: int) -> bool:
+        """
+        Check if an integer move represents castling.
+
+        Castling moves in our integer format have specific patterns:
+        - White kingside: e1(4)->g1(6)
+        - White queenside: e1(4)->c1(2)
+        - Black kingside: e8(60)->g8(62)
+        - Black queenside: e8(60)->c8(58)
+        """
+        from_sq = move_int & 0x3F
+        to_sq = (move_int >> 6) & 0x3F
+        promo = (move_int >> 12) & 0xF
+
+        if promo != 0:
+            return False
+
+        # Check standard castling patterns
+        if from_sq == 4 and to_sq in (6, 2):  # White: E1 to G1 or C1
+            piece = self.piece_at(4)
+            return piece is not None and piece.piece_type == chess.KING
+
+        if from_sq == 60 and to_sq in (62, 58):  # Black: E8 to G8 or C8
+            piece = self.piece_at(60)
+            return piece is not None and piece.piece_type == chess.KING
+
+        return False
+
+    def precompute_move_info_int(self) -> None:
+        """
+        PHASE 2 OPTIMIZATION: Precompute move info using integer keys.
+
+        This is significantly faster than the object-based version because:
+        - No chess.Move object creation or hashing
+        - Integer dictionary keys are faster to hash and compare
+        - Combines with get_legal_moves_int() for zero-object move generation
+        """
+        cache = self._cache_stack[-1]  # Inlined
+        if cache.move_is_capture_int is not None:
+            return
+
+        cache.move_is_capture_int = {}
+        cache.move_gives_check_int = {}
+        cache.move_victim_type_int = {}
+        cache.move_attacker_type_int = {}
+
+        legal_moves_int = self.get_legal_moves_int()
+        occupied = self.occupied
+        ep_square = self.ep_square
+
+        for move_int in legal_moves_int:
+            from_sq = move_int & 0x3F
+            to_sq = (move_int >> 6) & 0x3F
+
+            # Check en passant (pawn moving to ep_square diagonally)
+            is_ep = (ep_square is not None and
+                     to_sq == ep_square and
+                     abs(from_sq - to_sq) in (7, 9))  # Diagonal pawn move
+
+            # Check capture
+            is_cap = bool(occupied & (1 << to_sq)) or is_ep
+            cache.move_is_capture_int[move_int] = is_cap
+
+            # Get gives_check from C++ backend
+            if self._use_cpp:
+                # Convert int to C++ move for gives_check call
+                cpp_move = self._int_to_cpp_move(move_int)
+                cache.move_gives_check_int[move_int] = self._board.gives_check(cpp_move)
+            else:
+                py_move = int_to_move(move_int)
+                cache.move_gives_check_int[move_int] = self._board.gives_check(py_move)
+
+            # Get victim type
+            if is_cap:
+                if is_ep:
+                    cache.move_victim_type_int[move_int] = chess.PAWN
+                else:
+                    piece = self.piece_at(to_sq)
+                    cache.move_victim_type_int[move_int] = piece.piece_type if piece else None
+            else:
+                cache.move_victim_type_int[move_int] = None
+
+            # Get attacker type
+            attacker = self.piece_at(from_sq)
+            cache.move_attacker_type_int[move_int] = attacker.piece_type if attacker else None
+
+    def _int_to_cpp_move(self, move_int: int):
+        """
+        Convert integer move to C++ move for board operations.
+        Handles castling coordinate conversion (python-chess -> C++ convention).
+
+        Note: Only call this when self._use_cpp is True.
+        """
+        if not self._use_cpp:
+            raise RuntimeError("_int_to_cpp_move called without C++ backend")
+
+        from_sq = move_int & 0x3F
+        to_sq = (move_int >> 6) & 0x3F
+        promo = (move_int >> 12) & 0xF
+
+        # Convert castling from python-chess convention to C++ convention
+        if promo == 0 and (from_sq == 4 or from_sq == 60):
+            # Check if this looks like castling
+            if from_sq == 4:  # E1
+                if to_sq == 6:    # G1 -> H1 (kingside)
+                    to_sq = 7
+                elif to_sq == 2:  # C1 -> A1 (queenside)
+                    to_sq = 0
+            elif from_sq == 60:  # E8
+                if to_sq == 62:   # G8 -> H8 (kingside)
+                    to_sq = 63
+                elif to_sq == 58: # C8 -> A8 (queenside)
+                    to_sq = 56
+
+        return chess_cpp.Move(from_sq, to_sq, promo)
+
+    def is_capture_int(self, move_int: int) -> bool:
+        """Check if move is a capture using integer key."""
+        cache = self._cache_stack[-1]
+        if cache.move_is_capture_int is None:
+            self.precompute_move_info_int()
+        result = cache.move_is_capture_int.get(move_int)
+        if result is not None:
+            return result
+        # Fallback: compute directly
+        to_sq = (move_int >> 6) & 0x3F
+        return bool(self.occupied & (1 << to_sq))
+
+    def gives_check_int(self, move_int: int) -> bool:
+        """Check if move gives check using integer key."""
+        cache = self._cache_stack[-1]
+        if cache.move_gives_check_int is None:
+            self.precompute_move_info_int()
+        result = cache.move_gives_check_int.get(move_int)
+        if result is not None:
+            return result
+        # Fallback: compute directly
+        if self._use_cpp:
+            cpp_move = self._int_to_cpp_move(move_int)
+            return self._board.gives_check(cpp_move)
+        else:
+            return self._board.gives_check(int_to_move(move_int))
+
+    def get_victim_type_int(self, move_int: int) -> Optional[int]:
+        """Get victim piece type using integer key."""
+        cache = self._cache_stack[-1]
+        if cache.move_victim_type_int is None:
+            self.precompute_move_info_int()
+        return cache.move_victim_type_int.get(move_int)
+
+    def get_attacker_type_int(self, move_int: int) -> Optional[int]:
+        """Get attacker piece type using integer key."""
+        cache = self._cache_stack[-1]
+        if cache.move_attacker_type_int is None:
+            self.precompute_move_info_int()
+        return cache.move_attacker_type_int.get(move_int)
 
     def is_check(self) -> bool:
         """PHASE 2: Inlined cache access"""

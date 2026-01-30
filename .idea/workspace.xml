@@ -4,23 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Before cProfile">
-      <change afterPath="$PROJECT_DIR$/libs/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/nn_train/__init__.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Reorganizing in to nn_train and libs sub dirs.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/build.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_nn_build/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_nn_build/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dnn_batch_loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/dnn_batch_loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nnue_batch_loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/nnue_batch_loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/prepare_data.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/shard_io.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/shard_io.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/data_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/data_test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/quantize_analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/quantize_analysis.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/sf_static_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/sf_static_eval.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_board/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cpp_nn_build/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_nn_build/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train/build.sh" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/build.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/nn_train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/nn_train/prepare_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/prepare_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -321,14 +314,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00143" summary="Cached stockfish NNUE evals">
-      <option name="closed" value="true" />
-      <created>1768957831145</created>
-      <option name="number" value="00143" />
-      <option name="presentableId" value="LOCAL-00143" />
-      <option name="project" value="LOCAL" />
-      <updated>1768957831146</updated>
-    </task>
     <task id="LOCAL-00144" summary="Quantization benchmark">
       <option name="closed" value="true" />
       <created>1768959387326</created>
@@ -537,7 +522,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769733020935</updated>
     </task>
-    <option name="localTasksCounter" value="170" />
+    <task id="LOCAL-00170" summary="Reorganizing in to nn_train and libs sub dirs.">
+      <option name="closed" value="true" />
+      <created>1769735348252</created>
+      <option name="number" value="00170" />
+      <option name="presentableId" value="LOCAL-00170" />
+      <option name="project" value="LOCAL" />
+      <updated>1769735348252</updated>
+    </task>
+    <option name="localTasksCounter" value="171" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -552,7 +545,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Quantization benchmark" />
     <MESSAGE value="Before quantization" />
     <MESSAGE value="Quantization, functional test ok, performance test - TBD" />
     <MESSAGE value="Fixed nn_tests.py" />
@@ -577,7 +569,8 @@
     <MESSAGE value="README  for sub dirs" />
     <MESSAGE value="Guides for optimization" />
     <MESSAGE value="Before cProfile" />
-    <option name="LAST_COMMIT_MESSAGE" value="Before cProfile" />
+    <MESSAGE value="Reorganizing in to nn_train and libs sub dirs." />
+    <option name="LAST_COMMIT_MESSAGE" value="Reorganizing in to nn_train and libs sub dirs." />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

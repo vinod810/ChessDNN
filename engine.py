@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 import chess
 import chess.polyglot
-from  config import *
+from config import *
 
-from cached_board import CachedBoard, move_to_int
+from cached_board import CachedBoard, move_to_int, int_to_move
 from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
 from config import MAX_SCORE, QS_SOFT_STOP_DIVISOR
 
@@ -25,6 +25,7 @@ if not IS_BLAS_ENABLED:
     os.environ["OMP_NUM_THREADS"] = "1"
 
 MODEL_PATH = str(DNN_MODEL_FILEPATH if NN_TYPE == "DNN" else NNUE_MODEL_FILEPATH)
+
 
 def is_debug_enabled() -> bool:
     """Check if diagnostic output is enabled (either via IS_DIAGNOSTIC or UCI debug on)."""
@@ -52,6 +53,7 @@ transposition_table = {}
 qs_transposition_table = {}
 dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
+killer_moves_int = [[0, 0] for _ in range(MAX_NEGAMAX_DEPTH + 1)]  # Phase 2: Integer-based killer moves
 history_heuristic = {}
 
 kpi = {
@@ -343,6 +345,101 @@ def move_score(board: CachedBoard, move: chess.Move, depth: int) -> int:
     return score
 
 
+def move_score_int(board: CachedBoard, move_int: int, depth: int) -> int:
+    """
+    PHASE 2 OPTIMIZATION: Score a move for move ordering using integer representation.
+
+    This avoids chess.Move object creation and uses integer-keyed caches.
+    """
+    score = 0
+
+    # Use cached is_capture (integer version)
+    is_capture = board.is_capture_int(move_int)
+
+    # Killer moves (quiet moves only) - now using integer comparison
+    if not is_capture and depth is not None and 0 <= depth < len(killer_moves_int):
+        if move_int == killer_moves_int[depth][0]:
+            score += 9000
+        elif move_int == killer_moves_int[depth][1]:
+            score += 8000
+
+    if is_capture:
+        # Use cached victim and attacker types (integer version)
+        victim_type = board.get_victim_type_int(move_int)
+        attacker_type = board.get_attacker_type_int(move_int)
+        if victim_type and attacker_type:
+            score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
+
+    # History heuristic - already uses integer keys!
+    score += history_heuristic.get(move_int, 0)
+
+    # Use cached gives_check (integer version)
+    if board.gives_check_int(move_int):
+        score += 50
+
+    return score
+
+
+def move_score_q_search_int(board: CachedBoard, move_int: int) -> int:
+    """
+    PHASE 2 OPTIMIZATION: Score a move for quiescence search using integer representation.
+    """
+    score = 0
+
+    if board.is_capture_int(move_int):
+        victim_type = board.get_victim_type_int(move_int)
+        attacker_type = board.get_attacker_type_int(move_int)
+        if victim_type and attacker_type:
+            score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
+
+    return score
+
+
+def ordered_moves_int(board: CachedBoard, depth: int, pv_move_int: int = 0, tt_move_int: int = 0) -> List[int]:
+    """
+    PHASE 2 OPTIMIZATION: Return legal moves as integers, ordered by expected quality.
+
+    This completely avoids chess.Move object creation in the move ordering hot path.
+
+    Args:
+        board: The board position
+        depth: Current search depth (for killer moves)
+        pv_move_int: Principal variation move as integer (0 if none)
+        tt_move_int: Transposition table move as integer (0 if none)
+
+    Returns:
+        List of integer moves, sorted by score (best first)
+    """
+    # Ensure move info is precomputed using integer keys
+    board.precompute_move_info_int()
+
+    scored_moves = []
+    for move_int in board.get_legal_moves_int():
+        if move_int == tt_move_int and tt_move_int != 0:
+            score = 1000000
+        elif move_int == pv_move_int and pv_move_int != 0:
+            score = 900000
+        else:
+            score = move_score_int(board, move_int, depth)
+        scored_moves.append((score, move_int))
+
+    # Sort by score descending, with random tiebreaker
+    scored_moves.sort(key=lambda tup: (tup[0], random.random()), reverse=True)
+    return [move_int for _, move_int in scored_moves]
+
+
+def ordered_moves_q_search_int(board: CachedBoard) -> List[int]:
+    """
+    PHASE 2 OPTIMIZATION: Return legal moves for quiescence search as integers.
+    """
+    board.precompute_move_info_int()
+
+    moves_int = board.get_legal_moves_int()
+    moves_with_scores = [(move_score_q_search_int(board, m), m) for m in moves_int]
+    moves_with_scores.sort(key=lambda x: x[0], reverse=True)
+    return [m for _, m in moves_with_scores]
+
+
 def see(board: CachedBoard, move: chess.Move) -> int:
     """
     Simplified Static Exchange Evaluation (SEE).
@@ -405,39 +502,34 @@ def see_ge(board: CachedBoard, move: chess.Move, threshold: int = 0) -> bool:
 def ordered_moves(board: CachedBoard, depth: int, pv_move=None, tt_move=None):
     """
     Return legal moves ordered by expected quality.
-    Pre-computes move info for efficient scoring.
+
+    PHASE 3: Now uses integer-based ordering internally for performance,
+    but returns chess.Move objects for compatibility.
     """
-    # Ensure move info is precomputed for this position
-    board.precompute_move_info()
+    # Convert special moves to integers
+    pv_move_int = move_to_int(pv_move) if pv_move else 0
+    tt_move_int = move_to_int(tt_move) if tt_move else 0
 
-    scored_moves = []
-    for move in board.get_legal_moves_list():
-        if move == tt_move:
-            score = 1000000
-        elif move == pv_move:
-            score = 900000
-        else:
-            score = move_score(board, move, depth)
-        scored_moves.append((score, move))
+    # Use integer-based ordering (much faster)
+    moves_int = ordered_moves_int(board, depth, pv_move_int, tt_move_int)
 
-    # Add small random noise to break ties (preserves relative ordering mostly)
-    scored_moves.sort(key=lambda tup: (tup[0], random.random()), reverse=True)
-    return [move for _, move in scored_moves]
+    # Convert back to chess.Move for compatibility
+    # This conversion is now done once at the end instead of multiple times during scoring
+    return [int_to_move(m) for m in moves_int]
 
 
 def ordered_moves_q_search(board: CachedBoard):
     """
     Return legal moves ordered for quiescence search.
-    Pre-computes move info for efficient scoring.
-    """
-    # Ensure move info is precomputed for this position
-    board.precompute_move_info()
 
-    # Use the already-cached legal moves list (don't create a copy)
-    moves = board.get_legal_moves_list()
-    moves_with_scores = [(move_score_q_search(board, m), m) for m in moves]
-    moves_with_scores.sort(key=lambda x: x[0], reverse=True)
-    return [m for _, m in moves_with_scores]
+    PHASE 3: Now uses integer-based ordering internally for performance,
+    but returns chess.Move objects for compatibility.
+    """
+    # Use integer-based ordering (much faster)
+    moves_int = ordered_moves_q_search_int(board)
+
+    # Convert back to chess.Move for compatibility
+    return [int_to_move(m) for m in moves_int]
 
 
 def should_stop_search(current_depth: int) -> bool:
@@ -585,19 +677,19 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             (time.perf_counter() - TimeControl.start_time) > TimeControl.time_limit * QS_TIME_CRITICAL_FACTOR
     )
     if time_critical:
-        move_limit = min(MAX_QS_MOVES_TIME_CRITICAL,  move_limit) # Time critical (5 moves)
-    #elif q_depth > MAX_QS_DEPTH // 2:
-     #   move_limit = MAX_QS_MOVES_DEEP  # Medium (5 moves)
-    #else:
-     #   move_limit = MAX_QS_MOVES_PER_PLY  # Normal (10 moves)
+        move_limit = min(MAX_QS_MOVES_TIME_CRITICAL, move_limit)  # Time critical (5 moves)
+    # elif q_depth > MAX_QS_DEPTH // 2:
+    #   move_limit = MAX_QS_MOVES_DEEP  # Medium (5 moves)
+    # else:
+    #   move_limit = MAX_QS_MOVES_PER_PLY  # Normal (10 moves)
 
     # FIX: Never use less than MIN_QS_MOVES_SHALLOW at shallow QS depths (1-2)
     # These shallow evaluations are critical for score accuracy
-    #if q_depth <= 2:
-     #   move_limit = max(move_limit, MIN_QS_MOVES_SHALLOW)
+    # if q_depth <= 2:
+    #   move_limit = max(move_limit, MIN_QS_MOVES_SHALLOW)
 
-    # Pre-compute move info for this position
-    board.precompute_move_info()
+    # Pre-compute move info for this position (using integer version)
+    board.precompute_move_info_int()
 
     moves_searched = 0
     for move in ordered_moves_q_search(board):
@@ -606,21 +698,24 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             _diag_warn("qs_move_limit", f"QS move limit ({move_limit}) at depth {q_depth}")
             break
 
+        # PHASE 3: Convert to integer for fast lookups
+        move_int = move_to_int(move)
+
         if not is_check:
-            # Use cached is_capture
-            is_capture_move = board.is_capture_cached(move)
+            # Use cached is_capture (integer version - faster)
+            is_capture_move = board.is_capture_int(move_int)
             # if the move is not a capture then if the move gives check and depth < TACTICAL_QS_MAX_DEPTH,
             # go ahead with exploration; otherwise skip the move
             if not is_capture_move:
                 if q_depth > CHECK_QS_MAX_DEPTH:
                     continue
-                if not board.gives_check_cached(move):
+                if not board.gives_check_int(move_int):
                     continue
 
             # -------- Delta pruning (only when not in check) --------
             if (q_depth >= DELTA_PRUNING_QS_MIN_DEPTH and is_capture_move
-                    and not board.gives_check_cached(move)):
-                victim_type = board.get_victim_type(move)
+                    and not board.gives_check_int(move_int)):
+                victim_type = board.get_victim_type_int(move_int)
                 if victim_type:
                     gain = PIECE_VALUES[victim_type]
                     if best_score + gain + DELTA_PRUNING_QS_MARGIN < alpha:  # ✅ Use best_score
@@ -850,9 +945,12 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
             if TimeControl.stop_search:
                 break  # Hard stop - exit immediately
 
-        # Use cached move info
-        is_capture = board.is_capture_cached(move)
-        gives_check = board.gives_check_cached(move)
+        # PHASE 3: Convert to integer for fast lookups
+        move_int = move_to_int(move)
+
+        # Use cached move info (integer version - faster)
+        is_capture = board.is_capture_int(move_int)
+        gives_check = board.gives_check_int(move_int)
 
         # -------- SEE Pruning (prune losing captures at low depths) --------
         if (SEE_PRUNING_ENABLED
@@ -874,10 +972,10 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
                 and not gives_check
                 and move != tt_move
                 and move_index > 0):  # Don't prune the first move or TT move
-            # Check if the move is not a killer move
+            # Check if the move is not a killer move (use integer comparison)
             is_killer = False
-            if depth is not None and 0 <= depth < len(killer_moves):
-                is_killer = (move == killer_moves[depth][0] or move == killer_moves[depth][1])
+            if depth is not None and 0 <= depth < len(killer_moves_int):
+                is_killer = (move_int == killer_moves_int[depth][0] or move_int == killer_moves_int[depth][1])
 
             if not is_killer:
                 # This quiet move is unlikely to raise the score above alpha
@@ -897,12 +995,13 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
         new_depth = depth - 1 + extension
 
         # -------- LMR --------
-        if depth is not None and 0 <= depth < len(killer_moves):
-            km0 = killer_moves[depth][0]
-            km1 = killer_moves[depth][1]
+        # PHASE 3: Use integer killer moves for comparison
+        if depth is not None and 0 <= depth < len(killer_moves_int):
+            km0_int = killer_moves_int[depth][0]
+            km1_int = killer_moves_int[depth][1]
         else:
-            km0 = None
-            km1 = None
+            km0_int = 0
+            km1_int = 0
 
         reduce = (
                 depth >= LMR_MIN_DEPTH
@@ -910,8 +1009,8 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
                 and not child_in_check
                 and not is_capture
                 and not gives_check
-                and move != km0
-                and move != km1
+                and move_int != km0_int
+                and move_int != km1_int
                 and extension == 0
         )
 
@@ -948,14 +1047,14 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
         if alpha >= beta:
             # Update killer moves and history for quiet moves
-            if not is_capture and depth is not None and 0 <= depth < len(killer_moves):
-                if killer_moves[depth][0] != move:
-                    killer_moves[depth][1] = killer_moves[depth][0]
-                    killer_moves[depth][0] = move
-                # OPTIMIZATION: Use integer key for faster hashing
-                key_hist = move_to_int(move)
-                history_heuristic[key_hist] = min(
-                    history_heuristic.get(key_hist, 0) + depth * depth, 10_000
+            # PHASE 3: Use integer killer moves storage
+            if not is_capture and depth is not None and 0 <= depth < len(killer_moves_int):
+                if killer_moves_int[depth][0] != move_int:
+                    killer_moves_int[depth][1] = killer_moves_int[depth][0]
+                    killer_moves_int[depth][0] = move_int
+                # History already uses integer key
+                history_heuristic[move_int] = min(
+                    history_heuristic.get(move_int, 0) + depth * depth, 10_000
                 )
             kpi['beta_cutoffs'] += 1
             break
@@ -1124,6 +1223,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
+    for i in range(len(killer_moves_int)):
+        killer_moves_int[i] = [0, 0]  # Phase 2: Clear integer killer moves
     history_heuristic.clear()
 
     # Only clear TT if requested (preserve on ponderhit for warm cache)
@@ -1562,15 +1663,18 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     opp_moves_checked = 0
                     max_opp_moves = 8  # Limit opponent moves to check
 
-                    board.precompute_move_info()
+                    board.precompute_move_info_int()
                     for opp_move in board.get_legal_moves_list():
                         # -------- CRITICAL: Check for stop signal in inner loop --------
                         if TimeControl.stop_search:
                             break
 
+                        # PHASE 3: Use integer for fast lookups
+                        opp_move_int = move_to_int(opp_move)
+
                         # Only consider captures, checks, or promotions
-                        is_tactical = (board.is_capture_cached(opp_move) or
-                                       board.gives_check_cached(opp_move) or
+                        is_tactical = (board.is_capture_int(opp_move_int) or
+                                       board.gives_check_int(opp_move_int) or
                                        opp_move.promotion is not None)
 
                         if not is_tactical and opp_moves_checked > 0:

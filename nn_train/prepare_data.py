@@ -43,7 +43,6 @@ import io
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
-import chess
 import chess.pgn
 import zstandard as zstd
 
@@ -53,7 +52,7 @@ from nn_inference import (
 from config import MAX_SCORE
 
 # Import ShardWriter from shared module
-from shard_io import ShardWriter
+from nn_train.shard_io import ShardWriter
 
 # Constants from nn_train.py
 MATE_FACTOR = 100

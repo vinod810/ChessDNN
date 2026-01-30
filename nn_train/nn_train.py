@@ -73,7 +73,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader, IterableDataset
+from torch.utils.data import DataLoader, IterableDataset
 
 # Import network architectures and constants from nn_inference
 from nn_inference import (
@@ -681,7 +681,7 @@ class ShardIterableDataset(IterableDataset):
 
     def _read_shard_positions(self, shard_path: str) -> Iterator[Dict]:
         """Read all positions from a shard file using shard_io."""
-        from shard_io import ShardReader
+        from nn_train.shard_io import ShardReader
         reader = ShardReader(self.nn_type)
         positions = reader.read_all_positions(shard_path, include_fen=False, skip_diagnostic=True)
 
@@ -1576,7 +1576,7 @@ class Trainer:
 
 
 # Import discover_shards from shared module
-from shard_io import discover_shards
+from nn_train.shard_io import discover_shards
 
 
 def split_shards(shards: List[str], val_ratio: float = VALIDATION_SPLIT_RATIO) -> Tuple[List[str], List[str]]:

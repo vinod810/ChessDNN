@@ -128,6 +128,9 @@ Stockfish NNUE positional evaluation: MAE - Difference capped at 100 CP,
 Stockfish NNUE positional evaluation, MSE - tanh(CP/410),
 Classical piece square evaluation, MAE - ELO,
 
+01/29/26
+WAC: 265/300
+
 
 
 
