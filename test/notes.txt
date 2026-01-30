@@ -131,6 +131,9 @@ Classical piece square evaluation, MAE - ELO,
 01/29/26
 WAC: 265/300
 
+01/20/26
+WAC: 259/300
+
 
 
 

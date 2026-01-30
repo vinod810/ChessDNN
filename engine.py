@@ -46,15 +46,21 @@ class TimeControl:
     hard_stop_time = None  # FIX V3: Absolute time when search MUST stop (150% of time_limit)
 
 
-TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move"])
+TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move_int"])  # PHASE 3: store int
 TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
 
 transposition_table = {}
 qs_transposition_table = {}
 dnn_eval_cache = {}
-killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]
-killer_moves_int = [[0, 0] for _ in range(MAX_NEGAMAX_DEPTH + 1)]  # Phase 2: Integer-based killer moves
+killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]  # Legacy - kept for compatibility
+killer_moves_int = [[0, 0] for _ in range(MAX_NEGAMAX_DEPTH + 1)]  # Primary: Integer-based killer moves
 history_heuristic = {}
+
+
+def pv_int_to_moves(pv_int: List[int]) -> List[chess.Move]:
+    """Convert integer PV to chess.Move list for UCI output."""
+    return [int_to_move(m) for m in pv_int if m != 0]
+
 
 kpi = {
     "nodes": 0,
@@ -499,37 +505,11 @@ def see_ge(board: CachedBoard, move: chess.Move, threshold: int = 0) -> bool:
     return see(board, move) >= threshold
 
 
-def ordered_moves(board: CachedBoard, depth: int, pv_move=None, tt_move=None):
+def see_ge_int(board: CachedBoard, move_int: int, threshold: int = 0) -> bool:
     """
-    Return legal moves ordered by expected quality.
-
-    PHASE 3: Now uses integer-based ordering internally for performance,
-    but returns chess.Move objects for compatibility.
+    Check if SEE value of move is >= threshold (integer move version).
     """
-    # Convert special moves to integers
-    pv_move_int = move_to_int(pv_move) if pv_move else 0
-    tt_move_int = move_to_int(tt_move) if tt_move else 0
-
-    # Use integer-based ordering (much faster)
-    moves_int = ordered_moves_int(board, depth, pv_move_int, tt_move_int)
-
-    # Convert back to chess.Move for compatibility
-    # This conversion is now done once at the end instead of multiple times during scoring
-    return [int_to_move(m) for m in moves_int]
-
-
-def ordered_moves_q_search(board: CachedBoard):
-    """
-    Return legal moves ordered for quiescence search.
-
-    PHASE 3: Now uses integer-based ordering internally for performance,
-    but returns chess.Move objects for compatibility.
-    """
-    # Use integer-based ordering (much faster)
-    moves_int = ordered_moves_q_search_int(board)
-
-    # Convert back to chess.Move for compatibility
-    return [int_to_move(m) for m in moves_int]
+    return see(board, int_to_move(move_int)) >= threshold
 
 
 def should_stop_search(current_depth: int) -> bool:
@@ -548,12 +528,14 @@ def should_stop_search(current_depth: int) -> bool:
     return False
 
 
-def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple[int, List[chess.Move]]:
+def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple[int, List[int]]:
     """
     Quiescence search with improved time management and move limits.
 
+    PHASE 3: Uses integer moves throughout for performance.
+
     Returns:
-        Tuple of (score, pv) where pv is the list of moves in the principal variation.
+        Tuple of (score, pv_int) where pv_int is the list of integer moves in the principal variation.
     """
     global _qs_stats
 
@@ -692,14 +674,11 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     board.precompute_move_info_int()
 
     moves_searched = 0
-    for move in ordered_moves_q_search(board):
+    for move_int in ordered_moves_q_search_int(board):
         # -------- NEW: Enforce move limit to prevent explosion --------
         if not is_check and moves_searched >= move_limit:
             _diag_warn("qs_move_limit", f"QS move limit ({move_limit}) at depth {q_depth}")
             break
-
-        # PHASE 3: Convert to integer for fast lookups
-        move_int = move_to_int(move)
 
         if not is_check:
             # Use cached is_capture (integer version - faster)
@@ -721,6 +700,8 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
                     if best_score + gain + DELTA_PRUNING_QS_MARGIN < alpha:  # ✅ Use best_score
                         continue
 
+        # Convert to chess.Move for push (needed by evaluator)
+        move = int_to_move(move_int)
         should_update_nn = q_depth <= QS_DEPTH_MAX_NN_EVAL
         if should_update_nn:
             push_move(board, move, nn_evaluator)
@@ -748,7 +729,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
         if score > best_score:  # ✅ Track best_score
             best_score = score
-            best_pv = [move] + child_pv
+            best_pv = [move_int] + child_pv  # Store integer move in PV
 
         if score >= beta:
             kpi['beta_cutoffs'] += 1
@@ -789,12 +770,14 @@ def get_draw_score(board: CachedBoard) -> int:
 
 
 def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singular: bool = True) -> Tuple[
-    int, List[chess.Move]]:
+    int, List[int]]:
     """
     Negamax search with alpha-beta pruning.
 
+    PHASE 3: Uses integer moves throughout for performance.
+
     Returns:
-        Tuple of (score, pv) where pv is the list of moves in the principal variation.
+        Tuple of (score, pv_int) where pv_int is the list of integer moves in the principal variation.
     """
     kpi['nodes'] += 1
 
@@ -813,16 +796,17 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     alpha_orig = alpha
     beta_orig = beta  # ✅ FIX 1
 
-    best_move = None
+    best_move_int = 0  # PHASE 3: Integer move
     best_pv = []
     max_eval = -MAX_SCORE
 
     # -------- TT Lookup --------
     entry = transposition_table.get(key)
+    tt_move_int = 0  # PHASE 3: Integer TT move
     if entry and entry.depth >= depth:
         kpi['tt_hits'] += 1
         if entry.flag == TT_EXACT:
-            return entry.score, extract_pv_from_tt(board, depth)
+            return entry.score, extract_pv_from_tt_int(board, depth)
         elif entry.flag == TT_LOWER_BOUND:
             alpha = max(alpha, entry.score)
         elif entry.flag == TT_UPPER_BOUND:
@@ -830,13 +814,13 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
         if alpha >= beta:
             return entry.score, []  # ✅ FIX 2 (no PV on cutoff)
 
-        tt_move = entry.best_move
+        tt_move_int = entry.best_move_int
         # DIAG: Verify TT move is legal (corruption detection)
-        if tt_move and tt_move not in board.get_legal_moves_list():
-            _diag_warn("tt_illegal_moves", f"TT move {tt_move.uci()} illegal in {board.fen()[:50]}")
-            tt_move = None  # Ignore corrupted TT move
-    else:
-        tt_move = None
+        if tt_move_int != 0:
+            legal_moves = board.get_legal_moves_int()
+            if tt_move_int not in legal_moves:
+                _diag_warn("tt_illegal_moves", f"TT move {tt_move_int} illegal in {board.fen()[:50]}")
+                tt_move_int = 0  # Ignore corrupted TT move
 
     # -------- Quiescence if depth == 0 --------
     if depth == 0:
@@ -878,11 +862,11 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
     # -------- Singular Extension Check (simplified) --------
     singular_extension_applicable = False
-    singular_move = None
+    singular_move_int = 0  # PHASE 3: Integer move
 
     if (allow_singular
             and depth >= 6
-            and tt_move is not None
+            and tt_move_int != 0
             and not in_check
             and key in transposition_table
             and transposition_table[key].flag != TT_UPPER_BOUND
@@ -895,12 +879,13 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
         move_count = 0
         highest_score = -MAX_SCORE
 
-        for move in ordered_moves(board, depth, tt_move=tt_move):
-            if move == tt_move:
+        for move_int in ordered_moves_int(board, depth, tt_move_int=tt_move_int):
+            if move_int == tt_move_int:
                 continue
             if move_count >= 3:  # Limit moves checked
                 break
 
+            move = int_to_move(move_int)
             push_move(board, move, nn_evaluator)
             score, _ = negamax(board, reduced_depth, -reduced_beta - 1, -reduced_beta, allow_singular=False)
             score = -score
@@ -914,11 +899,11 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
         if highest_score < reduced_beta:
             singular_extension_applicable = True
-            singular_move = tt_move
+            singular_move_int = tt_move_int
 
     # -------- Move Ordering --------
-    moves = ordered_moves(board, depth, tt_move=tt_move)
-    if not moves:
+    moves_int = ordered_moves_int(board, depth, tt_move_int=tt_move_int)
+    if not moves_int:
         if in_check:
             return -MAX_SCORE + board.ply(), []
         return 0, []
@@ -938,15 +923,12 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
         if static_eval + futility_margin <= alpha:
             futility_pruning_applicable = True
 
-    for move_index, move in enumerate(moves):
+    for move_index, move_int in enumerate(moves_int):
         # FIX V3: Check time at start of each move iteration for faster response
         if move_index > 0 and move_index % 3 == 0:  # Check every 3rd move
             check_time()
             if TimeControl.stop_search:
                 break  # Hard stop - exit immediately
-
-        # PHASE 3: Convert to integer for fast lookups
-        move_int = move_to_int(move)
 
         # Use cached move info (integer version - faster)
         is_capture = board.is_capture_int(move_int)
@@ -957,12 +939,12 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
                 and depth <= SEE_PRUNING_MAX_DEPTH
                 and is_capture
                 and not in_check
-                and move != tt_move
+                and move_int != tt_move_int
                 and move_index > 0):  # Don't prune the first move
             # Prune captures with negative SEE at low depths
             # Threshold increases with depth (more aggressive pruning at lower depths)
             see_threshold = -20 * depth  # e.g., -20 at depth 1, -40 at depth 2, etc.
-            if not see_ge(board, move, see_threshold):
+            if not see_ge_int(board, move_int, see_threshold):
                 kpi['see_prunes'] += 1
                 continue  # Skip this losing capture
 
@@ -970,7 +952,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
         if (futility_pruning_applicable
                 and not is_capture
                 and not gives_check
-                and move != tt_move
+                and move_int != tt_move_int
                 and move_index > 0):  # Don't prune the first move or TT move
             # Check if the move is not a killer move (use integer comparison)
             is_killer = False
@@ -982,12 +964,14 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
                 kpi['futility_prunes'] += 1
                 continue
 
+        # Convert to chess.Move for push (needed by evaluator)
+        move = int_to_move(move_int)
         push_move(board, move, nn_evaluator)
         child_in_check = board.is_check()
 
         # -------- Extensions --------
         extension = 0
-        if singular_extension_applicable and move == singular_move:
+        if singular_extension_applicable and move_int == singular_move_int:
             extension = SINGULAR_EXTENSION
         elif child_in_check:
             extension = 1
@@ -1039,8 +1023,8 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
         if score > max_eval:
             max_eval = score
-            best_move = move
-            best_pv = [move] + child_pv
+            best_move_int = move_int
+            best_pv = [move_int] + child_pv  # Store integer move in PV
 
         if score > alpha:
             alpha = score
@@ -1069,21 +1053,23 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
     old = transposition_table.get(key)
     if old is None or depth >= old.depth:
-        transposition_table[key] = TTEntry(depth, max_eval, flag, best_move)
+        transposition_table[key] = TTEntry(depth, max_eval, flag, best_move_int)
 
     return max_eval, best_pv
 
 
-def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
+def extract_pv_from_tt_int(board: CachedBoard, max_depth: int) -> List[int]:
     """
-    Extract the principal variation from the transposition table.
+    Extract the principal variation from the transposition table as integer moves.
+
+    PHASE 3: Returns integer moves instead of chess.Move objects.
 
     Args:
         board: Current board position
         max_depth: Maximum depth to extract
 
     Returns:
-        List of moves forming the PV
+        List of integer moves forming the PV
     """
     pv = []
     seen_keys = set()
@@ -1097,16 +1083,18 @@ def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
         seen_keys.add(key)
 
         entry = transposition_table.get(key)
-        if entry is None or entry.best_move is None:
+        if entry is None or entry.best_move_int == 0:
             break
 
-        move = entry.best_move
-        if move not in board.get_legal_moves_list():
+        move_int = entry.best_move_int
+        legal_moves = board.get_legal_moves_int()
+        if move_int not in legal_moves:
             # DIAG: Track when TT contains illegal PV move
-            _diag_warn("pv_illegal_moves", f"PV move {move.uci()} illegal at depth {len(pv)}")
+            _diag_warn("pv_illegal_moves", f"PV move {move_int} illegal at depth {len(pv)}")
             break
 
-        pv.append(move)
+        pv.append(move_int)
+        move = int_to_move(move_int)
         push_move(board, move, nn_evaluator)
 
     # Restore board state
@@ -1115,6 +1103,23 @@ def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
         nn_evaluator.pop()
 
     return pv
+
+
+def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
+    """
+    Extract the principal variation from the transposition table.
+
+    Legacy wrapper - converts integer PV to chess.Move objects.
+
+    Args:
+        board: Current board position
+        max_depth: Maximum depth to extract
+
+    Returns:
+        List of moves forming the PV
+    """
+    pv_int = extract_pv_from_tt_int(board, max_depth)
+    return pv_int_to_moves(pv_int)
 
 
 def age_heuristic_history():
@@ -1297,10 +1302,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         return chess.Move.null(), 0, [], 0, 0
 
     # Start with no result - fallback computed lazily only if needed
-    best_move = None
+    best_move_int = 0  # PHASE 3: Integer move
     best_score = 0
-    best_pv = []
-    pv_move = None
+    best_pv = []  # List of integer moves
     prev_depth_score = None  # For score stability tracking
 
     last_depth_time = 0.0
@@ -1364,7 +1368,11 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         # -------- Root TT move --------
         root_key = board.zobrist_hash()
         entry = transposition_table.get(root_key)
-        tt_move = entry.best_move if entry and entry.best_move in board.get_legal_moves_list() else None
+        tt_move_int = 0
+        if entry and entry.best_move_int != 0:
+            legal_int = board.get_legal_moves_int()
+            if entry.best_move_int in legal_int:
+                tt_move_int = entry.best_move_int
 
         # -------- Aspiration window --------
         window = ASPIRATION_WINDOW
@@ -1390,15 +1398,18 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
             alpha_orig = alpha
 
             current_best_score = -MAX_SCORE
-            current_best_move = None
+            current_best_move_int = 0
             current_best_pv = []
 
-            for move_index, move in enumerate(ordered_moves(board, depth, pv_move, tt_move)):
+            # Get PV move as integer
+            pv_move_int = best_move_int if best_move_int != 0 else 0
+
+            for move_index, move_int in enumerate(ordered_moves_int(board, depth, pv_move_int, tt_move_int)):
                 check_time()
 
                 # -------- NEW: Debug output for move progress at depth 1 --------
                 if depth == 1 and move_index < 3:
-                    diag_print(f"DEBUG: depth 1 move {move_index}: {move.uci()}, stop={TimeControl.stop_search}")
+                    diag_print(f"DEBUG: depth 1 move {move_index}: {move_int}, stop={TimeControl.stop_search}")
 
                 # Check for stop before searching this move
                 if TimeControl.stop_search:
@@ -1411,6 +1422,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     search_aborted = True
                     break
 
+                move = int_to_move(move_int)
                 push_move(board, move, nn_evaluator)
 
                 if is_draw_by_repetition(board):
@@ -1436,16 +1448,16 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                 if TimeControl.stop_search or (TimeControl.soft_stop and max_completed_depth >= MIN_PREFERRED_DEPTH):
                     search_aborted = True
                     # Still save this move's result if it's our only one
-                    if current_best_move is None:
-                        current_best_move = move
+                    if current_best_move_int == 0:
+                        current_best_move_int = move_int
                         current_best_score = score
-                        current_best_pv = [move] + child_pv
+                        current_best_pv = [move_int] + child_pv
                     break
 
                 if score > current_best_score:
                     current_best_score = score
-                    current_best_move = move
-                    current_best_pv = [move] + child_pv
+                    current_best_move_int = move_int
+                    current_best_pv = [move_int] + child_pv
 
                 if score > alpha:
                     alpha = score
@@ -1456,18 +1468,17 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
             # If search was aborted, only save partial result if we have NO completed result
             # FIXED: Don't overwrite a completed depth's result with an incomplete one
             if search_aborted:
-                if best_move is None and current_best_move is not None:
-                    best_move = current_best_move
+                if best_move_int == 0 and current_best_move_int != 0:
+                    best_move_int = current_best_move_int
                     best_score = current_best_score
                     best_pv = current_best_pv
                 break
 
             # -------- SUCCESS: within aspiration window (or using full window) --------
             if use_full_window or (current_best_score > alpha_orig and current_best_score < beta):
-                best_move = current_best_move
+                best_move_int = current_best_move_int
                 best_score = current_best_score
                 best_pv = current_best_pv
-                pv_move = best_move
                 depth_completed = True
                 break
 
@@ -1487,8 +1498,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
             # Save partial result ONLY if we have NO completed result yet
             # FIXED: Don't overwrite a completed depth's result with an incomplete aspiration retry
-            if best_move is None and current_best_move is not None:
-                best_move = current_best_move
+            if best_move_int == 0 and current_best_move_int != 0:
+                best_move_int = current_best_move_int
                 best_score = current_best_score
                 best_pv = current_best_pv
 
@@ -1498,7 +1509,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                 beta = MAX_SCORE
                 current_best_score = -MAX_SCORE
 
-                for move in ordered_moves(board, depth, pv_move, tt_move):
+                for move_int in ordered_moves_int(board, depth, pv_move_int, tt_move_int):
                     check_time()
 
                     # Check for stop
@@ -1510,6 +1521,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                         search_aborted = True
                         break
 
+                    move = int_to_move(move_int)
                     push_move(board, move, nn_evaluator)
                     score, child_pv = negamax(board, depth - 1, -beta, -alpha, allow_singular=True)
                     score = -score
@@ -1521,32 +1533,31 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     if TimeControl.stop_search or (
                             TimeControl.soft_stop and max_completed_depth >= MIN_PREFERRED_DEPTH):
                         search_aborted = True
-                        if current_best_move is None:
-                            current_best_move = move
+                        if current_best_move_int == 0:
+                            current_best_move_int = move_int
                             current_best_score = score
-                            current_best_pv = [move] + child_pv
+                            current_best_pv = [move_int] + child_pv
                         break
 
                     if score > current_best_score:
                         current_best_score = score
-                        current_best_move = move
-                        current_best_pv = [move] + child_pv
+                        current_best_move_int = move_int
+                        current_best_pv = [move_int] + child_pv
 
                     if score > alpha:
                         alpha = score
 
                 # Save results from fallback search ONLY if completed (not aborted)
-                # Or if we have no result yet (best_move is None)
+                # Or if we have no result yet (best_move_int is 0)
                 if not search_aborted:
-                    if current_best_move is not None:
-                        best_move = current_best_move
+                    if current_best_move_int != 0:
+                        best_move_int = current_best_move_int
                         best_score = current_best_score
                         best_pv = current_best_pv
-                        pv_move = best_move
                     depth_completed = True
-                elif best_move is None and current_best_move is not None:
+                elif best_move_int == 0 and current_best_move_int != 0:
                     # Aborted but no previous result - save partial
-                    best_move = current_best_move
+                    best_move_int = current_best_move_int
                     best_score = current_best_score
                     best_pv = current_best_pv
                 break
@@ -1582,13 +1593,16 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         if depth_completed and best_pv:
             elapsed = time.perf_counter() - TimeControl.start_time
             nps = int((kpi['nodes'] - nodes_start) / elapsed) if elapsed > 0 else 0
+            pv_uci = ' '.join(int_to_move(m).uci() for m in best_pv)
             print(
-                f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {' '.join(m.uci() for m in best_pv)}",
+                f"info depth {depth} score cp {best_score} nodes {kpi['nodes']} nps {nps} pv {pv_uci}",
                 flush=True)
 
         # Early break to speed up testing
-        if best_move is not None and expected_best_moves is not None and best_move in expected_best_moves:
-            break
+        if best_move_int != 0 and expected_best_moves is not None:
+            best_move = int_to_move(best_move_int)
+            if best_move in expected_best_moves:
+                break
 
     # -------- SHALLOW SEARCH DIAGNOSTICS --------
     _diag["bestmove_depth_sum"] += max_completed_depth
@@ -1600,8 +1614,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
             _diag["shallow_search_d2"] += 1
         elif max_completed_depth == 3:
             _diag["shallow_search_d3"] += 1
+        best_move_for_diag = int_to_move(best_move_int) if best_move_int != 0 else None
         diag_print(f"SHALLOW_SEARCH: bestmove selected at depth {max_completed_depth} "
-                   f"(tactical={is_tactical_position}, move={best_move})")
+                   f"(tactical={is_tactical_position}, move={best_move_for_diag})")
 
     # Print QS statistics if significant
     if _qs_stats["max_depth_reached"] > MAX_QS_DEPTH // 2 or _qs_stats["time_cutoffs"] > 0:
@@ -1609,7 +1624,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                    f"nodes={_qs_stats['total_nodes']}, time_cutoffs={_qs_stats['time_cutoffs']}")
 
     # -------- IMPROVED fallback: shallow tactical search instead of pure NN eval --------
-    if best_move is None:
+    if best_move_int == 0:
         # DIAG: Track when fallback is needed
         _diag_warn("best_move_none", f"No depth completed, using shallow search fallback, fen={fen[:40]}")
         diag_print(f"Computing shallow search fallback (no depth completed)...")
@@ -1625,7 +1640,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         legal = board.get_legal_moves_list()
 
         if legal:
-            best_move = legal[0]  # Default to first legal move
+            best_move_int = move_to_int(legal[0])  # Default to first legal move
             best_score = -MAX_SCORE
 
             # -------- NEW: Do a shallow 1-ply search with captures/checks --------
@@ -1648,9 +1663,9 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                     score = MAX_SCORE - board.ply()
                     board.pop()
                     nn_evaluator.pop()
-                    best_move = move
+                    best_move_int = move_to_int(move)
                     best_score = score
-                    best_pv = [move]
+                    best_pv = [best_move_int]
                     diag_print(f"Fallback found checkmate: {move.uci()}")
                     break
 
@@ -1709,14 +1724,15 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
 
                 if score > best_score:
                     best_score = score
-                    best_move = move
+                    best_move_int = move_to_int(move)
 
-            best_pv = [best_move]
+            best_pv = [best_move_int]
             if not fallback_aborted:
-                diag_print(f"Shallow fallback: {len(legal)} moves, best={best_move.uci()} score={best_score}cp")
+                diag_print(
+                    f"Shallow fallback: {len(legal)} moves, best={int_to_move(best_move_int).uci()} score={best_score}cp")
         else:
             # No legal moves - game is over (checkmate or stalemate)
-            best_move = chess.Move.null()
+            best_move_int = 0  # Will return null move
             best_score = evaluate_classical(board)
             best_pv = []
 
@@ -1739,11 +1755,21 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     if abs(best_score) > MAX_SCORE:
         _diag_warn("score_out_of_bounds", f"Score {best_score} exceeds MAX_SCORE {MAX_SCORE}")
 
-    return best_move, best_score, best_pv, kpi['nodes'] - nodes_start, nps
+    # Convert integer move and PV to chess.Move for return value
+    best_move = int_to_move(best_move_int) if best_move_int != 0 else chess.Move.null()
+    best_pv_moves = pv_int_to_moves(best_pv)
+
+    return best_move, best_score, best_pv_moves, kpi['nodes'] - nodes_start, nps
 
 
 def push_move(board: CachedBoard, move, evaluator: NNEvaluator):
     """Push move on both evaluator and board using the unified interface."""
+    evaluator.push_with_board(board, move)
+
+
+def push_move_int(board: CachedBoard, move_int: int, evaluator: NNEvaluator):
+    """Push integer move on both evaluator and board. Converts to chess.Move internally."""
+    move = int_to_move(move_int)
     evaluator.push_with_board(board, move)
 
 

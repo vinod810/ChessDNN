@@ -233,7 +233,7 @@ class DNNEvaluator(NNEvaluator):
 
     def _evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators."""
-        #if board.is_game_over():
+        # if board.is_game_over():
         #    if board.is_checkmate():
         #        return -MAX_SCORE + board.ply()
         #    return 0.0
@@ -243,7 +243,7 @@ class DNNEvaluator(NNEvaluator):
 
     def _evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
-        #if board.is_game_over():
+        # if board.is_game_over():
         #    if board.is_checkmate():
         #        return -MAX_SCORE + board.ply()
         #    return 0.0
@@ -278,6 +278,8 @@ class NNUEEvaluator(NNEvaluator):
 
         Note: For NNUE, this is less efficient than push_with_board() because
         it requires creating a temporary board copy. Use push_with_board() when possible.
+
+        PHASE 3: Uses lazy accumulator refresh for king moves.
         """
         # Get pre-push data
         is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board_before_push, move)
@@ -289,10 +291,9 @@ class NNUEEvaluator(NNEvaluator):
         # Complete the update
         self.updater.update_post_push(temp_board, is_white_king_move, is_black_king_move, change_record)
 
-        # Update accumulators
+        # Update accumulators - lazy refresh for king moves
         if is_white_king_move or is_black_king_move:
-            white_feat, black_feat = self.updater.get_features_unsorted()
-            self.inference.refresh_accumulator(white_feat, black_feat)
+            self.inference.mark_dirty()
         else:
             self.inference.update_accumulator(
                 change_record['white_added'],
@@ -305,6 +306,9 @@ class NNUEEvaluator(NNEvaluator):
         """
         Efficiently update both evaluator state and board for a move.
         Uses NNUE's two-phase update for optimal performance.
+
+        PHASE 3: Uses lazy accumulator refresh - king moves just mark dirty
+        instead of immediately refreshing.
 
         Args:
             board: Board state BEFORE the move (will be modified)
@@ -321,10 +325,10 @@ class NNUEEvaluator(NNEvaluator):
         # Phase 2: After board.push()
         self.updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
 
-        # Update accumulators
+        # Update accumulators - lazy refresh for king moves
         if is_white_king_move or is_black_king_move:
-            white_feat, black_feat = self.updater.get_features_unsorted()
-            self.inference.refresh_accumulator(white_feat, black_feat)
+            # Mark dirty instead of immediate refresh
+            self.inference.mark_dirty()
         else:
             self.inference.update_accumulator(
                 change_record['white_added'],
@@ -350,6 +354,8 @@ class NNUEEvaluator(NNEvaluator):
         """
         Phase 2 of two-phase push. Call AFTER board.push(move).
 
+        PHASE 3: Uses lazy accumulator refresh for king moves.
+
         Args:
             board_after_push: Board state after the move was pushed
             is_white_king_move: From update_pre_push return value
@@ -359,10 +365,9 @@ class NNUEEvaluator(NNEvaluator):
         self.updater.update_post_push(board_after_push, is_white_king_move,
                                       is_black_king_move, change_record)
 
-        # Update accumulators
+        # Update accumulators - lazy refresh for king moves
         if is_white_king_move or is_black_king_move:
-            white_feat, black_feat = self.updater.get_features_unsorted()
-            self.inference.refresh_accumulator(white_feat, black_feat)
+            self.inference.mark_dirty()
         else:
             self.inference.update_accumulator(
                 change_record['white_added'],
@@ -372,36 +377,47 @@ class NNUEEvaluator(NNEvaluator):
             )
 
     def pop(self):
-        """Restore internal state to before the last push. Does NOT modify the board."""
+        """Restore internal state to before the last push. Does NOT modify the board.
+
+        PHASE 3: Uses lazy accumulator handling - king move pops either decrement
+        dirty counter (if never evaluated) or refresh (if evaluation happened).
+        """
         change_record = self.updater.pop()
 
-        # Restore accumulators
+        # Restore accumulators - lazy handling for king moves
         if change_record['white_king_moved'] or change_record['black_king_moved']:
-            # King moves require full refresh
-            white_feat, black_feat = self.updater.get_features_unsorted()
-            self.inference.refresh_accumulator(white_feat, black_feat)
+            if self.inference.is_dirty():
+                # Never evaluated after this king move - just decrement dirty counter
+                # Accumulators are still at the pre-push state
+                self.inference.unmark_dirty()
+            else:
+                # We evaluated after this king move (accumulator was refreshed)
+                # Need to refresh to the restored features (updater already popped)
+                white_feat, black_feat = self.updater.get_features_unsorted()
+                self.inference.refresh_accumulator(white_feat, black_feat)
         else:
-            # Regular move: reverse incremental updates
-            self.inference.update_accumulator(
-                change_record['white_removed'],
-                change_record['white_added'],
-                change_record['black_removed'],
-                change_record['black_added']
-            )
+            # Regular move: reverse incremental updates (only if not dirty)
+            # If dirty, the update was skipped on push, so skip the reverse too
+            if not self.inference.is_dirty():
+                self.inference.update_accumulator(
+                    change_record['white_removed'],
+                    change_record['white_added'],
+                    change_record['black_removed'],
+                    change_record['black_added']
+                )
 
     def _evaluate(self, board: CachedBoard) -> float:
-        """Evaluate using incremental accumulators."""
-        #if board.is_game_over():
-        #    if board.is_checkmate():
-        #        return -MAX_SCORE + board.ply()
-        #    return 0.0
+        """Evaluate using incremental accumulators.
 
+        PHASE 3: Provides feature_getter for lazy refresh when needed.
+        """
         stm = board.turn == chess.WHITE
-        return self.inference.evaluate_incremental(stm)
+        # Provide feature getter for lazy refresh
+        return self.inference.evaluate_incremental(stm, self.updater.get_features_unsorted)
 
     def _evaluate_full(self, board: CachedBoard) -> float:
         """Evaluate using full matrix multiplication (no incremental state)."""
-        #if board.is_game_over():
+        # if board.is_game_over():
         #    if board.is_checkmate():
         #        return -MAX_SCORE + board.ply()
         #    return 0.0
@@ -416,6 +432,7 @@ class NNUEEvaluator(NNEvaluator):
         self.updater = NNUEIncrementalUpdater(board)
         white_feat, black_feat = self.updater.get_features_unsorted()
         self.inference.refresh_accumulator(white_feat, black_feat)
+        self.inference.force_clean()  # Clear any dirty state
 
 
 # =============================================================================

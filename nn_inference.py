@@ -623,6 +623,10 @@ class NNUEInference:
         self.white_accumulator = None
         self.black_accumulator = None
 
+        # Lazy refresh tracking - defer expensive refresh until evaluation is needed
+        # Uses a depth counter to handle nested king moves correctly
+        self._dirty_depth = 0  # Number of king moves pending refresh
+
         # Pre-allocate all buffers
         self._hidden_buf = np.empty(self.hidden_size * 2, dtype=np.float32)
         self._l1_buf = np.empty(self.l1_bias.shape[0], dtype=np.float32)
@@ -682,6 +686,33 @@ class NNUEInference:
 
         print(f"  L1 INT16 quantization: weight_scale={weight_scale:.6f}, combined_scale={self._l1_combined_scale:.10f}")
 
+    def mark_dirty(self):
+        """
+        Mark that a king move occurred (call on king move push).
+
+        The actual refresh is deferred until evaluate_incremental() is called.
+        This avoids expensive refresh operations that would be immediately
+        undone by a pop() when the search backtracks.
+        """
+        self._dirty_depth += 1
+
+    def unmark_dirty(self):
+        """
+        Decrement dirty depth (call when popping a king move).
+
+        When dirty_depth reaches 0, accumulators are back in sync with features.
+        """
+        if self._dirty_depth > 0:
+            self._dirty_depth -= 1
+
+    def is_dirty(self) -> bool:
+        """Check if accumulators need refresh."""
+        return self._dirty_depth > 0
+
+    def force_clean(self):
+        """Force clean state (call after refresh or reset)."""
+        self._dirty_depth = 0
+
     def evaluate_full(self, white_features: List[int], black_features: List[int], stm: bool) -> float:
         white_input = np.zeros(self.ft_weight.shape[1], dtype=np.float32)
         black_input = np.zeros(self.ft_weight.shape[1], dtype=np.float32)
@@ -707,13 +738,29 @@ class NNUEInference:
 
         return output[0]
 
-    def evaluate_incremental(self, stm: bool) -> float:
+    def evaluate_incremental(self, stm: bool, feature_getter=None) -> float:
         """PHASE 2: Uses Cython-accelerated evaluation when available.
 
         Supports L1 quantization modes based on L1_QUANTIZATION setting.
+
+        PHASE 3: Implements lazy accumulator refresh - only refreshes when
+        evaluation is actually needed (not on every king move).
+
+        Args:
+            stm: True if white to move
+            feature_getter: Optional callable that returns (white_features, black_features).
+                           Required if dirty and refresh is needed.
         """
         if self.white_accumulator is None or self.black_accumulator is None:
             raise RuntimeError("Accumulators not initialized.")
+
+        # Lazy refresh: only refresh when we actually need to evaluate
+        if self._dirty_depth > 0:
+            if feature_getter is None:
+                raise RuntimeError("Lazy refresh needed but no feature_getter provided")
+            white_feat, black_feat = feature_getter()
+            self.refresh_accumulator(white_feat, black_feat)
+            self._dirty_depth = 0
 
         # TODO: store accumulators in quantized form for additional speedup
 
@@ -788,9 +835,17 @@ class NNUEInference:
 
     def update_accumulator(self, added_features_white: Set[int], removed_features_white: Set[int],
                            added_features_black: Set[int], removed_features_black: Set[int]):
-        """PHASE 2: Uses Cython-accelerated update when available."""
+        """PHASE 2: Uses Cython-accelerated update when available.
+
+        PHASE 3: If accumulators are dirty (pending refresh from king move),
+        skip the incremental update - we'll do a full refresh before evaluation anyway.
+        """
         if self.white_accumulator is None or self.black_accumulator is None:
             raise RuntimeError("Accumulators not initialized.")
+
+        # Skip incremental updates when dirty - we'll refresh before evaluation
+        if self._dirty_depth > 0:
+            return
 
         _cy_nnue_update(
             self.white_accumulator,
@@ -954,5 +1009,3 @@ def load_model(model_path: str, nn_type: str):
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
-
