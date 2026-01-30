@@ -4,13 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="README  for sub dirs">
-      <change afterPath="$PROJECT_DIR$/parameter_tuning_guide.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/time_depth_management_guide.md" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Guides for optimization">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -309,14 +304,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00141" summary="NNUE and DNN converging well.">
-      <option name="closed" value="true" />
-      <created>1768889324764</created>
-      <option name="number" value="00141" />
-      <option name="presentableId" value="LOCAL-00141" />
-      <option name="project" value="LOCAL" />
-      <updated>1768889324764</updated>
-    </task>
     <task id="LOCAL-00142" summary="Removed multiple is_game_over()">
       <option name="closed" value="true" />
       <created>1768921922667</created>
@@ -525,7 +512,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769616724421</updated>
     </task>
-    <option name="localTasksCounter" value="168" />
+    <task id="LOCAL-00168" summary="Guides for optimization">
+      <option name="closed" value="true" />
+      <created>1769720729175</created>
+      <option name="number" value="00168" />
+      <option name="presentableId" value="LOCAL-00168" />
+      <option name="project" value="LOCAL" />
+      <updated>1769720729175</updated>
+    </task>
+    <option name="localTasksCounter" value="169" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -540,7 +535,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Removed multiple is_game_over()" />
     <MESSAGE value="Cached stockfish NNUE evals" />
     <MESSAGE value="Quantization benchmark" />
     <MESSAGE value="Before quantization" />
@@ -565,7 +559,8 @@
     <MESSAGE value="Parameter optimization" />
     <MESSAGE value="DNN COO and Dataloader" />
     <MESSAGE value="README  for sub dirs" />
-    <option name="LAST_COMMIT_MESSAGE" value="README  for sub dirs" />
+    <MESSAGE value="Guides for optimization" />
+    <option name="LAST_COMMIT_MESSAGE" value="Guides for optimization" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
