@@ -81,14 +81,14 @@ QS_SOFT_STOP_DIVISOR = _env_float('QS_SOFT_STOP_DIVISOR', 8.0)
 #MAX_QS_MOVES_PER_PLY = _env_int('MAX_QS_MOVES_PER_PLY', 10)  # REDUCED from 12 - Maximum captures to examine at each QS depth
 #MAX_QS_MOVES_DEEP = _env_int('MAX_QS_MOVES_DEEP', 5)  # REDUCED from 6
 QS_TIME_CRITICAL_FACTOR = _env_float('QS_TIME_CRITICAL_FACTOR', 0.88)
-MAX_QS_MOVES_TIME_CRITICAL = _env_int('MAX_QS_MOVES_TIME_CRITICAL', 5)  # FIX: Increased from 3 to 5
+MAX_QS_MOVES_TIME_CRITICAL = _env_int('MAX_QS_MOVES_TIME_CRITICAL', 6)  # FIX: Increased from 3 to 5
 #MIN_QS_MOVES_SHALLOW = _env_int('MIN_QS_MOVES_SHALLOW', 6)  # NEW: Minimum moves at QS depth 1-2
 DELTA_PRUNING_QS_MIN_DEPTH = _env_int('DELTA_PRUNING_QS_MIN_DEPTH', 5)  # REDUCED from 6
 DELTA_PRUNING_QS_MARGIN = _env_int('DELTA_PRUNING_QS_MARGIN', 75)
 CHECK_QS_MAX_DEPTH = _env_int('CHECK_QS_MAX_DEPTH', 5)  # REDUCED from 5
 # Time check frequency in QS - more aggressive
-QS_TIME_CHECK_INTERVAL = _env_int('QS_TIME_CHECK_INTERVAL', 25)  # REDUCED from 50
-# Time budget allocation
+QS_TIME_CHECK_INTERVAL = _env_int('QS_TIME_CHECK_INTERVAL', 35)  # REDUCED from 50
+# Time budget allocation # TODO optimize two entries below
 QS_TIME_BUDGET_FRACTION = _env_float('QS_TIME_BUDGET_FRACTION', 0.35)  # FIX V4: Reduced from 0.35
 #MIN_MAIN_SEARCH_RESERVE = _env_float('MIN_MAIN_SEARCH_RESERVE', 0.30)  # NEW: Always reserve 30% of time
 QS_TT_SUPPORTED = _env_bool('QS_TT_SUPPORTED', False)
@@ -107,14 +107,14 @@ ESTIMATED_BRANCHING_FACTOR = _env_float('ESTIMATED_BRANCHING_FACTOR', 4.0)
 TIME_SAFETY_MARGIN_RATIO = _env_float('TIME_SAFETY_MARGIN_RATIO', 0.45)  # Only start new depth if 70%+ time available
 
 ASPIRATION_WINDOW = _env_int('ASPIRATION_WINDOW', 75)  # FIX V4: Increased from 50
-MAX_AW_RETRIES = _env_int('MAX_AW_RETRIES', 2)  # Base retries (tactical positions get +1)
+MAX_AW_RETRIES = _env_int('MAX_AW_RETRIES', 1)  # Base retries (tactical positions get +1)
 MAX_AW_RETRIES_TACTICAL = _env_int('MAX_AW_RETRIES_TACTICAL', 3)  # FIX V4: More retries for tactical positions
 
 LMR_MOVE_THRESHOLD = _env_int('LMR_MOVE_THRESHOLD', 2)
-LMR_MIN_DEPTH = _env_int('LMR_MIN_DEPTH', 3)  # minimum depth to apply LMR
+LMR_MIN_DEPTH = _env_int('LMR_MIN_DEPTH', 4)  # minimum depth to apply LMR
 
-NULL_MOVE_REDUCTION = _env_int('NULL_MOVE_REDUCTION', 3)  # R value (usually 2 or 3)
-NULL_MOVE_MIN_DEPTH = _env_int('NULL_MOVE_MIN_DEPTH', 4)
+NULL_MOVE_REDUCTION = _env_int('NULL_MOVE_REDUCTION', 2)  # R value (usually 2 or 3)
+NULL_MOVE_MIN_DEPTH = _env_int('NULL_MOVE_MIN_DEPTH', 3)
 
 SINGULAR_MARGIN = _env_int('SINGULAR_MARGIN', 130)  # Score difference in centipawns
 SINGULAR_EXTENSION = _env_int('SINGULAR_EXTENSION', 1)  # Extra depth
@@ -122,7 +122,7 @@ SINGULAR_EXTENSION = _env_int('SINGULAR_EXTENSION', 1)  # Extra depth
 # SEE Pruning - prune losing captures at low depths
 SEE_PRUNING_ENABLED = _env_bool('SEE_PRUNING_ENABLED', False)
 SEE_PRUNING_MAX_DEPTH = _env_int('SEE_PRUNING_MAX_DEPTH', 6)  # Only apply at shallow depths
-
+# TODO Optimize below
 # Futility Pruning - skip quiet moves when position is hopeless
 FUTILITY_PRUNING_ENABLED = _env_bool('FUTILITY_PRUNING_ENABLED', True)
 # Note: FUTILITY_MARGIN is a list - use JSON format in env var, e.g. "[0,150,300,450]"
