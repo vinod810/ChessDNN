@@ -35,6 +35,14 @@ PIECE_VALUES = {
     chess.KING: 0
 }
 
+# OPTIMIZATION: Pre-computed MVV-LVA table as nested list (2x faster than dict)
+# Index: [victim_type][attacker_type], piece types 1-6
+# Value: 10 * victim_value - attacker_value
+_MVV_LVA = [[0] * 7 for _ in range(7)]
+for _v in range(1, 7):
+    for _a in range(1, 7):
+        _MVV_LVA[_v][_a] = 10 * PIECE_VALUES.get(_v, 0) - PIECE_VALUES.get(_a, 0)
+
 # fmt: off
 _PST_PAWN = [
       0,   0,   0,   0,   0,   0,   0,   0,
@@ -156,6 +164,8 @@ class _CacheState:
     move_piece_color_int: Optional[Dict[int, bool]] = None  # True = WHITE
     move_captured_piece_type_int: Optional[Dict[int, Optional[int]]] = None  # For non-ep captures
     move_captured_piece_color_int: Optional[Dict[int, Optional[bool]]] = None
+    # OPTIMIZATION: Pre-computed MVV-LVA scores (eliminates 3 dict lookups per QS move)
+    move_mvv_lva_int: Optional[Dict[int, int]] = None
 
 
 # OPTIMIZATION: Pre-computed bitmasks for fast capture detection
@@ -871,6 +881,8 @@ class CachedBoard:
         cache.move_piece_color_int = {}
         cache.move_captured_piece_type_int = {}
         cache.move_captured_piece_color_int = {}
+        # OPTIMIZATION: Pre-computed MVV-LVA scores
+        cache.move_mvv_lva_int = {}
 
         # PHASE 3.2 FIX: Call get_legal_moves_int FIRST - this populates
         # move_gives_check_int for C++ backend, avoiding redundant conversion
@@ -951,15 +963,23 @@ class CachedBoard:
                     cache.move_victim_type_int[move_int] = chess.PAWN
                     cache.move_captured_piece_type_int[move_int] = chess.PAWN
                     cache.move_captured_piece_color_int[move_int] = not stm  # Opposite of moving piece
+                    # OPTIMIZATION: Pre-compute MVV-LVA score
+                    cache.move_mvv_lva_int[move_int] = _MVV_LVA[chess.PAWN][attacker_type]
                 else:
                     victim_type = piece_type_at(to_sq)
                     cache.move_victim_type_int[move_int] = victim_type
                     cache.move_captured_piece_type_int[move_int] = victim_type
                     cache.move_captured_piece_color_int[move_int] = piece_color_map.get(to_sq)
+                    # OPTIMIZATION: Pre-compute MVV-LVA score
+                    if victim_type and attacker_type:
+                        cache.move_mvv_lva_int[move_int] = _MVV_LVA[victim_type][attacker_type]
+                    else:
+                        cache.move_mvv_lva_int[move_int] = 0
             else:
                 cache.move_victim_type_int[move_int] = None
                 cache.move_captured_piece_type_int[move_int] = None
                 cache.move_captured_piece_color_int[move_int] = None
+                cache.move_mvv_lva_int[move_int] = 0  # Non-captures have score 0
 
             # PHASE 3.3: Get attacker type using piece_type_at (no object creation)
             cache.move_attacker_type_int[move_int] = attacker_type
@@ -1045,6 +1065,18 @@ class CachedBoard:
         if cache.move_attacker_type_int is None:
             self.precompute_move_info_int()
         return cache.move_attacker_type_int.get(move_int)
+
+    def get_mvv_lva_int(self, move_int: int) -> int:
+        """
+        OPTIMIZATION: Get pre-computed MVV-LVA score for a move.
+
+        Returns the MVV-LVA score (10*victim_value - attacker_value) for captures,
+        or 0 for non-captures. This eliminates 3 dict lookups in move_score_q_search_int.
+        """
+        cache = self._cache_stack[-1]
+        if cache.move_mvv_lva_int is None:
+            self.precompute_move_info_int()
+        return cache.move_mvv_lva_int.get(move_int, 0)
 
     # ==================== WEEK 1 OPTIMIZATION: New getters ====================
 

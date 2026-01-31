@@ -384,11 +384,8 @@ def move_score_int(board: CachedBoard, move_int: int, depth: int) -> int:
             score += 8000
 
     if is_capture:
-        # Use cached victim and attacker types (integer version)
-        victim_type = board.get_victim_type_int(move_int)
-        attacker_type = board.get_attacker_type_int(move_int)
-        if victim_type and attacker_type:
-            score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
+        # OPTIMIZED: Use pre-computed MVV-LVA score (1 lookup instead of 3)
+        score += board.get_mvv_lva_int(move_int)
 
     # PHASE 3: Array-based history heuristic for O(1) access
     if move_int < HISTORY_TABLE_SIZE:
@@ -401,27 +398,14 @@ def move_score_int(board: CachedBoard, move_int: int, depth: int) -> int:
     return score
 
 
-# OPTIMIZATION: Pre-computed MVV-LVA table for instant lookup
-# Key: (victim_type, attacker_type), Value: MVV-LVA score
-_MVV_LVA_TABLE = {}
-for v in range(1, 7):  # Victim types 1-6
-    for a in range(1, 7):  # Attacker types 1-6
-        _MVV_LVA_TABLE[(v, a)] = 10 * PIECE_VALUES.get(v, 0) - PIECE_VALUES.get(a, 0)
-
-
 def move_score_q_search_int(board: CachedBoard, move_int: int) -> int:
     """
-    OPTIMIZED: Score a move for quiescence search using pre-computed table.
+    OPTIMIZED: Score a move for quiescence search using pre-computed MVV-LVA.
+
+    This uses board.get_mvv_lva_int() which returns the pre-computed score,
+    eliminating 3 dict lookups (is_capture, victim_type, attacker_type).
     """
-    if not board.is_capture_int(move_int):
-        return 0
-
-    victim_type = board.get_victim_type_int(move_int)
-    attacker_type = board.get_attacker_type_int(move_int)
-
-    if victim_type and attacker_type:
-        return _MVV_LVA_TABLE.get((victim_type, attacker_type), 0)
-    return 0
+    return board.get_mvv_lva_int(move_int)
 
 
 def ordered_moves_int(board: CachedBoard, depth: int, pv_move_int: int = 0, tt_move_int: int = 0) -> List[int]:
@@ -2009,4 +1993,6 @@ def main():
 
 
 if __name__ == '__main__':
+    import random
+    random.seed(42)  # Fixed seed for reproducible benchmarks
     main()
