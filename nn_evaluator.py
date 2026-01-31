@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Optional
 
 import chess
 
-from cached_board import CachedBoard
+from cached_board import CachedBoard, move_to_int
 from nn_inference import NNUEIncrementalUpdater
 from nn_inference import DNNIncrementalUpdater
 from nn_inference import load_model
@@ -310,14 +310,41 @@ class NNUEEvaluator(NNEvaluator):
         PHASE 3: Uses lazy accumulator refresh - king moves just mark dirty
         instead of immediately refreshing.
 
+        WEEK 1 OPTIMIZATION: Uses cached move info when available to eliminate
+        piece_at() calls in update_pre_push.
+
         Args:
             board: Board state BEFORE the move (will be modified)
             move: Move being made
             :param move:
             :param board:
         """
-        # Phase 1: Before board.push()
-        is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board, move)
+        # WEEK 1: Try to get cached move info to avoid piece_at() calls
+        move_int = move_to_int(move)
+
+        # Check if we have cached move info
+        cache = board._cache_stack[-1] if board._cache_stack else None
+        use_fast_path = (cache is not None and
+                         cache.move_attacker_type_int is not None and
+                         move_int in cache.move_attacker_type_int)
+
+        if use_fast_path:
+            # Fast path: use cached move info
+            attacker_type = cache.move_attacker_type_int.get(move_int)
+            piece_color = cache.move_piece_color_int.get(move_int, board.turn)
+            is_en_passant = cache.move_is_en_passant_int.get(move_int, False)
+            is_castling = cache.move_is_castling_int.get(move_int, False)
+            captured_type = cache.move_captured_piece_type_int.get(move_int)
+            captured_color = cache.move_captured_piece_color_int.get(move_int)
+
+            # Phase 1: Before board.push() - use fast version
+            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push_fast(
+                board, move, attacker_type, piece_color,
+                is_en_passant, is_castling, captured_type, captured_color
+            )
+        else:
+            # Slow path: compute piece info via piece_at() calls
+            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board, move)
 
         # Push the board
         board.push(move)
@@ -328,6 +355,59 @@ class NNUEEvaluator(NNEvaluator):
         # Update accumulators - lazy refresh for king moves
         if is_white_king_move or is_black_king_move:
             # Mark dirty instead of immediate refresh
+            self.inference.mark_dirty()
+        else:
+            self.inference.update_accumulator(
+                change_record['white_added'],
+                change_record['white_removed'],
+                change_record['black_added'],
+                change_record['black_removed']
+            )
+
+    def push_with_board_int(self, board: CachedBoard, move: chess.Move, move_int: int):
+        """
+        WEEK 1 OPTIMIZATION: Variant of push_with_board that accepts pre-computed
+        move_int to avoid redundant conversion.
+
+        Use this when you already have the integer move from move ordering.
+
+        Args:
+            board: Board state BEFORE the move (will be modified)
+            move: The chess.Move object
+            move_int: Pre-computed integer representation of the move
+        """
+        # Check if we have cached move info
+        cache = board._cache_stack[-1] if board._cache_stack else None
+        use_fast_path = (cache is not None and
+                         cache.move_attacker_type_int is not None and
+                         move_int in cache.move_attacker_type_int)
+
+        if use_fast_path:
+            # Fast path: use cached move info
+            attacker_type = cache.move_attacker_type_int.get(move_int)
+            piece_color = cache.move_piece_color_int.get(move_int, board.turn)
+            is_en_passant = cache.move_is_en_passant_int.get(move_int, False)
+            is_castling = cache.move_is_castling_int.get(move_int, False)
+            captured_type = cache.move_captured_piece_type_int.get(move_int)
+            captured_color = cache.move_captured_piece_color_int.get(move_int)
+
+            # Phase 1: Before board.push() - use fast version
+            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push_fast(
+                board, move, attacker_type, piece_color,
+                is_en_passant, is_castling, captured_type, captured_color
+            )
+        else:
+            # Slow path: compute piece info via piece_at() calls
+            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board, move)
+
+        # Push the board
+        board.push(move)
+
+        # Phase 2: After board.push()
+        self.updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
+
+        # Update accumulators - lazy refresh for king moves
+        if is_white_king_move or is_black_king_move:
             self.inference.mark_dirty()
         else:
             self.inference.update_accumulator(

@@ -359,6 +359,92 @@ class NNUEIncrementalUpdater:
 
         return is_white_king_move, is_black_king_move, change_record
 
+    def update_pre_push_fast(self, board_before_push: CachedBoard, move: chess.Move,
+                             moving_piece_type: int, moving_piece_color: bool,
+                             is_en_passant: bool, is_castling: bool,
+                             captured_piece_type: Optional[int],
+                             captured_piece_color: Optional[bool]) -> Tuple[bool, bool, Dict]:
+        """
+        WEEK 1 OPTIMIZATION: Faster version of update_pre_push that accepts
+        pre-computed piece information, eliminating piece_at() calls.
+
+        Args:
+            board_before_push: Board state BEFORE the move
+            move: The move being made
+            moving_piece_type: Type of the piece being moved (1-6)
+            moving_piece_color: Color of moving piece (True=WHITE)
+            is_en_passant: Whether this is an en passant capture
+            is_castling: Whether this is a castling move
+            captured_piece_type: Type of captured piece (None if not capture)
+            captured_piece_color: Color of captured piece (None if not capture)
+
+        Returns:
+            Tuple of (is_white_king_move, is_black_king_move, change_record)
+        """
+        from_sq = move.from_square
+        to_sq = move.to_square
+
+        change_record = {
+            'white_added': set(), 'white_removed': set(),
+            'black_added': set(), 'black_removed': set(),
+            'white_king_moved': False, 'black_king_moved': False,
+            'prev_white_king_sq': self.white_king_sq,
+            'prev_black_king_sq': self.black_king_sq,
+            'prev_white_features': None, 'prev_black_features': None,
+        }
+
+        # Handle None piece type (shouldn't happen with legal moves, but be safe)
+        if moving_piece_type is None:
+            return False, False, change_record
+
+        is_white_king_move = (moving_piece_type == chess.KING and moving_piece_color == chess.WHITE)
+        is_black_king_move = (moving_piece_type == chess.KING and moving_piece_color == chess.BLACK)
+
+        # For king moves, save the entire feature set for that perspective (for undo)
+        # and update the king square. Feature rebuild happens in update_post_push.
+        if is_white_king_move:
+            change_record['white_king_moved'] = True
+            change_record['prev_white_features'] = self.white_features.copy()
+            self.white_king_sq = to_sq
+        if is_black_king_move:
+            change_record['black_king_moved'] = True
+            change_record['prev_black_features'] = self.black_features.copy()
+            self.black_king_sq = to_sq
+
+        # Handle captures - NO piece_at() calls needed!
+        if is_en_passant:
+            # En passant: captured pawn is adjacent to to_sq
+            ep_sq = to_sq + (-8 if moving_piece_color == chess.WHITE else 8)
+            # Captured piece is always an opponent pawn
+            self._remove_piece_features(ep_sq, chess.PAWN, not moving_piece_color, change_record)
+        elif captured_piece_type is not None and captured_piece_color is not None:
+            # Regular capture
+            self._remove_piece_features(to_sq, captured_piece_type, captured_piece_color, change_record)
+
+        # Handle castling rook movement
+        rook_to = None
+        if is_castling:
+            if to_sq > from_sq:  # Kingside
+                rook_from = chess.H1 if moving_piece_color == chess.WHITE else chess.H8
+                rook_to = chess.F1 if moving_piece_color == chess.WHITE else chess.F8
+            else:  # Queenside
+                rook_from = chess.A1 if moving_piece_color == chess.WHITE else chess.A8
+                rook_to = chess.D1 if moving_piece_color == chess.WHITE else chess.D8
+            self._remove_piece_features(rook_from, chess.ROOK, moving_piece_color, change_record)
+
+        # For non-king moves, handle the moving piece's feature changes
+        if not is_white_king_move and not is_black_king_move:
+            self._remove_piece_features(from_sq, moving_piece_type, moving_piece_color, change_record)
+
+            final_piece_type = move.promotion if move.promotion else moving_piece_type
+            self._add_piece_features(to_sq, final_piece_type, moving_piece_color, change_record)
+
+        # For castling, add the rook at its new position
+        if is_castling and rook_to is not None:
+            self._add_piece_features(rook_to, chess.ROOK, moving_piece_color, change_record)
+
+        return is_white_king_move, is_black_king_move, change_record
+
     def update_post_push(self, board_after_push: CachedBoard,
                          is_white_king_move: bool,
                          is_black_king_move: bool,

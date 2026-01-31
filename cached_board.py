@@ -11,7 +11,7 @@ Optimizations:
 """
 
 import sys
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 
 try:
@@ -150,6 +150,12 @@ class _CacheState:
     move_gives_check_int: Optional[Dict[int, bool]] = None
     move_victim_type_int: Optional[Dict[int, Optional[int]]] = None
     move_attacker_type_int: Optional[Dict[int, Optional[int]]] = None
+    # WEEK 1 OPTIMIZATION: Additional caches to eliminate piece_at() calls
+    move_is_en_passant_int: Optional[Dict[int, bool]] = None
+    move_is_castling_int: Optional[Dict[int, bool]] = None
+    move_piece_color_int: Optional[Dict[int, bool]] = None  # True = WHITE
+    move_captured_piece_type_int: Optional[Dict[int, Optional[int]]] = None  # For non-ep captures
+    move_captured_piece_color_int: Optional[Dict[int, Optional[bool]]] = None
 
 
 @dataclass(slots=True)
@@ -505,10 +511,10 @@ class CachedBoard:
     def piece_type_at(self, square: int) -> Optional[int]:
         """
         PHASE 3.3: Get piece type at square without creating chess.Piece object.
-        
+
         This is faster than piece_at() when you only need the piece type,
         as it avoids chess.Piece object creation overhead.
-        
+
         Returns:
             Piece type (1-6) or None if square is empty
         """
@@ -746,9 +752,12 @@ class CachedBoard:
         PHASE 3.2: gives_check is computed during get_legal_moves_int() for
         C++ backend. We MUST call get_legal_moves_int() BEFORE checking if
         move_gives_check_int is populated.
-        
+
         PHASE 3.3: Uses piece_type_at() instead of piece_at() to avoid
         chess.Piece object creation overhead.
+
+        WEEK 1 OPTIMIZATION: Also caches en passant, castling, piece colors
+        to eliminate piece_at() calls in nn_inference.update_pre_push().
         """
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_is_capture_int is not None:
@@ -757,11 +766,17 @@ class CachedBoard:
         cache.move_is_capture_int = {}
         cache.move_victim_type_int = {}
         cache.move_attacker_type_int = {}
+        # WEEK 1: New caches
+        cache.move_is_en_passant_int = {}
+        cache.move_is_castling_int = {}
+        cache.move_piece_color_int = {}
+        cache.move_captured_piece_type_int = {}
+        cache.move_captured_piece_color_int = {}
 
         # PHASE 3.2 FIX: Call get_legal_moves_int FIRST - this populates
         # move_gives_check_int for C++ backend, avoiding redundant conversion
         legal_moves_int = self.get_legal_moves_int()
-        
+
         # NOW check if gives_check was already computed during move generation
         if cache.move_gives_check_int is None:
             cache.move_gives_check_int = {}
@@ -771,22 +786,54 @@ class CachedBoard:
 
         occupied = self.occupied
         ep_square = self.ep_square
-        
+        stm = self.turn  # Side to move
+
         # PHASE 3.3: Use local reference to avoid repeated attribute lookup
         piece_type_at = self.piece_type_at
+
+        # WEEK 1: Build piece map for fast color lookup (avoiding piece_at)
+        # piece_color_map[sq] = True if white piece, False if black, None if empty
+        piece_color_map = {}
+        # Handle both C++ backend (method) and python-chess (dict-like)
+        if self._use_cpp:
+            white_pieces = self._board.occupied_co(chess.WHITE)
+        elif hasattr(self._board, 'occupied_co'):
+            white_pieces = self._board.occupied_co[chess.WHITE]
+        else:
+            white_pieces = 0
+        for sq in range(64):
+            if occupied & (1 << sq):
+                piece_color_map[sq] = bool(white_pieces & (1 << sq))
 
         for move_int in legal_moves_int:
             from_sq = move_int & 0x3F
             to_sq = (move_int >> 6) & 0x3F
+            promo = (move_int >> 12) & 0xF
+
+            # WEEK 1: Cache piece color (side to move)
+            cache.move_piece_color_int[move_int] = stm
 
             # Check en passant (pawn moving to ep_square diagonally)
+            attacker_type = piece_type_at(from_sq)
             is_ep = (ep_square is not None and
                      to_sq == ep_square and
+                     attacker_type == chess.PAWN and
                      abs(from_sq - to_sq) in (7, 9))  # Diagonal pawn move
+            cache.move_is_en_passant_int[move_int] = is_ep
 
             # Check capture
             is_cap = bool(occupied & (1 << to_sq)) or is_ep
             cache.move_is_capture_int[move_int] = is_cap
+
+            # WEEK 1: Check castling
+            is_castling = False
+            if attacker_type == chess.KING and promo == 0:
+                # White: e1->g1 or e1->c1, Black: e8->g8 or e8->c8
+                if from_sq == 4 and to_sq in (6, 2):  # White castling
+                    is_castling = True
+                elif from_sq == 60 and to_sq in (62, 58):  # Black castling
+                    is_castling = True
+            cache.move_is_castling_int[move_int] = is_castling
 
             # PHASE 3.2: Only compute gives_check if not already done
             if needs_gives_check:
@@ -799,16 +846,24 @@ class CachedBoard:
                     cache.move_gives_check_int[move_int] = self._board.gives_check(py_move)
 
             # PHASE 3.3: Get victim type using piece_type_at (no object creation)
+            # WEEK 1: Also cache captured piece color
             if is_cap:
                 if is_ep:
                     cache.move_victim_type_int[move_int] = chess.PAWN
+                    cache.move_captured_piece_type_int[move_int] = chess.PAWN
+                    cache.move_captured_piece_color_int[move_int] = not stm  # Opposite of moving piece
                 else:
-                    cache.move_victim_type_int[move_int] = piece_type_at(to_sq)
+                    victim_type = piece_type_at(to_sq)
+                    cache.move_victim_type_int[move_int] = victim_type
+                    cache.move_captured_piece_type_int[move_int] = victim_type
+                    cache.move_captured_piece_color_int[move_int] = piece_color_map.get(to_sq)
             else:
                 cache.move_victim_type_int[move_int] = None
+                cache.move_captured_piece_type_int[move_int] = None
+                cache.move_captured_piece_color_int[move_int] = None
 
             # PHASE 3.3: Get attacker type using piece_type_at (no object creation)
-            cache.move_attacker_type_int[move_int] = piece_type_at(from_sq)
+            cache.move_attacker_type_int[move_int] = attacker_type
 
     def _int_to_cpp_move(self, move_int: int):
         """
@@ -880,6 +935,103 @@ class CachedBoard:
         if cache.move_attacker_type_int is None:
             self.precompute_move_info_int()
         return cache.move_attacker_type_int.get(move_int)
+
+    # ==================== WEEK 1 OPTIMIZATION: New getters ====================
+
+    def is_en_passant_int(self, move_int: int) -> bool:
+        """
+        WEEK 1 OPTIMIZATION: Check if move is en passant using integer key.
+        Eliminates need for move conversion and piece_at() calls.
+        """
+        cache = self._cache_stack[-1]
+        if cache.move_is_en_passant_int is None:
+            self.precompute_move_info_int()
+        result = cache.move_is_en_passant_int.get(move_int)
+        if result is not None:
+            return result
+        # Fallback: compute directly
+        ep_square = self.ep_square
+        if ep_square is None:
+            return False
+        to_sq = (move_int >> 6) & 0x3F
+        if to_sq != ep_square:
+            return False
+        from_sq = move_int & 0x3F
+        piece_type = self.piece_type_at(from_sq)
+        return piece_type == chess.PAWN and abs(from_sq - to_sq) in (7, 9)
+
+    def is_castling_int(self, move_int: int) -> bool:
+        """
+        WEEK 1 OPTIMIZATION: Check if move is castling using integer key.
+        Uses cached value when available, avoiding piece_at() calls.
+        """
+        cache = self._cache_stack[-1]
+        if cache.move_is_castling_int is None:
+            self.precompute_move_info_int()
+        result = cache.move_is_castling_int.get(move_int)
+        if result is not None:
+            return result
+        # Fallback: compute directly
+        from_sq = move_int & 0x3F
+        to_sq = (move_int >> 6) & 0x3F
+        promo = (move_int >> 12) & 0xF
+        if promo != 0:
+            return False
+        # Check standard castling patterns
+        if from_sq == 4 and to_sq in (6, 2):  # White: E1 to G1 or C1
+            piece_type = self.piece_type_at(4)
+            return piece_type == chess.KING
+        if from_sq == 60 and to_sq in (62, 58):  # Black: E8 to G8 or C8
+            piece_type = self.piece_type_at(60)
+            return piece_type == chess.KING
+        return False
+
+    def get_move_piece_color_int(self, move_int: int) -> Optional[bool]:
+        """
+        WEEK 1 OPTIMIZATION: Get the color of the moving piece.
+        Returns True for WHITE, False for BLACK, None if not cached.
+        """
+        cache = self._cache_stack[-1]
+        if cache.move_piece_color_int is None:
+            self.precompute_move_info_int()
+        return cache.move_piece_color_int.get(move_int, self.turn)
+
+    def get_captured_piece_info_int(self, move_int: int) -> Tuple[Optional[int], Optional[bool]]:
+        """
+        WEEK 1 OPTIMIZATION: Get captured piece type and color using integer key.
+        Returns (piece_type, is_white) or (None, None) if not a capture.
+        Eliminates piece_at() calls in nn_inference.update_pre_push().
+        """
+        cache = self._cache_stack[-1]
+        if cache.move_captured_piece_type_int is None:
+            self.precompute_move_info_int()
+        return (
+            cache.move_captured_piece_type_int.get(move_int),
+            cache.move_captured_piece_color_int.get(move_int)
+        )
+
+    def get_move_info_for_nn_int(self, move_int: int) -> Tuple[int, bool, bool, bool, Optional[int], Optional[bool]]:
+        """
+        WEEK 1 OPTIMIZATION: Get all move info needed for NN updates in one call.
+
+        Returns:
+            (attacker_type, attacker_color, is_en_passant, is_castling,
+             captured_type, captured_color)
+
+        This eliminates multiple piece_at() calls in nn_inference.update_pre_push().
+        """
+        cache = self._cache_stack[-1]
+        if cache.move_attacker_type_int is None:
+            self.precompute_move_info_int()
+
+        return (
+            cache.move_attacker_type_int.get(move_int),
+            cache.move_piece_color_int.get(move_int, self.turn),
+            cache.move_is_en_passant_int.get(move_int, False),
+            cache.move_is_castling_int.get(move_int, False),
+            cache.move_captured_piece_type_int.get(move_int),
+            cache.move_captured_piece_color_int.get(move_int)
+        )
 
     def is_check(self) -> bool:
         """PHASE 2: Inlined cache access"""
