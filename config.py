@@ -57,7 +57,6 @@ IS_SHARED_TT_MP = _env_bool('IS_SHARED_TT_MP', False)  # Whether to share TT acr
 IS_BLAS_ENABLED = _env_bool('IS_BLAS_ENABLED', False)
 IS_NN_ENABLED = _env_bool('IS_NN_ENABLED', True)
 NN_TYPE = _env_str('NN_TYPE', "NNUE")
-# TODO Implement quantization for DNN
 L1_QUANTIZATION = _env_str('L1_QUANTIZATION', "NONE")  # Options: "NONE" (FP32), "INT8", "INT16"
 FULL_NN_EVAL_FREQ = _env_int('FULL_NN_EVAL_FREQ', 3000)  # Increase to 50_000 after initial testing
 
@@ -70,13 +69,28 @@ STAND_PAT_MAX_NN_EVAL = _env_int('STAND_PAT_MAX_NN_EVAL', 200)  # Absolute value
 
 # Limit moves examined per QS ply to prevent explosion
 MAX_QS_DEPTH = _env_int('MAX_QS_DEPTH', 22)  # REDUCED from 15 to prevent search explosion
-MAX_QS_MOVES_Q1 = _env_int('MAX_QS_MOVES_Q1', 10)
-MAX_QS_MOVES_Q2 = _env_int('MAX_QS_MOVES_Q2', 5)
-MAX_QS_MOVES_Q3 = _env_int('MAX_QS_MOVES_Q3', 2)
-MAX_QS_MOVES_Q4 = _env_int('MAX_QS_MOVES_Q4', 1)
-MAX_QS_MOVES_Q1_DIVISOR = _env_float('MAX_QS_MOVES_Q1_DIVISOR', 4.0) # 0.25
-MAX_QS_MOVES_Q2_DIVISOR = _env_float('MAX_QS_MOVES_Q2_DIVISOR', 2.0) # 0.5
-MAX_QS_MOVES_Q3_DIVISOR = _env_float('MAX_QS_MOVES_Q3_DIVISOR', 1.33) # 0.75
+_max_qs_moves_default = [12, 6, 4, 2]
+_max_q_moves_env = os.environ.get('MAX_QS_MOVES')
+if _max_q_moves_env:
+    MAX_QS_MOVES = eval(_max_q_moves_env)
+    _overridden_params.append(('MAX_QS_MOVES', _max_qs_moves_default, MAX_QS_MOVES))
+else:
+    MAX_QS_MOVES = _max_qs_moves_default
+#MAX_QS_MOVES_Q1 = _env_int('MAX_QS_MOVES_Q1', 10)
+#MAX_QS_MOVES_Q2 = _env_int('MAX_QS_MOVES_Q2', 5)
+#MAX_QS_MOVES_Q3 = _env_int('MAX_QS_MOVES_Q3', 2)
+#MAX_QS_MOVES_Q4 = _env_int('MAX_QS_MOVES_Q4', 1)
+_max_qs_moves_divisor_default = [4, 2.0, 1.33]
+_max_q_moves_divisor_env = os.environ.get('MAX_QS_MOVES_DIVISOR')
+if _max_q_moves_divisor_env:
+    MAX_QS_MOVES_DIVISOR = eval(_max_q_moves_divisor_env)
+    _overridden_params.append(('MAX_QS_MOVES_DIVISOR', _max_qs_moves_divisor_default, MAX_QS_MOVES_DIVISOR))
+else:
+    MAX_QS_MOVES_DIVISOR = _max_qs_moves_divisor_default
+#MAX_QS_MOVES_Q1_DIVISOR = _env_float('MAX_QS_MOVES_Q1_DIVISOR', 4.0) # 0.25
+#MAX_QS_MOVES_Q2_DIVISOR = _env_float('MAX_QS_MOVES_Q2_DIVISOR', 2.0) # 0.5
+#MAX_QS_MOVES_Q3_DIVISOR = _env_float('MAX_QS_MOVES_Q3_DIVISOR', 1.33) # 0.75
+
 QS_SOFT_STOP_DIVISOR = _env_float('QS_SOFT_STOP_DIVISOR', 8.0)
 #MAX_QS_MOVES_PER_PLY = _env_int('MAX_QS_MOVES_PER_PLY', 10)  # REDUCED from 12 - Maximum captures to examine at each QS depth
 #MAX_QS_MOVES_DEEP = _env_int('MAX_QS_MOVES_DEEP', 5)  # REDUCED from 6
@@ -88,8 +102,7 @@ DELTA_PRUNING_QS_MARGIN = _env_int('DELTA_PRUNING_QS_MARGIN', 75)
 CHECK_QS_MAX_DEPTH = _env_int('CHECK_QS_MAX_DEPTH', 5)  # REDUCED from 5
 # Time check frequency in QS - more aggressive
 QS_TIME_CHECK_INTERVAL = _env_int('QS_TIME_CHECK_INTERVAL', 35)  # REDUCED from 50
-# Time budget allocation # TODO optimize two entries below
-QS_TIME_BUDGET_FRACTION = _env_float('QS_TIME_BUDGET_FRACTION', 0.35)  # FIX V4: Reduced from 0.35
+QS_TIME_BUDGET_FRACTION = _env_float('QS_TIME_BUDGET_FRACTION', 0.40)  # FIX V4: Reduced from 0.35
 #MIN_MAIN_SEARCH_RESERVE = _env_float('MIN_MAIN_SEARCH_RESERVE', 0.30)  # NEW: Always reserve 30% of time
 QS_TT_SUPPORTED = _env_bool('QS_TT_SUPPORTED', False)
 
@@ -122,7 +135,7 @@ SINGULAR_EXTENSION = _env_int('SINGULAR_EXTENSION', 1)  # Extra depth
 # SEE Pruning - prune losing captures at low depths
 SEE_PRUNING_ENABLED = _env_bool('SEE_PRUNING_ENABLED', False)
 SEE_PRUNING_MAX_DEPTH = _env_int('SEE_PRUNING_MAX_DEPTH', 6)  # Only apply at shallow depths
-# TODO Optimize below
+
 # Futility Pruning - skip quiet moves when position is hopeless
 FUTILITY_PRUNING_ENABLED = _env_bool('FUTILITY_PRUNING_ENABLED', True)
 # Note: FUTILITY_MARGIN is a list - use JSON format in env var, e.g. "[0,150,300,450]"

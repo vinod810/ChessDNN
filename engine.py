@@ -699,14 +699,22 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
             alpha = stand_pat
 
     # -------- DYNAMIC move limit based on depth AND time pressure --------
-    if q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_Q1_DIVISOR):
-        move_limit = MAX_QS_MOVES_Q1
-    elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_Q2_DIVISOR):
-        move_limit = MAX_QS_MOVES_Q2
-    elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_Q3_DIVISOR):
-        move_limit = MAX_QS_MOVES_Q3
-    else:
-        move_limit = MAX_QS_MOVES_Q4
+    move_limit = None
+    for i in range(len(MAX_QS_MOVES_DIVISOR)):
+        if q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_DIVISOR[i]):
+            move_limit = MAX_QS_MOVES[i]
+            break
+    if move_limit is None:
+        move_limit = MAX_QS_MOVES[-1]
+
+    # if q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_DIVISOR[0]):
+    #     move_limit = MAX_QS_MOVES[0]
+    # elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_DIVISOR[1]):
+    #     move_limit = MAX_QS_MOVES[1]
+    # elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_DIVISOR[2]):
+    #     move_limit = MAX_QS_MOVES[2]
+    # else:
+    #     move_limit = MAX_QS_MOVES[3]
 
     time_critical = TimeControl.soft_stop or (
             TimeControl.time_limit and TimeControl.start_time and
