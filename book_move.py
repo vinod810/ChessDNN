@@ -1,8 +1,9 @@
+import random
+from dataclasses import dataclass
+from typing import Optional, List
+
 import chess
 import chess.polyglot
-import random
-from typing import Optional, List
-from dataclasses import dataclass
 
 
 @dataclass

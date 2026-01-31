@@ -1,20 +1,20 @@
 import heapq
-import importlib
-import random
 import re
 import time
 import traceback
 from collections import namedtuple
 from pathlib import Path
 from typing import List, Tuple, Optional
+import random
+
 import chess
 import chess.polyglot
 import numpy as np
-from config import *
 
 from cached_board import CachedBoard, move_to_int, int_to_move
-from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
+from config import *
 from config import MAX_SCORE, QS_SOFT_STOP_DIVISOR
+from nn_evaluator import DNNEvaluator, NNUEEvaluator, NNEvaluator
 
 CURR_DIR = Path(__file__).resolve().parent
 HOME_DIR = "ChessDNN"
@@ -48,7 +48,7 @@ class TimeControl:
     hard_stop_time = None  # FIX V3: Absolute time when search MUST stop (150% of time_limit)
 
 
-TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move_int"])  # PHASE 3: store int
+TTEntry = namedtuple("TTEntry", ["depth", "score", "flag", "best_move_int"])
 TT_EXACT, TT_LOWER_BOUND, TT_UPPER_BOUND = 0, 1, 2
 
 transposition_table = {}
@@ -57,7 +57,7 @@ dnn_eval_cache = {}
 killer_moves = [[None, None] for _ in range(MAX_NEGAMAX_DEPTH + 1)]  # Legacy - kept for compatibility
 killer_moves_int = [[0, 0] for _ in range(MAX_NEGAMAX_DEPTH + 1)]  # Primary: Integer-based killer moves
 
-# PHASE 3: Array-based history heuristic for O(1) access
+# Array-based history heuristic for O(1) access
 # Max move_int is from_sq(63) | to_sq(63)<<6 | promo(5)<<12 = 63 + 63*64 + 5*4096 = 24575
 HISTORY_TABLE_SIZE = 25000
 history_heuristic = np.zeros(HISTORY_TABLE_SIZE, dtype=np.int32)
@@ -264,7 +264,7 @@ def evaluate_classical(board: CachedBoard, skip_game_over: bool = False) -> int:
     """
     Evaluate the board position from the side-to-move perspective.
 
-    PHASE 3: Added skip_game_over parameter to avoid redundant checks when
+    Added skip_game_over parameter to avoid redundant checks when
     caller already knows the position is not game over.
 
     Returns:
@@ -285,7 +285,7 @@ def evaluate_classical(board: CachedBoard, skip_game_over: bool = False) -> int:
 
 def evaluate_nn(board: CachedBoard, skip_game_over: bool = False) -> int:
     """
-    PHASE 3: Added skip_game_over parameter to avoid redundant checks when
+    Added skip_game_over parameter to avoid redundant checks when
     caller already knows the position is not game over.
     """
     if not skip_game_over and board.is_game_over():
@@ -354,7 +354,7 @@ def move_score(board: CachedBoard, move: chess.Move, depth: int) -> int:
         if victim_type and attacker_type:
             score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
 
-    # PHASE 3: Use array-based history heuristic for O(1) access
+    # Use array-based history heuristic for O(1) access
     move_int = move_to_int(move)
     if move_int < HISTORY_TABLE_SIZE:
         score += history_heuristic[move_int]
@@ -368,7 +368,7 @@ def move_score(board: CachedBoard, move: chess.Move, depth: int) -> int:
 
 def move_score_int(board: CachedBoard, move_int: int, depth: int) -> int:
     """
-    PHASE 2 OPTIMIZATION: Score a move for move ordering using integer representation.
+    OPTIMIZATION: Score a move for move ordering using integer representation.
 
     This avoids chess.Move object creation and uses integer-keyed caches.
     """
@@ -388,7 +388,7 @@ def move_score_int(board: CachedBoard, move_int: int, depth: int) -> int:
         # OPTIMIZED: Use pre-computed MVV-LVA score (1 lookup instead of 3)
         score += board.get_mvv_lva_int(move_int)
 
-    # PHASE 3: Array-based history heuristic for O(1) access
+    # Array-based history heuristic for O(1) access
     if move_int < HISTORY_TABLE_SIZE:
         score += history_heuristic[move_int]
 
@@ -411,7 +411,7 @@ def move_score_q_search_int(board: CachedBoard, move_int: int) -> int:
 
 def ordered_moves_int(board: CachedBoard, depth: int, pv_move_int: int = 0, tt_move_int: int = 0) -> List[int]:
     """
-    PHASE 2 OPTIMIZATION: Return legal moves as integers, ordered by expected quality.
+    OPTIMIZATION: Return legal moves as integers, ordered by expected quality.
 
     This completely avoids chess.Move object creation in the move ordering hot path.
 
@@ -444,7 +444,7 @@ def ordered_moves_int(board: CachedBoard, depth: int, pv_move_int: int = 0, tt_m
 
 def ordered_moves_q_search_int(board: CachedBoard, last_capture_sq: int = -1) -> List[int]:
     """
-    PHASE 2 OPTIMIZATION: Return legal moves for quiescence search as integers.
+    OPTIMIZATION: Return legal moves for quiescence search as integers.
 
     FIX: Added last_capture_sq parameter to prioritize recaptures on that square.
     This ensures capture sequences are properly resolved before soft-stop.
@@ -459,7 +459,7 @@ def ordered_moves_q_search_int(board: CachedBoard, last_capture_sq: int = -1) ->
         to_sq = (m >> 6) & 0x3F
 
         # FIX: Prioritize recaptures on the last capture square with a large bonus
-        if last_capture_sq >= 0 and to_sq == last_capture_sq:
+        if 0 <= last_capture_sq == to_sq:
             score += 100000  # Ensure recaptures are searched first
 
         moves_with_scores.append((score, m))
@@ -557,7 +557,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
     """
     Quiescence search with improved time management and move limits.
 
-    PHASE 3: Uses integer moves throughout for performance.
+    Uses integer moves throughout for performance.
 
     FIX: Added last_capture_sq parameter to track capture sequences.
     When the last move was a capture, we MUST search at least one recapture
@@ -598,7 +598,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
 
     # Hard stop always honored immediately
     if TimeControl.stop_search:
-        # PHASE 3: Skip game_over check - we got here via legal move
+        # Skip game_over check - we got here via legal move
         if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL:
             return evaluate_nn(board, skip_game_over=True), []
         else:
@@ -612,7 +612,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
         if not in_capture_sequence:
             _qs_stats["time_cutoffs"] += 1
             _diag_warn("qs_time_cutoff", f"QS soft-stopped at depth {q_depth}")
-            # PHASE 3: Skip game_over check - we got here via legal move
+            # Skip game_over check - we got here via legal move
             if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL:
                 return evaluate_nn(board, skip_game_over=True), []
             else:
@@ -624,7 +624,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
         # DIAG: Track QS depth limit hits
         _diag_warn("qs_depth_exceeded", f"QS hit depth {q_depth}, fen={board.fen()[:40]}")
         # Return static evaluation when QS goes too deep
-        # PHASE 3: Skip game_over check - we got here via legal move
+        # Skip game_over check - we got here via legal move
         if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL:
             return evaluate_nn(board, skip_game_over=True), []
         else:
@@ -643,7 +643,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
         if stored_score >= beta:
             return stored_score, []  # ✅ Return stored score, not beta
 
-    # PHASE 3: Defer is_game_over check - only needed for rare stalemate cases
+    # Defer is_game_over check - only needed for rare stalemate cases
     # We check it at the end if moves_searched == 0 and not in check
     is_check = board.is_check()
     best_pv = []
@@ -694,30 +694,12 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
     if move_limit is None:
         move_limit = MAX_QS_MOVES[-1]
 
-    # if q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_DIVISOR[0]):
-    #     move_limit = MAX_QS_MOVES[0]
-    # elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_DIVISOR[1]):
-    #     move_limit = MAX_QS_MOVES[1]
-    # elif q_depth <= round(MAX_QS_DEPTH / MAX_QS_MOVES_DIVISOR[2]):
-    #     move_limit = MAX_QS_MOVES[2]
-    # else:
-    #     move_limit = MAX_QS_MOVES[3]
-
     time_critical = TimeControl.soft_stop or (
             TimeControl.time_limit and TimeControl.start_time and
             (time.perf_counter() - TimeControl.start_time) > TimeControl.time_limit * QS_TIME_CRITICAL_FACTOR
     )
     if time_critical:
         move_limit = min(MAX_QS_MOVES_TIME_CRITICAL, move_limit)  # Time critical (5 moves)
-    # elif q_depth > MAX_QS_DEPTH // 2:
-    #   move_limit = MAX_QS_MOVES_DEEP  # Medium (5 moves)
-    # else:
-    #   move_limit = MAX_QS_MOVES_PER_PLY  # Normal (10 moves)
-
-    # FIX: Never use less than MIN_QS_MOVES_SHALLOW at shallow QS depths (1-2)
-    # These shallow evaluations are critical for score accuracy
-    # if q_depth <= 2:
-    #   move_limit = max(move_limit, MIN_QS_MOVES_SHALLOW)
 
     # Pre-compute move info for this position (using integer version)
     board.precompute_move_info_int()
@@ -730,7 +712,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
         # -------- NEW: Enforce move limit to prevent explosion --------
         # FIX: But always allow recaptures on the last capture square
         to_sq = (move_int >> 6) & 0x3F
-        is_recapture = (last_capture_sq >= 0 and to_sq == last_capture_sq)
+        is_recapture = (0 <= last_capture_sq == to_sq)
 
         if not is_check and moves_searched >= move_limit:
             # Allow one recapture even past move limit
@@ -814,7 +796,7 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
     if moves_searched == 0:
         if is_check:
             return -MAX_SCORE + board.ply(), []  # Checkmate
-        # PHASE 3: Deferred stalemate check - only when not in check and no moves
+        # Deferred stalemate check - only when not in check and no moves
         # This is rare, so we save the is_game_over call for most nodes
         if board.is_game_over():
             return 0, []  # Stalemate
@@ -849,7 +831,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     """
     Negamax search with alpha-beta pruning.
 
-    PHASE 3: Uses integer moves throughout for performance.
+    Uses integer moves throughout for performance.
 
     Returns:
         Tuple of (score, pv_int) where pv_int is the list of integer moves in the principal variation.
@@ -860,7 +842,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     # Only check hard stop here - soft_stop is handled at root level
     # This ensures current depth completes before stopping
     if TimeControl.stop_search:
-        # PHASE 3: Skip game_over check - we got here via legal move
+        # Skip game_over check - we got here via legal move
         return evaluate_classical(board, skip_game_over=True), []
 
     # -------- Draw detection --------
@@ -871,13 +853,13 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
     alpha_orig = alpha
     beta_orig = beta  # ✅ FIX 1
 
-    best_move_int = 0  # PHASE 3: Integer move
+    best_move_int = 0  # Integer move
     best_pv = []
     max_eval = -MAX_SCORE
 
     # -------- TT Lookup --------
     entry = transposition_table.get(key)
-    tt_move_int = 0  # PHASE 3: Integer TT move
+    tt_move_int = 0  # Integer TT move
     if entry and entry.depth >= depth:
         kpi['tt_hits'] += 1
         if entry.flag == TT_EXACT:
@@ -937,7 +919,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
     # -------- Singular Extension Check (simplified) --------
     singular_extension_applicable = False
-    singular_move_int = 0  # PHASE 3: Integer move
+    singular_move_int = 0  # Integer move
 
     if (allow_singular
             and depth >= 6
@@ -1054,7 +1036,7 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
         new_depth = depth - 1 + extension
 
         # -------- LMR --------
-        # PHASE 3: Use integer killer moves for comparison
+        # Use integer killer moves for comparison
         if depth is not None and 0 <= depth < len(killer_moves_int):
             km0_int = killer_moves_int[depth][0]
             km1_int = killer_moves_int[depth][1]
@@ -1106,12 +1088,12 @@ def negamax(board: CachedBoard, depth: int, alpha: int, beta: int, allow_singula
 
         if alpha >= beta:
             # Update killer moves and history for quiet moves
-            # PHASE 3: Use integer killer moves storage
+            # Use integer killer moves storage
             if not is_capture and depth is not None and 0 <= depth < len(killer_moves_int):
                 if killer_moves_int[depth][0] != move_int:
                     killer_moves_int[depth][1] = killer_moves_int[depth][0]
                     killer_moves_int[depth][0] = move_int
-                # PHASE 3: Array-based history heuristic
+                # Array-based history heuristic
                 if move_int < HISTORY_TABLE_SIZE:
                     history_heuristic[move_int] = min(
                         history_heuristic[move_int] + depth * depth, 10_000
@@ -1138,7 +1120,7 @@ def extract_pv_from_tt_int(board: CachedBoard, max_depth: int) -> List[int]:
     """
     Extract the principal variation from the transposition table as integer moves.
 
-    PHASE 3: Returns integer moves instead of chess.Move objects.
+    Returns integer moves instead of chess.Move objects.
 
     Args:
         board: Current board position
@@ -1199,7 +1181,7 @@ def extract_pv_from_tt(board: CachedBoard, max_depth: int) -> List[chess.Move]:
 
 
 def age_heuristic_history():
-    """PHASE 3: Vectorized history aging using numpy."""
+    """Vectorized history aging using numpy."""
     global history_heuristic
     history_heuristic = (history_heuristic * 3) // 4
 
@@ -1306,8 +1288,8 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     for i in range(len(killer_moves)):
         killer_moves[i] = [None, None]
     for i in range(len(killer_moves_int)):
-        killer_moves_int[i] = [0, 0]  # Phase 2: Clear integer killer moves
-    history_heuristic.fill(0)  # PHASE 3: Numpy array clear
+        killer_moves_int[i] = [0, 0]  # Clear integer killer moves
+    history_heuristic.fill(0)  # Numpy array clear
 
     # Only clear TT if requested (preserve on ponderhit for warm cache)
     if clear_tt:
@@ -1379,7 +1361,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
         return chess.Move.null(), 0, [], 0, 0
 
     # Start with no result - fallback computed lazily only if needed
-    best_move_int = 0  # PHASE 3: Integer move
+    best_move_int = 0  # Integer move
     best_score = 0
     best_pv = []  # List of integer moves
     prev_depth_score = None  # For score stability tracking
@@ -1685,7 +1667,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
     _diag["bestmove_depth_sum"] += max_completed_depth
     _diag["bestmove_count"] += 1
 
-    if max_completed_depth <= 3 and max_completed_depth > 0:
+    if 3 >= max_completed_depth > 0:
         _diag["shallow_search_total"] += 1
         if max_completed_depth == 2:
             _diag["shallow_search_d2"] += 1
@@ -1761,7 +1743,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                         if TimeControl.stop_search:
                             break
 
-                        # PHASE 3: Use integer for fast lookups
+                        # Use integer for fast lookups
                         opp_move_int = move_to_int(opp_move)
 
                         # Only consider captures, checks, or promotions
@@ -1772,7 +1754,7 @@ def find_best_move(fen, max_depth=MAX_NEGAMAX_DEPTH, time_limit=None, clear_tt=T
                         if not is_tactical and opp_moves_checked > 0:
                             continue
 
-                        # -------- FIXED: Use push_move helper which handles both board and nn_evaluator --------
+                        # ------- Use push_move helper which handles both board and nn_evaluator --------
                         push_move(board, opp_move, nn_evaluator)
 
                         # Check for mate threats
@@ -1872,73 +1854,6 @@ def pv_from_san_string(fen: str, san_string: str) -> list[chess.Move]:
     return pv
 
 
-def print_vars(var_names, module_name, local_scope=None):
-    local_scope = local_scope or {}
-    global_scope = globals()
-    module_vars = {}
-
-    if module_name:
-        try:
-            module = importlib.import_module(module_name)
-            module_vars = vars(module)
-        except ImportError:
-            module_vars = {}
-
-    for name in var_names:
-        if name in local_scope:
-            value = local_scope[name]
-            source = "local"
-        elif name in global_scope:
-            value = global_scope[name]
-            source = "global"
-        elif name in module_vars:
-            value = module_vars[name]
-            source = f"module:{module_name}"
-        else:
-            value = "<NOT FOUND>"
-            source = "missing"
-
-        print(f"{name} = {value}")
-
-
-def dump_parameters():
-    print_vars(["L1_QUANTIZATION"], "nn_inference")
-    print_vars([
-        "MAX_MP_CORES",
-        "IS_SHARED_TT_MP",
-        "IS_NN_ENABLED",
-        "NN_TYPE",
-        "MODEL_PATH",
-        "IS_BLAS_ENABLED",
-        "QS_DEPTH_MIN_NN_EVAL",
-        "QS_DEPTH_MAX_NN_EVAL",
-        "MAX_QS_DEPTH",
-        "QS_DELTA_MAX_NN_EVAL",
-        "STAND_PAT_MAX_NN_EVAL",
-        "QS_TT_SUPPORTED",
-        "DELTA_PRUNING_QS_MIN_DEPTH",
-        "DELTA_PRUNING_MARGIN",
-        "TACTICAL_QS_MAX_DEPTH",
-        "ASPIRATION_WINDOW",
-        "MAX_AW_RETRIES",
-        "LMR_MOVE_THRESHOLD",
-        "LMR_MIN_DEPTH",
-        "NULL_MOVE_REDUCTION",
-        "NULL_MOVE_MIN_DEPTH",
-        "SINGULAR_MARGIN",
-        "SINGULAR_EXTENSION",
-        "SEE_PRUNING_ENABLED",
-        "SEE_PRUNING_MAX_DEPTH",
-        "FUTILITY_PRUNING_ENABLED",
-        "FUTILITY_MARGIN",
-        "FUTILITY_MAX_DEPTH",
-        "RAZORING_ENABLED",
-        "RAZORING_MARGIN",
-        "RAZORING_MAX_DEPTH",
-        "ESTIMATED_BRANCHING_FACTOR",
-        "TIME_SAFETY_MARGIN"], "engine")
-
-
 def main():
     """
     Interactive loop to input FEN positions and get the best move and evaluation.
@@ -1997,5 +1912,6 @@ def main():
 
 if __name__ == '__main__':
     import random
+
     random.seed(42)  # Fixed seed for reproducible benchmarks
     main()

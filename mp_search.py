@@ -10,24 +10,23 @@ Implements Root Move Splitting:
 Optional Shared TT:
 - When IS_SHARED_TT_MP is True, workers share transposition tables
 - Uses multiprocessing.Manager().dict() for simplicity
-- TODO: Try `shared_memory` with custom hash table for better performance
 """
 
-import multiprocessing as mp
-import traceback
-from multiprocessing import Process, Queue, Event, Value, Manager
-from typing import List, Tuple, Optional, Dict, Any
 import time
+from multiprocessing import Process, Queue, Event, Value, Manager
+from typing import List, Tuple, Optional, Dict
+
 import chess
 
 from cached_board import CachedBoard
-from engine import kpi, transposition_table, dnn_eval_cache, pv_to_san, MAX_MP_CORES, IS_SHARED_TT_MP, is_debug_enabled
+from engine import pv_to_san, is_debug_enabled
 
 
 def _mp_diag_print(msg: str):
     """Print diagnostic info string only when diagnostics are enabled."""
     if is_debug_enabled():
         print(f"info string {msg}", flush=True)
+
 
 # Worker pool (persistent workers)
 _worker_pool: List[Process] = []
@@ -198,7 +197,8 @@ def _worker_main(worker_id: int, work_queue: Queue, result_queue: Queue,
 
 
 def _search_moves(engine, worker_id: int, fen: str, moves: List[chess.Move], max_depth: int,
-                  time_limit: Optional[float], initial_alpha: int, stop_event: Event, shared_alpha: Value) -> Optional[Tuple]:
+                  time_limit: Optional[float], initial_alpha: int, stop_event: Event, shared_alpha: Value) -> Optional[
+    Tuple]:
     """
     Search a list of root moves using iterative deepening.
     Returns (best_move, best_score, best_pv, nodes) or None if stopped.
@@ -354,7 +354,6 @@ def parallel_find_best_move(fen: str, max_depth: int = 20, time_limit: Optional[
         return engine.find_best_move(fen, max_depth=max_depth, time_limit=time_limit, clear_tt=clear_tt)
 
     # Order moves for better distribution
-    # TODO: Try dynamic work stealing
     ordered = list(engine.ordered_moves(board, max_depth, pv_move=None, tt_move=None))
 
     # Distribute moves among workers
@@ -367,7 +366,6 @@ def parallel_find_best_move(fen: str, max_depth: int = 20, time_limit: Optional[
 
     # Send work to workers
     initial_alpha = -MAX_SCORE
-    # TODO let the main also do some work
     for i in range(num_workers):
         if move_assignments[i]:
             work = (fen, move_assignments[i], max_depth, time_limit, initial_alpha)
@@ -482,6 +480,7 @@ def clear_shared_tables():
     if _shared_dnn_cache is not None:
         _shared_dnn_cache.clear()
 
+
 def main():
     """
     Interactive loop to input FEN positions and get the best move and evaluation.
@@ -507,9 +506,6 @@ def main():
             # Print KPIs
             print(f"nodes: {total_nodes}")
             print(f"nps: {nps}")
-            #print("\n--- Search KPIs ---")
-            #for key, value in total_nodes.items():
-            #    print(f"{key}: {value}")
 
             board = CachedBoard(fen)
             print("\nBest move:", move)
@@ -523,10 +519,6 @@ def main():
             stop_parallel_search()
             shutdown_worker_pool()
             exit()
-            #response = input("\nKeyboardInterrupt detected. Type 'exit' to quit, Enter to continue: ").strip()
-            #if response.lower() == "exit":
-            #    break
-            #print("Resuming...\n")
         except Exception as e:
             print(f"Exception {str(e)}")
             import traceback

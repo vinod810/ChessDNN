@@ -17,104 +17,6 @@ medium,512-256-32-1,relu,mae,0.136,234
 medium,512-256-32-1,tanh,mae,0.143,235
 medium,512-256-32-1,relu,mse,0.057,233
 
-Against Stockfish1700 (2 epochs training)
-DNN512 - +77.8
-DNN1024 - +181.7 +/-113.2
-
-DNN1024 vs. DNN512
-DNN512 +6.9 ELO / 50 games
-
-NN Training (Old)
-DNN - Val-0.044638, Test(100K) - 0.045048(mse), 0.122605(mae), 144.51(mae-cp) - 91-epochs( 10M)
-NNUE -
-
-NN Training (01/1025)
-Type,Batch-Size, EPOCH-Size, LR, Epochs, Val-Loss, MSE(Test-100k pos), SF-MSE, Better, SF-CP
-DNN, 8192,10M, 0.001, 64, 0.047056, 0.043821, 0.017535, NN, 22.46
-NNUE, 2048, 10M, 0.001
-
-Loss Expectations Revised
-Given your data statistics (std=0.6, many extreme targets):
-Epoch, Expected Loss, Your Status
-1, 0.24 - 0.35✅, 0.24 is good!
-10, 0.15 - 0.20, Target
-50, 0.08 - 0.12, Well-trained
-100+, 0.05 - 0.08, Excellent
-
-Version, WAC, ELO (stockfish), nps
-python-chess, 217/300, 1954, NA
-C++ chess library, 218/300, 2070, 1077
-Cython, 231/300, 2251, 2595
-Support SEE pruning, Futility pruning, and Razoring, , ,
-
-SEE pruning, Futility pruning, and Razoring
-True, True, True - 213
-True, False, False - 225
-False, True, False - 238
-False, False, True - 206
-
-Multiprocessing
-Cores, WAXC
-1, 199/300
-2, 208/300
-3, 218/300
-6, 225/300
-
-QS_DEPTH_MIN_NN_EVAL 30 games against SF-2300
-0,2153
-1,2217
-2,2312 *
-3,2254
-5,2254
-8,2265
-QS_DEPTH_MIN_NN_EVAL 100 games against SF-2100
-0,2069
-1,2121
-2,2193
-3,2167
-4,2124
-5,2223
-6,2230*
-7,2145
-9,2192
-12,2167
-16,2192
-99,2167
-
-QS_DEPTH_MAX_NN_EVAL 60 games again SF-2300
-2 - 2153
-4 - 2186
-6 - 2258
-8 - 2259
-10 - 2153
-12 - 2294 *
-
-QS_DELTA_MAX_NN_EVAL_150 30 games SF-2200
-0 - 2141
-25 - 2066
-50 - 2177
-75 - 2211 *
-100 - 2053
-150 - 2117
-
-STAND_PAT_MAX_NN_EVAL 30 games SF-2200
-0,
-100,2188
-150.2165
-200,2177
-250,2141
-300,2223 *
-
-STAND_PAT_MAX_NN_EVAL 30 games SF-2200
-0: 2133
-200: 2183 *
-300:2169
-
-L1_QUANTIZATION, 30 games, SF-2200
-NONE: 2246 *
-INT8: 2177
-INT16:2130
-
 IS_BLAS_ENABLED, 30 games, SF-2200
 True: 2246
 False: 2223
@@ -127,16 +29,6 @@ Stockfish depth 20+, MSE - tanh(CP/410)
 Stockfish NNUE positional evaluation: MAE - Difference capped at 100 CP,
 Stockfish NNUE positional evaluation, MSE - tanh(CP/410),
 Classical piece square evaluation, MAE - ELO,
-
-01/29/26
-WAC: 265/300
-
-01/20/26
-WAC: 268/300
-WAC: 265/300
-WAC: 263/300
-WAC: 264/300
-ELO: 2307
 
 01/31
 ELO: 2292

@@ -1,6 +1,6 @@
 """
 Neural Network Inference Module for Chess Engine
-PHASE 2 OPTIMIZED VERSION
+OPTIMIZED VERSION
 
 Optimizations:
 - Uses Cython-accelerated ops when available (5-10x faster)
@@ -71,7 +71,7 @@ OUTPUT_SIZE = 1
 # Pre-computed lookup tables
 _FLIPPED_SQUARES = np.array([(7 - (sq // 8)) * 8 + (sq % 8) for sq in range(64)], dtype=np.int32)
 
-# PHASE 3: Pre-computed NNUE feature index table
+# Pre-computed NNUE feature index table
 # Shape: [64 king squares][64 piece squares][10 piece indices]
 # piece_idx = (piece_type - 1) + (1 if friendly else 0) * 5
 # Feature = king_sq * 640 + piece_sq * 10 + piece_idx
@@ -113,14 +113,14 @@ class NNUEFeatures:
 
     @staticmethod
     def get_piece_index(piece_type: int, is_friendly_piece: bool) -> int:
-        """PHASE 3: Use lookup table instead of computation."""
+        """Use lookup table instead of computation."""
         if piece_type < 1 or piece_type > 5:  # Only P, N, B, R, Q (not K)
             return -1
         return int(_PIECE_INDEX_TABLE[piece_type, 1 if is_friendly_piece else 0])
 
     @staticmethod
     def get_feature_index(king_sq: int, piece_sq: int, piece_type: int, is_friendly_piece: bool) -> int:
-        """PHASE 3: Use lookup table instead of computation."""
+        """Use lookup table instead of computation."""
         if piece_type < 1 or piece_type > 5:  # Only P, N, B, R, Q (not K)
             return -1
         piece_idx = _PIECE_INDEX_TABLE[piece_type, 1 if is_friendly_piece else 0]
@@ -228,7 +228,7 @@ class NNUEIncrementalUpdater:
 
     def _get_feature_for_perspective(self, perspective: bool, piece_sq: int,
                                      piece_type: int, is_friendly_piece: bool) -> int:
-        """PHASE 3: Inlined lookup table access for speed."""
+        """Inlined lookup table access for speed."""
         if piece_type < 1 or piece_type > 5:  # Skip kings
             return -1
         if perspective:
@@ -243,7 +243,7 @@ class NNUEIncrementalUpdater:
     def _remove_piece_features(self, square: int, piece_type: int, piece_color: bool,
                                change_record: Dict):
         """
-        WEEK 3 OPTIMIZATION: Inlined feature computation to avoid function call overhead.
+        OPTIMIZATION: Inlined feature computation to avoid function call overhead.
         """
         if piece_type == chess.KING or piece_type < 1 or piece_type > 5:
             return
@@ -270,7 +270,7 @@ class NNUEIncrementalUpdater:
     def _add_piece_features(self, square: int, piece_type: int, piece_color: bool,
                             change_record: Dict):
         """
-        WEEK 3 OPTIMIZATION: Inlined feature computation to avoid function call overhead.
+        OPTIMIZATION: Inlined feature computation to avoid function call overhead.
         """
         if piece_type == chess.KING or piece_type < 1 or piece_type > 5:
             return
@@ -296,8 +296,6 @@ class NNUEIncrementalUpdater:
 
     def update_pre_push(self, board_before_push: CachedBoard, move: chess.Move) -> Tuple[bool, bool, Dict]:
         """
-        Phase 1 of two-phase push. Call BEFORE board.push(move).
-
         This method handles all feature changes that can be computed from the pre-move board:
         - Captures (including en passant)
         - Castling rook movements
@@ -383,13 +381,11 @@ class NNUEIncrementalUpdater:
 
         return is_white_king_move, is_black_king_move, change_record
 
-    def update_pre_push_fast(self, board_before_push: CachedBoard, move: chess.Move,
-                             moving_piece_type: int, moving_piece_color: bool,
-                             is_en_passant: bool, is_castling: bool,
-                             captured_piece_type: Optional[int],
+    def update_pre_push_fast(self, move: chess.Move, moving_piece_type: int, moving_piece_color: bool,
+                             is_en_passant: bool, is_castling: bool, captured_piece_type: Optional[int],
                              captured_piece_color: Optional[bool]) -> Tuple[bool, bool, Dict]:
         """
-        WEEK 1 OPTIMIZATION: Faster version of update_pre_push that accepts
+        OPTIMIZATION: Faster version of update_pre_push that accepts
         pre-computed piece information, eliminating piece_at() calls.
 
         Args:
@@ -474,8 +470,6 @@ class NNUEIncrementalUpdater:
                          is_black_king_move: bool,
                          change_record: Dict):
         """
-        Phase 2 of two-phase push. Call AFTER board.push(move).
-
         For king moves, this rebuilds the entire feature set for that perspective
         since all features are indexed by the king square.
 
@@ -737,7 +731,7 @@ class DNNNetwork(nn.Module):
 
 class NNUEInference:
     """
-    PHASE 2 OPTIMIZED: Numpy-based inference engine for NNUE.
+    Numpy-based inference engine for NNUE.
     Uses Cython-accelerated operations when available.
 
     Supports L1 layer quantization (INT8/INT16) controlled by L1_QUANTIZATION global.
@@ -875,11 +869,11 @@ class NNUEInference:
         return output[0]
 
     def evaluate_incremental(self, stm: bool, feature_getter=None) -> float:
-        """PHASE 2: Uses Cython-accelerated evaluation when available.
+        """Uses Cython-accelerated evaluation when available.
 
         Supports L1 quantization modes based on L1_QUANTIZATION setting.
 
-        PHASE 3: Implements lazy accumulator refresh - only refreshes when
+        Implements lazy accumulator refresh - only refreshes when
         evaluation is actually needed (not on every king move).
 
         Args:
@@ -897,8 +891,6 @@ class NNUEInference:
             white_feat, black_feat = feature_getter()
             self.refresh_accumulator(white_feat, black_feat)
             self._dirty_depth = 0
-
-        # TODO: store accumulators in quantized form for additional speedup
 
         if self._quantization_mode == "INT8":
             return _cy_nnue_eval_int8(
@@ -959,14 +951,14 @@ class NNUEInference:
 
     def refresh_accumulator(self, white_features: List[int], black_features: List[int]):
         """
-        WEEK 3 OPTIMIZATION: Use NumPy array operations for faster feature validation.
+        OPTIMIZATION: Use NumPy array operations for faster feature validation.
 
         Note: Despite type hints, features may be passed as sets - handle both.
         """
         self.white_accumulator = self.ft_bias.copy()
         self.black_accumulator = self.ft_bias.copy()
 
-        # WEEK 3: Convert to NumPy array and filter in one operation
+        # Convert to NumPy array and filter in one operation
         # Handle both list and set inputs
         if white_features:
             white_list = list(white_features) if isinstance(white_features, set) else white_features
@@ -986,12 +978,12 @@ class NNUEInference:
 
     def update_accumulator(self, added_features_white: Set[int], removed_features_white: Set[int],
                            added_features_black: Set[int], removed_features_black: Set[int]):
-        """PHASE 2: Uses Cython-accelerated update when available.
+        """Uses Cython-accelerated update when available.
 
-        PHASE 3: If accumulators are dirty (pending refresh from king move),
+        If accumulators are dirty (pending refresh from king move),
         skip the incremental update - we'll do a full refresh before evaluation anyway.
 
-        WEEK 3 OPTIMIZATION: Skip empty set processing and pre-filter features.
+        OPTIMIZATION: Skip empty set processing and pre-filter features.
         """
         if self.white_accumulator is None or self.black_accumulator is None:
             raise RuntimeError("Accumulators not initialized.")
@@ -1000,7 +992,7 @@ class NNUEInference:
         if self._dirty_depth > 0:
             return
 
-        # WEEK 3: Skip if all sets are empty (common case for quiet moves with no captures)
+        # Skip if all sets are empty (common case for quiet moves with no captures)
         if not added_features_white and not removed_features_white and \
            not added_features_black and not removed_features_black:
             return
@@ -1023,7 +1015,7 @@ class NNUEInference:
 
 class DNNInference:
     """
-    PHASE 2 OPTIMIZED: Numpy-based inference engine for DNN.
+    Numpy-based inference engine for DNN.
     Uses Cython-accelerated operations when available.
     """
 
@@ -1063,7 +1055,7 @@ class DNNInference:
         return output[0]
 
     def evaluate_incremental(self, perspective: bool) -> float:
-        """PHASE 2: Uses Cython-accelerated evaluation when available."""
+        """Uses Cython-accelerated evaluation when available."""
         if perspective:
             if self.white_accumulator is None:
                 raise RuntimeError("White accumulator not initialized")
@@ -1087,7 +1079,7 @@ class DNNInference:
         )
 
     def refresh_accumulator(self, features: List[int], perspective: bool):
-        """WEEK 3 OPTIMIZATION: Use NumPy array operations.
+        """OPTIMIZATION: Use NumPy array operations.
 
         Note: Despite type hints, features may be passed as sets - handle both.
         """
@@ -1107,9 +1099,9 @@ class DNNInference:
             self.black_accumulator = accumulator
 
     def update_accumulator(self, added_features: Set[int], removed_features: Set[int], perspective: bool):
-        """PHASE 2: Uses Cython-accelerated update when available.
+        """Uses Cython-accelerated update when available.
 
-        WEEK 3 OPTIMIZATION: Skip empty set processing.
+        OPTIMIZATION: Skip empty set processing.
         """
         if perspective:
             if self.white_accumulator is None:
@@ -1120,7 +1112,7 @@ class DNNInference:
                 raise RuntimeError("Black accumulator not initialized")
             accumulator = self.black_accumulator
 
-        # WEEK 3: Skip if both sets are empty
+        # Skip if both sets are empty
         if not added_features and not removed_features:
             return
 

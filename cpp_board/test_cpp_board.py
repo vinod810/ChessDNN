@@ -7,7 +7,6 @@ Run with: python3 test_cpp_board.py
 
 import sys
 import time
-from typing import List
 
 # First, try importing the C++ module
 try:

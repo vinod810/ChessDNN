@@ -19,10 +19,10 @@ Usage:
 """
 
 import argparse
+import os
+import random
 import struct
 import subprocess
-import random
-import os
 from typing import List, Dict, Tuple, Optional
 
 from tqdm import tqdm
@@ -102,8 +102,8 @@ def collect_diagnostic_fens(data_dir: str, reader: ShardReader, target_count: in
     print(f"Found {len(shards)} shard files in {data_dir}")
 
     # Shuffle shards for random sampling across different shards
-    #shards_reversed = shards.copy()
-    #random.shuffle(shards_reversed)
+    # shards_reversed = shards.copy()
+    # random.shuffle(shards_reversed)
 
     # Collect with early stopping - aim for 2x target to allow for deduplication
     collection_target = target_count * 2

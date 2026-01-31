@@ -8,8 +8,9 @@ For best performance, compile the Cython version with:
     python setup.py build_ext --inplace
 """
 
-import numpy as np
 from typing import Set
+
+import numpy as np
 
 
 def clipped_relu_inplace(x: np.ndarray) -> None:
@@ -26,16 +27,16 @@ def clipped_relu_copy(src: np.ndarray, dst: np.ndarray) -> None:
 
 
 def dnn_evaluate_incremental(
-    accumulator: np.ndarray,
-    l2_weight: np.ndarray,
-    l2_bias: np.ndarray,
-    l3_weight: np.ndarray,
-    l3_bias: np.ndarray,
-    l4_weight: np.ndarray,
-    l4_bias: np.ndarray,
-    l2_buf: np.ndarray,
-    l3_buf: np.ndarray,
-    acc_clipped: np.ndarray
+        accumulator: np.ndarray,
+        l2_weight: np.ndarray,
+        l2_bias: np.ndarray,
+        l3_weight: np.ndarray,
+        l3_bias: np.ndarray,
+        l4_weight: np.ndarray,
+        l4_bias: np.ndarray,
+        l2_buf: np.ndarray,
+        l3_buf: np.ndarray,
+        acc_clipped: np.ndarray
 ) -> float:
     """Fast DNN incremental evaluation."""
     # Clipped ReLU on accumulator
@@ -60,20 +61,20 @@ def dnn_evaluate_incremental(
 
 
 def nnue_evaluate_incremental(
-    white_accumulator: np.ndarray,
-    black_accumulator: np.ndarray,
-    stm: bool,
-    l1_weight: np.ndarray,
-    l1_bias: np.ndarray,
-    l2_weight: np.ndarray,
-    l2_bias: np.ndarray,
-    l3_weight: np.ndarray,
-    l3_bias: np.ndarray,
-    hidden_buf: np.ndarray,
-    l1_buf: np.ndarray,
-    l2_buf: np.ndarray,
-    white_clipped: np.ndarray,
-    black_clipped: np.ndarray
+        white_accumulator: np.ndarray,
+        black_accumulator: np.ndarray,
+        stm: bool,
+        l1_weight: np.ndarray,
+        l1_bias: np.ndarray,
+        l2_weight: np.ndarray,
+        l2_bias: np.ndarray,
+        l3_weight: np.ndarray,
+        l3_bias: np.ndarray,
+        hidden_buf: np.ndarray,
+        l1_buf: np.ndarray,
+        l2_buf: np.ndarray,
+        white_clipped: np.ndarray,
+        black_clipped: np.ndarray
 ) -> float:
     """Fast NNUE incremental evaluation."""
     hidden_size = white_accumulator.shape[0]
@@ -107,22 +108,22 @@ def nnue_evaluate_incremental(
 
 
 def nnue_evaluate_incremental_int8(
-    white_accumulator: np.ndarray,
-    black_accumulator: np.ndarray,
-    stm: bool,
-    l1_weight_q: np.ndarray,  # INT8 quantized weights
-    l1_bias: np.ndarray,       # FP32 bias
-    l1_combined_scale: float,  # Pre-computed scale: input_scale * weight_scale
-    l2_weight: np.ndarray,
-    l2_bias: np.ndarray,
-    l3_weight: np.ndarray,
-    l3_bias: np.ndarray,
-    hidden_buf: np.ndarray,    # FP32 buffer for clipped values
-    hidden_buf_q: np.ndarray,  # INT8 buffer for quantized input
-    l1_buf: np.ndarray,
-    l2_buf: np.ndarray,
-    white_clipped: np.ndarray,
-    black_clipped: np.ndarray
+        white_accumulator: np.ndarray,
+        black_accumulator: np.ndarray,
+        stm: bool,
+        l1_weight_q: np.ndarray,  # INT8 quantized weights
+        l1_bias: np.ndarray,  # FP32 bias
+        l1_combined_scale: float,  # Pre-computed scale: input_scale * weight_scale
+        l2_weight: np.ndarray,
+        l2_bias: np.ndarray,
+        l3_weight: np.ndarray,
+        l3_bias: np.ndarray,
+        hidden_buf: np.ndarray,  # FP32 buffer for clipped values
+        hidden_buf_q: np.ndarray,  # INT8 buffer for quantized input
+        l1_buf: np.ndarray,
+        l2_buf: np.ndarray,
+        white_clipped: np.ndarray,
+        black_clipped: np.ndarray
 ) -> float:
     """
     NNUE incremental evaluation with INT8 quantized L1 layer.
@@ -133,8 +134,6 @@ def nnue_evaluate_incremental_int8(
     - Accumulation is done in INT32 to prevent overflow
     - Result is dequantized using pre-computed combined scale
     """
-    # TODO: store accumulators in quantized form for additional speedup
-
     hidden_size = white_accumulator.shape[0]
 
     # Clipped ReLU on both accumulators
@@ -175,22 +174,22 @@ def nnue_evaluate_incremental_int8(
 
 
 def nnue_evaluate_incremental_int16(
-    white_accumulator: np.ndarray,
-    black_accumulator: np.ndarray,
-    stm: bool,
-    l1_weight_q: np.ndarray,  # INT16 quantized weights
-    l1_bias: np.ndarray,       # FP32 bias
-    l1_combined_scale: float,  # Pre-computed scale: input_scale * weight_scale
-    l2_weight: np.ndarray,
-    l2_bias: np.ndarray,
-    l3_weight: np.ndarray,
-    l3_bias: np.ndarray,
-    hidden_buf: np.ndarray,    # FP32 buffer for clipped values
-    hidden_buf_q: np.ndarray,  # INT16 buffer for quantized input
-    l1_buf: np.ndarray,
-    l2_buf: np.ndarray,
-    white_clipped: np.ndarray,
-    black_clipped: np.ndarray
+        white_accumulator: np.ndarray,
+        black_accumulator: np.ndarray,
+        stm: bool,
+        l1_weight_q: np.ndarray,  # INT16 quantized weights
+        l1_bias: np.ndarray,  # FP32 bias
+        l1_combined_scale: float,  # Pre-computed scale: input_scale * weight_scale
+        l2_weight: np.ndarray,
+        l2_bias: np.ndarray,
+        l3_weight: np.ndarray,
+        l3_bias: np.ndarray,
+        hidden_buf: np.ndarray,  # FP32 buffer for clipped values
+        hidden_buf_q: np.ndarray,  # INT16 buffer for quantized input
+        l1_buf: np.ndarray,
+        l2_buf: np.ndarray,
+        white_clipped: np.ndarray,
+        black_clipped: np.ndarray
 ) -> float:
     """
     NNUE incremental evaluation with INT16 quantized L1 layer.
@@ -202,8 +201,6 @@ def nnue_evaluate_incremental_int16(
       (INT32 would overflow: 512 * 32767 * 32767 > 2^31)
     - Result is dequantized using pre-computed combined scale
     """
-    # TODO: store accumulators in quantized form for additional speedup
-
     hidden_size = white_accumulator.shape[0]
 
     # Clipped ReLU on both accumulators
@@ -244,10 +241,10 @@ def nnue_evaluate_incremental_int16(
 
 
 def accumulator_add_features(
-    accumulator: np.ndarray,
-    weights: np.ndarray,
-    features: np.ndarray,
-    max_feature: int
+        accumulator: np.ndarray,
+        weights: np.ndarray,
+        features: np.ndarray,
+        max_feature: int
 ) -> None:
     """Add weight columns for given features to accumulator."""
     valid = features[(features >= 0) & (features < max_feature)]
@@ -256,10 +253,10 @@ def accumulator_add_features(
 
 
 def accumulator_remove_features(
-    accumulator: np.ndarray,
-    weights: np.ndarray,
-    features: np.ndarray,
-    max_feature: int
+        accumulator: np.ndarray,
+        weights: np.ndarray,
+        features: np.ndarray,
+        max_feature: int
 ) -> None:
     """Remove weight columns for given features from accumulator."""
     valid = features[(features >= 0) & (features < max_feature)]
@@ -268,11 +265,11 @@ def accumulator_remove_features(
 
 
 def dnn_update_accumulator(
-    accumulator: np.ndarray,
-    weights: np.ndarray,
-    added_features: Set[int],
-    removed_features: Set[int],
-    max_feature: int
+        accumulator: np.ndarray,
+        weights: np.ndarray,
+        added_features: Set[int],
+        removed_features: Set[int],
+        max_feature: int
 ) -> None:
     """Update DNN accumulator with added/removed features."""
     valid_added = [f for f in added_features if 0 <= f < max_feature]
@@ -285,14 +282,14 @@ def dnn_update_accumulator(
 
 
 def nnue_update_accumulator(
-    white_accumulator: np.ndarray,
-    black_accumulator: np.ndarray,
-    weights: np.ndarray,
-    added_white: Set[int],
-    removed_white: Set[int],
-    added_black: Set[int],
-    removed_black: Set[int],
-    max_feature: int
+        white_accumulator: np.ndarray,
+        black_accumulator: np.ndarray,
+        weights: np.ndarray,
+        added_white: Set[int],
+        removed_white: Set[int],
+        added_black: Set[int],
+        removed_black: Set[int],
+        max_feature: int
 ) -> None:
     """Update NNUE accumulators with added/removed features."""
     # White accumulator

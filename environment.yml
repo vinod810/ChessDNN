@@ -7,3 +7,4 @@ dependencies:
   - python-chess
   - zstandard
   - cython
+  - chess

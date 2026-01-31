@@ -1,7 +1,7 @@
 """
 CachedBoard - Efficient chess board wrapper with intelligent caching.
 
-PHASE 2 OPTIMIZED VERSION
+OPTIMIZED VERSION
 
 Optimizations:
 - Inlined _cache property access (eliminates 2.8M property calls)
@@ -11,11 +11,12 @@ Optimizations:
 """
 
 import sys
-from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
+from typing import Optional, List, Dict, Any, Tuple
 
 try:
     import libs.chess_cpp as chess_cpp
+
     HAS_CPP_BACKEND = True
     print("✓ Using fast C++ chess backend (chess_cpp)", file=sys.stderr)
 except ImportError:
@@ -24,7 +25,6 @@ except ImportError:
 
 import chess
 import chess.polyglot
-
 
 PIECE_VALUES = {
     chess.PAWN: 100,
@@ -45,58 +45,58 @@ for _v in range(1, 7):
 
 # fmt: off
 _PST_PAWN = [
-      0,   0,   0,   0,   0,   0,   0,   0,
-      5,  10,  10, -20, -20,  10,  10,   5,
-      5,  -5, -10,   0,   0, -10,  -5,   5,
-      0,   0,   0,  20,  20,   0,   0,   0,
-      5,   5,  10,  25,  25,  10,   5,   5,
-     10,  10,  20,  30,  30,  20,  10,  10,
-     50,  50,  50,  50,  50,  50,  50,  50,
-      0,   0,   0,   0,   0,   0,   0,   0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    5, 10, 10, -20, -20, 10, 10, 5,
+    5, -5, -10, 0, 0, -10, -5, 5,
+    0, 0, 0, 20, 20, 0, 0, 0,
+    5, 5, 10, 25, 25, 10, 5, 5,
+    10, 10, 20, 30, 30, 20, 10, 10,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    0, 0, 0, 0, 0, 0, 0, 0,
 ]
 _PST_KNIGHT = [
     -50, -40, -30, -30, -30, -30, -40, -50,
-    -40, -20,   0,   5,   5,   0, -20, -40,
-    -30,   5,  10,  15,  15,  10,   5, -30,
-    -30,   0,  15,  20,  20,  15,   0, -30,
-    -30,   5,  15,  20,  20,  15,   5, -30,
-    -30,   0,  10,  15,  15,  10,   0, -30,
-    -40, -20,   0,   0,   0,   0, -20, -40,
+    -40, -20, 0, 5, 5, 0, -20, -40,
+    -30, 5, 10, 15, 15, 10, 5, -30,
+    -30, 0, 15, 20, 20, 15, 0, -30,
+    -30, 5, 15, 20, 20, 15, 5, -30,
+    -30, 0, 10, 15, 15, 10, 0, -30,
+    -40, -20, 0, 0, 0, 0, -20, -40,
     -50, -40, -30, -30, -30, -30, -40, -50,
 ]
 _PST_BISHOP = [
     -20, -10, -10, -10, -10, -10, -10, -20,
-    -10,   5,   0,   0,   0,   0,   5, -10,
-    -10,  10,  10,  10,  10,  10,  10, -10,
-    -10,   0,  10,  10,  10,  10,   0, -10,
-    -10,   5,   5,  10,  10,   5,   5, -10,
-    -10,   0,   5,  10,  10,   5,   0, -10,
-    -10,   0,   0,   0,   0,   0,   0, -10,
+    -10, 5, 0, 0, 0, 0, 5, -10,
+    -10, 10, 10, 10, 10, 10, 10, -10,
+    -10, 0, 10, 10, 10, 10, 0, -10,
+    -10, 5, 5, 10, 10, 5, 5, -10,
+    -10, 0, 5, 10, 10, 5, 0, -10,
+    -10, 0, 0, 0, 0, 0, 0, -10,
     -20, -10, -10, -10, -10, -10, -10, -20,
 ]
 _PST_ROOK = [
-      0,   0,   0,   5,   5,   0,   0,   0,
-     -5,   0,   0,   0,   0,   0,   0,  -5,
-     -5,   0,   0,   0,   0,   0,   0,  -5,
-     -5,   0,   0,   0,   0,   0,   0,  -5,
-     -5,   0,   0,   0,   0,   0,   0,  -5,
-     -5,   0,   0,   0,   0,   0,   0,  -5,
-      5,  10,  10,  10,  10,  10,  10,   5,
-      0,   0,   0,   0,   0,   0,   0,   0,
+    0, 0, 0, 5, 5, 0, 0, 0,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    5, 10, 10, 10, 10, 10, 10, 5,
+    0, 0, 0, 0, 0, 0, 0, 0,
 ]
 _PST_QUEEN = [
-    -20, -10, -10,  -5,  -5, -10, -10, -20,
-    -10,   0,   5,   0,   0,   0,   0, -10,
-    -10,   5,   5,   5,   5,   5,   0, -10,
-      0,   0,   5,   5,   5,   5,   0,  -5,
-     -5,   0,   5,   5,   5,   5,   0,  -5,
-    -10,   0,   5,   5,   5,   5,   0, -10,
-    -10,   0,   0,   0,   0,   0,   0, -10,
-    -20, -10, -10,  -5,  -5, -10, -10, -20,
+    -20, -10, -10, -5, -5, -10, -10, -20,
+    -10, 0, 5, 0, 0, 0, 0, -10,
+    -10, 5, 5, 5, 5, 5, 0, -10,
+    0, 0, 5, 5, 5, 5, 0, -5,
+    -5, 0, 5, 5, 5, 5, 0, -5,
+    -10, 0, 5, 5, 5, 5, 0, -10,
+    -10, 0, 0, 0, 0, 0, 0, -10,
+    -20, -10, -10, -5, -5, -10, -10, -20,
 ]
 _PST_KING_MG = [
-     20,  30,  10,   0,   0,  10,  30,  20,
-     20,  20,   0,   0,   0,   0,  20,  20,
+    20, 30, 10, 0, 0, 10, 30, 20,
+    20, 20, 0, 0, 0, 0, 20, 20,
     -10, -20, -20, -20, -20, -20, -20, -10,
     -20, -30, -30, -40, -40, -30, -30, -20,
     -30, -40, -40, -50, -50, -40, -40, -30,
@@ -106,12 +106,12 @@ _PST_KING_MG = [
 ]
 _PST_KING_EG = [
     -50, -30, -30, -30, -30, -30, -30, -50,
-    -30, -30,   0,   0,   0,   0, -30, -30,
-    -30, -10,  20,  30,  30,  20, -10, -30,
-    -30, -10,  30,  40,  40,  30, -10, -30,
-    -30, -10,  30,  40,  40,  30, -10, -30,
-    -30, -10,  20,  30,  30,  20, -10, -30,
-    -30, -20, -10,   0,   0, -10, -20, -30,
+    -30, -30, 0, 0, 0, 0, -30, -30,
+    -30, -10, 20, 30, 30, 20, -10, -30,
+    -30, -10, 30, 40, 40, 30, -10, -30,
+    -30, -10, 30, 40, 40, 30, -10, -30,
+    -30, -10, 20, 30, 30, 20, -10, -30,
+    -30, -20, -10, 0, 0, -10, -20, -30,
     -50, -40, -30, -20, -20, -30, -40, -50,
 ]
 # fmt: on
@@ -153,12 +153,12 @@ class _CacheState:
     move_gives_check: Optional[Dict[chess.Move, bool]] = None
     move_victim_type: Optional[Dict[chess.Move, Optional[int]]] = None
     move_attacker_type: Optional[Dict[chess.Move, Optional[int]]] = None
-    # Phase 2: Integer-keyed move info caches
+    # Integer-keyed move info caches
     move_is_capture_int: Optional[Dict[int, bool]] = None
     move_gives_check_int: Optional[Dict[int, bool]] = None
     move_victim_type_int: Optional[Dict[int, Optional[int]]] = None
     move_attacker_type_int: Optional[Dict[int, Optional[int]]] = None
-    # WEEK 1 OPTIMIZATION: Additional caches to eliminate piece_at() calls
+    # OPTIMIZATION: Additional caches to eliminate piece_at() calls
     move_is_en_passant_int: Optional[Dict[int, bool]] = None
     move_is_castling_int: Optional[Dict[int, bool]] = None
     move_piece_color_int: Optional[Dict[int, bool]] = None  # True = WHITE
@@ -316,7 +316,7 @@ class MoveAdapter:
 
 class CachedBoard:
     """
-    PHASE 2 OPTIMIZED: Chess board wrapper with inlined cache access.
+    OPTIMIZED: Chess board wrapper with inlined cache access.
 
     Key optimization: All _cache property access is now inlined as _cache_stack[-1]
     to eliminate 2.8M+ property call overhead.
@@ -391,7 +391,7 @@ class CachedBoard:
             self._py_board_dirty = False
             self._hash_history.append(chess.polyglot.zobrist_hash(self._board))
 
-    # PHASE 2: Keep property for backward compatibility but inline in hot paths
+    # Keep property for backward compatibility but inline in hot paths
     @property
     def _cache(self) -> _CacheState:
         return self._cache_stack[-1]
@@ -480,7 +480,7 @@ class CachedBoard:
                        captured_piece_type: Optional[int],
                        captured_piece_color: Optional[bool]) -> None:
         """
-        WEEK 2 OPTIMIZATION: Push move using pre-computed move info.
+        OPTIMIZATION: Push move using pre-computed move info.
 
         This eliminates redundant calls to:
         - _get_captured_piece() (which calls is_en_passant())
@@ -514,7 +514,7 @@ class CachedBoard:
             else:
                 self._board.push(move)
         else:
-            # WEEK 2: Build captured_piece from pre-computed info (no function calls!)
+            # Build captured_piece from pre-computed info (no function calls!)
             captured_piece = None
             if captured_piece_type is not None and captured_piece_color is not None:
                 captured_piece = chess.Piece(captured_piece_type, captured_piece_color)
@@ -642,7 +642,7 @@ class CachedBoard:
 
     def piece_type_at(self, square: int) -> Optional[int]:
         """
-        PHASE 3.3: Get piece type at square without creating chess.Piece object.
+        Get piece type at square without creating chess.Piece object.
 
         This is faster than piece_at() when you only need the piece type,
         as it avoids chess.Piece object creation overhead.
@@ -752,10 +752,10 @@ class CachedBoard:
     def can_claim_fifty_moves(self) -> bool:
         return self.halfmove_clock() >= 100
 
-    # ==================== PHASE 2: Inlined cache access ====================
+    # ==================== Inlined cache access ====================
 
     def zobrist_hash(self) -> int:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.zobrist_hash is None:
             if self._use_cpp:
@@ -765,7 +765,7 @@ class CachedBoard:
         return cache.zobrist_hash
 
     def get_legal_moves_list(self) -> List[chess.Move]:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.legal_moves is None:
             if self._use_cpp:
@@ -780,9 +780,9 @@ class CachedBoard:
 
     def get_legal_moves_int(self) -> List[int]:
         """
-        PHASE 1 OPTIMIZATION: Return legal moves as integers.
+        OPTIMIZATION: Return legal moves as integers.
 
-        PHASE 3: Also computes gives_check during generation to avoid
+        Also computes gives_check during generation to avoid
         redundant int→C++ move conversion in precompute_move_info_int.
 
         This avoids chess.Move object creation, providing significant speedup:
@@ -799,7 +799,7 @@ class CachedBoard:
         cache = self._cache_stack[-1]  # Inlined
         if cache.legal_moves_int is None:
             if self._use_cpp:
-                # PHASE 3: Compute gives_check while we have C++ moves
+                # Compute gives_check while we have C++ moves
                 # This avoids redundant int→C++ conversion later
                 cpp_moves = self._board.legal_moves()
                 result = []
@@ -815,11 +815,15 @@ class CachedBoard:
                     if promo == 0 and (from_sq == 4 or from_sq == 60):
                         if board.is_castling(m):
                             if from_sq == 4:  # E1
-                                if to_sq == 7: to_sq = 6      # H1 -> G1
-                                elif to_sq == 0: to_sq = 2    # A1 -> C1
+                                if to_sq == 7:
+                                    to_sq = 6  # H1 -> G1
+                                elif to_sq == 0:
+                                    to_sq = 2  # A1 -> C1
                             else:  # E8
-                                if to_sq == 63: to_sq = 62    # H8 -> G8
-                                elif to_sq == 56: to_sq = 58  # A8 -> C8
+                                if to_sq == 63:
+                                    to_sq = 62  # H8 -> G8
+                                elif to_sq == 56:
+                                    to_sq = 58  # A8 -> C8
 
                     move_int = from_sq | (to_sq << 6) | (promo << 12)
                     result.append(move_int)
@@ -853,15 +857,15 @@ class CachedBoard:
             if self._board.is_castling(cpp_move):
                 # White castling (from E1=4)
                 if from_sq == 4:
-                    if to_sq == 7:    # H1 -> G1 (kingside)
+                    if to_sq == 7:  # H1 -> G1 (kingside)
                         to_sq = 6
                     elif to_sq == 0:  # A1 -> C1 (queenside)
                         to_sq = 2
                 # Black castling (from E8=60)
                 else:
-                    if to_sq == 63:   # H8 -> G8 (kingside)
+                    if to_sq == 63:  # H8 -> G8 (kingside)
                         to_sq = 62
-                    elif to_sq == 56: # A8 -> C8 (queenside)
+                    elif to_sq == 56:  # A8 -> C8 (queenside)
                         to_sq = 58
 
         return from_sq | (to_sq << 6) | (promo << 12)
@@ -896,21 +900,21 @@ class CachedBoard:
 
     def precompute_move_info_int(self) -> None:
         """
-        PHASE 2 OPTIMIZATION: Precompute move info using integer keys.
+        OPTIMIZATION: Precompute move info using integer keys.
 
         This is significantly faster than the object-based version because:
         - No chess.Move object creation or hashing
         - Integer dictionary keys are faster to hash and compare
         - Combines with get_legal_moves_int() for zero-object move generation
 
-        PHASE 3.2: gives_check is computed during get_legal_moves_int() for
+        gives_check is computed during get_legal_moves_int() for
         C++ backend. We MUST call get_legal_moves_int() BEFORE checking if
         move_gives_check_int is populated.
 
-        PHASE 3.3: Uses piece_type_at() instead of piece_at() to avoid
+        Uses piece_type_at() instead of piece_at() to avoid
         chess.Piece object creation overhead.
 
-        WEEK 1 OPTIMIZATION: Also caches en passant, castling, piece colors
+        OPTIMIZATION: Also caches en passant, castling, piece colors
         to eliminate piece_at() calls in nn_inference.update_pre_push().
         """
         cache = self._cache_stack[-1]  # Inlined
@@ -920,7 +924,7 @@ class CachedBoard:
         cache.move_is_capture_int = {}
         cache.move_victim_type_int = {}
         cache.move_attacker_type_int = {}
-        # WEEK 1: New caches
+        # New caches
         cache.move_is_en_passant_int = {}
         cache.move_is_castling_int = {}
         cache.move_piece_color_int = {}
@@ -929,7 +933,7 @@ class CachedBoard:
         # OPTIMIZATION: Pre-computed MVV-LVA scores
         cache.move_mvv_lva_int = {}
 
-        # PHASE 3.2 FIX: Call get_legal_moves_int FIRST - this populates
+        # Call get_legal_moves_int FIRST - this populates
         # move_gives_check_int for C++ backend, avoiding redundant conversion
         legal_moves_int = self.get_legal_moves_int()
 
@@ -944,10 +948,10 @@ class CachedBoard:
         ep_square = self.ep_square
         stm = self.turn  # Side to move
 
-        # PHASE 3.3: Use local reference to avoid repeated attribute lookup
+        # Use local reference to avoid repeated attribute lookup
         piece_type_at = self.piece_type_at
 
-        # WEEK 1: Build piece map for fast color lookup (avoiding piece_at)
+        # Build piece map for fast color lookup (avoiding piece_at)
         # piece_color_map[sq] = True if white piece, False if black, None if empty
         piece_color_map = {}
         # Handle both C++ backend (method) and python-chess (dict-like)
@@ -966,7 +970,7 @@ class CachedBoard:
             to_sq = (move_int >> 6) & 0x3F
             promo = (move_int >> 12) & 0xF
 
-            # WEEK 1: Cache piece color (side to move)
+            # Cache piece color (side to move)
             cache.move_piece_color_int[move_int] = stm
 
             # Check en passant (pawn moving to ep_square diagonally)
@@ -981,7 +985,7 @@ class CachedBoard:
             is_cap = bool(occupied & (1 << to_sq)) or is_ep
             cache.move_is_capture_int[move_int] = is_cap
 
-            # WEEK 1: Check castling
+            # Check castling
             is_castling = False
             if attacker_type == chess.KING and promo == 0:
                 # White: e1->g1 or e1->c1, Black: e8->g8 or e8->c8
@@ -991,7 +995,7 @@ class CachedBoard:
                     is_castling = True
             cache.move_is_castling_int[move_int] = is_castling
 
-            # PHASE 3.2: Only compute gives_check if not already done
+            # Only compute gives_check if not already done
             if needs_gives_check:
                 if self._use_cpp:
                     # Convert int to C++ move for gives_check call
@@ -1001,8 +1005,8 @@ class CachedBoard:
                     py_move = int_to_move(move_int)
                     cache.move_gives_check_int[move_int] = self._board.gives_check(py_move)
 
-            # PHASE 3.3: Get victim type using piece_type_at (no object creation)
-            # WEEK 1: Also cache captured piece color
+            # Get victim type using piece_type_at (no object creation)
+            # Also cache captured piece color
             # OPTIMIZATION: Pre-compute MVV-LVA score
             if is_cap:
                 if is_ep:
@@ -1025,7 +1029,7 @@ class CachedBoard:
                 cache.move_captured_piece_color_int[move_int] = None
                 cache.move_mvv_lva_int[move_int] = 0  # Non-captures have score 0
 
-            # PHASE 3.3: Get attacker type using piece_type_at (no object creation)
+            # Get attacker type using piece_type_at (no object creation)
             cache.move_attacker_type_int[move_int] = attacker_type
 
     def _int_to_cpp_move(self, move_int: int):
@@ -1046,14 +1050,14 @@ class CachedBoard:
         if promo == 0 and (from_sq == 4 or from_sq == 60):
             # Check if this looks like castling
             if from_sq == 4:  # E1
-                if to_sq == 6:    # G1 -> H1 (kingside)
+                if to_sq == 6:  # G1 -> H1 (kingside)
                     to_sq = 7
                 elif to_sq == 2:  # C1 -> A1 (queenside)
                     to_sq = 0
             elif from_sq == 60:  # E8
-                if to_sq == 62:   # G8 -> H8 (kingside)
+                if to_sq == 62:  # G8 -> H8 (kingside)
                     to_sq = 63
-                elif to_sq == 58: # C8 -> A8 (queenside)
+                elif to_sq == 58:  # C8 -> A8 (queenside)
                     to_sq = 56
 
         return chess_cpp.Move(from_sq, to_sq, promo)
@@ -1122,11 +1126,11 @@ class CachedBoard:
             self.precompute_move_info_int()
         return cache.move_mvv_lva_int.get(move_int, 0)
 
-    # ==================== WEEK 1 OPTIMIZATION: New getters ====================
+    # ==================== OPTIMIZATION: New getters ====================
 
     def is_en_passant_int(self, move_int: int) -> bool:
         """
-        WEEK 1 OPTIMIZATION: Check if move is en passant using integer key.
+        OPTIMIZATION: Check if move is en passant using integer key.
         Eliminates need for move conversion and piece_at() calls.
         """
         cache = self._cache_stack[-1]
@@ -1148,7 +1152,7 @@ class CachedBoard:
 
     def is_castling_int(self, move_int: int) -> bool:
         """
-        WEEK 1 OPTIMIZATION: Check if move is castling using integer key.
+        OPTIMIZATION: Check if move is castling using integer key.
         Uses cached value when available, avoiding piece_at() calls.
         """
         cache = self._cache_stack[-1]
@@ -1174,7 +1178,7 @@ class CachedBoard:
 
     def get_move_piece_color_int(self, move_int: int) -> Optional[bool]:
         """
-        WEEK 1 OPTIMIZATION: Get the color of the moving piece.
+        OPTIMIZATION: Get the color of the moving piece.
         Returns True for WHITE, False for BLACK, None if not cached.
         """
         cache = self._cache_stack[-1]
@@ -1184,7 +1188,7 @@ class CachedBoard:
 
     def get_captured_piece_info_int(self, move_int: int) -> Tuple[Optional[int], Optional[bool]]:
         """
-        WEEK 1 OPTIMIZATION: Get captured piece type and color using integer key.
+        OPTIMIZATION: Get captured piece type and color using integer key.
         Returns (piece_type, is_white) or (None, None) if not a capture.
         Eliminates piece_at() calls in nn_inference.update_pre_push().
         """
@@ -1198,7 +1202,7 @@ class CachedBoard:
 
     def get_move_info_for_nn_int(self, move_int: int) -> Tuple[int, bool, bool, bool, Optional[int], Optional[bool]]:
         """
-        WEEK 1 OPTIMIZATION: Get all move info needed for NN updates in one call.
+        OPTIMIZATION: Get all move info needed for NN updates in one call.
 
         Returns:
             (attacker_type, attacker_color, is_en_passant, is_castling,
@@ -1220,28 +1224,28 @@ class CachedBoard:
         )
 
     def is_check(self) -> bool:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.is_check is None:
             cache.is_check = self._board.is_check()
         return cache.is_check
 
     def is_checkmate(self) -> bool:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.is_checkmate is None:
             cache.is_checkmate = self._board.is_checkmate()
         return cache.is_checkmate
 
     def is_game_over(self) -> bool:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.is_game_over is None:
             cache.is_game_over = self._board.is_game_over()
         return cache.is_game_over
 
     def has_non_pawn_material(self, color: Optional[bool] = None) -> bool:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         if color is None:
             color = self.turn
         cache = self._cache_stack[-1]  # Inlined
@@ -1253,7 +1257,7 @@ class CachedBoard:
         return cache.has_non_pawn_material[color]
 
     def precompute_move_info(self) -> None:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_is_capture is not None:
             return
@@ -1273,7 +1277,8 @@ class CachedBoard:
 
             if self._use_cpp:
                 is_castling_move = self.is_castling(move)
-                cache.move_gives_check[move] = self._board.gives_check(MoveAdapter.from_chess_move(move, is_castling=is_castling_move))
+                cache.move_gives_check[move] = self._board.gives_check(
+                    MoveAdapter.from_chess_move(move, is_castling=is_castling_move))
             else:
                 cache.move_gives_check[move] = self._board.gives_check(move)
 
@@ -1287,7 +1292,7 @@ class CachedBoard:
             cache.move_attacker_type[move] = attacker.piece_type if attacker else None
 
     def is_capture_cached(self, move: chess.Move) -> bool:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_is_capture is None:
             self.precompute_move_info()
@@ -1295,7 +1300,7 @@ class CachedBoard:
         return result if result is not None else self.is_capture(move)
 
     def gives_check_cached(self, move: chess.Move) -> bool:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_gives_check is None:
             self.precompute_move_info()
@@ -1308,21 +1313,21 @@ class CachedBoard:
         return self._board.gives_check(move)
 
     def get_victim_type(self, move: chess.Move) -> Optional[int]:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_victim_type is None:
             self.precompute_move_info()
         return cache.move_victim_type.get(move)
 
     def get_attacker_type(self, move: chess.Move) -> Optional[int]:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.move_attacker_type is None:
             self.precompute_move_info()
         return cache.move_attacker_type.get(move)
 
     def material_evaluation(self) -> int:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.material_evaluation is None:
             if len(self._cache_stack) > 1 and self._move_info_stack:
@@ -1335,7 +1340,7 @@ class CachedBoard:
         return cache.material_evaluation
 
     def _is_endgame(self) -> bool:
-        """PHASE 2: Inlined cache access"""
+        """Inlined cache access"""
         cache = self._cache_stack[-1]  # Inlined
         if cache.is_endgame is None:
             popcount = chess_cpp.popcount if self._use_cpp else chess.popcount
@@ -1372,7 +1377,7 @@ class CachedBoard:
         return our_mat - their_mat
 
     def _compute_incremental_material(self, parent_eval: int, move_info: _MoveInfo,
-                                       parent_is_endgame: Optional[bool]) -> int:
+                                      parent_is_endgame: Optional[bool]) -> int:
         move = move_info.move
         is_eg = self._is_endgame()
 

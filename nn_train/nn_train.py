@@ -67,7 +67,7 @@ import random
 import time
 import gc
 import traceback
-from typing import List, Tuple, Dict, Any, Optional, Iterator
+from typing import List, Tuple, Dict, Optional, Iterator
 
 import numpy as np
 import torch
@@ -79,7 +79,7 @@ from torch.utils.data import DataLoader, IterableDataset
 from nn_inference import (
     NNUE_INPUT_SIZE, DNN_INPUT_SIZE, NNUE_HIDDEN_SIZE, DNN_HIDDEN_LAYERS
 )
-from config import MAX_SCORE, TANH_SCALE
+from config import TANH_SCALE
 
 # Training configuration
 VALIDATION_SPLIT_RATIO = 0.01

@@ -19,28 +19,28 @@ Test Modes:
 """
 
 import argparse
+import io
+import random
 import re
-from contextlib import redirect_stdout
-
-import numpy as np
 import sys
 import time
-import io
+from contextlib import redirect_stdout
+
 import chess
-import random
 import chess.pgn
+import numpy as np
 
 from cached_board import CachedBoard
+from config import MAX_SCORE, TANH_SCALE
 from engine import find_best_move
+from nn_evaluator import NNEvaluator
 # Import from our modules - this ensures we test the actual production code
 from nn_inference import (
     NNUEFeatures, DNNFeatures,
     NNUE_INPUT_SIZE, DNN_INPUT_SIZE
 )
-from config import MAX_SCORE, TANH_SCALE
-from nn_evaluator import NNEvaluator
 
-CP_ERROR_CLIP = 100 # Keep low to make the average more sense.
+CP_ERROR_CLIP = 100  # Keep low to make the average more sense.
 
 # Configuration
 VALID_TEST_TYPES = {
@@ -380,10 +380,11 @@ def performance_test(nn_type: str, model_path: str):
 
     all_passed = speedup > expected_speedup and incremental_time / num_cycles * 1000 < expected_incr_time
     if not all_passed:
-            print(f"  ✗ FAIL, expected speedup >{expected_speedup}, got {speedup:.2f}. "
-                  f"expected incr-time <{expected_incr_time} but got {incremental_time / num_cycles * 1000:.2f} ms")
+        print(f"  ✗ FAIL, expected speedup >{expected_speedup}, got {speedup:.2f}. "
+              f"expected incr-time <{expected_incr_time} but got {incremental_time / num_cycles * 1000:.2f} ms")
 
     return all_passed
+
 
 # =============================================================================
 # Evaluation Accuracy Test
@@ -409,7 +410,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int = 1000
     if not shard_files:
         print(f"\n❌ ERROR: No shard files found for {nn_type}")
         print("Please ensure .bin.zst files exist in the data directory")
-        return
+        return None
 
     # Pick a random shard
     shard_path = random.choice(shard_files)
@@ -423,7 +424,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int = 1000
         print("\n❌ ERROR: No diagnostic records found in shard file")
         print("Diagnostic records are written every 1000 positions and include FEN.")
         print("You may need to regenerate shards with the updated prepare_data.py")
-        return
+        return None
 
     print(f"✓ Loaded {len(records)} diagnostic records from shard")
 
@@ -447,7 +448,6 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int = 1000
 
         try:
             fen = rec['fen']
-            stm_is_white = rec['stm'] == 1
 
             # Evaluate using features from shard
             if nn_type.upper() == "DNN":
@@ -479,7 +479,7 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int = 1000
 
     if not true_tanh_values:
         print("\n❌ ERROR: No positions could be evaluated")
-        return
+        return None
 
     # Compute metrics
     true_tanh_values = np.array(true_tanh_values)
@@ -533,14 +533,13 @@ def test_eval_accuracy(nn_type: str, model_path: str, positions_size: int = 1000
     print("Evaluation accuracy test complete!")
     print("=" * 70)
 
-
     expected_mse = 0.07
     expected_mae_cp = 100
 
     all_passed = mse < expected_mse and mae_cp < expected_mae_cp
     if not all_passed:
-            print(f"  ✗ FAIL, expected mae <{expected_mse}, got {mae:.4f}. "
-                  f"expected MAE CP <{expected_mae_cp} but got {mae_cp} ms")
+        print(f"  ✗ FAIL, expected mae <{expected_mse}, got {mae:.4f}. "
+              f"expected MAE CP <{expected_mae_cp} but got {mae_cp} ms")
 
     return all_passed
 
@@ -602,7 +601,7 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int = 10
         print(f"    {SF_EVAL_FILE_PATH}")
         print("\nPlease generate it first by running:")
         print(f"    python build_sf_static_eval_file.py --num-positions {positions_size}")
-        return
+        return None
 
     # Read pre-computed evaluations
     print(f"\nReading pre-computed Stockfish evaluations from: {SF_EVAL_FILE_PATH}")
@@ -644,8 +643,6 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int = 10
 
         try:
             # Set up board and evaluate with INCREMENTAL evaluation
-            # CRITICAL FIX: Use _evaluate() instead of _evaluate_full()
-            # _evaluate_full() bypasses quantization and always uses FP32!
             board = CachedBoard(fen)
             evaluator.reset(board)  # Initialize accumulators for this position
             pred_output = evaluator._evaluate(board)  # Uses incremental path with quantization
@@ -681,7 +678,7 @@ def test_nn_vs_stockfish(nn_type: str, model_path: str, positions_size: int = 10
 
     if not sf_tanh_values:
         print("\n❌ ERROR: No positions could be evaluated")
-        return
+        return None
 
     # Compute metrics
     sf_tanh_values = np.array(sf_tanh_values)
@@ -1126,7 +1123,7 @@ def test_reset_consistency(nn_type: str, model_path: str):
 # =============================================================================
 
 def test_deep_search_simulation(nn_type: str, model_path: str, depth: int = 4,
-                                  num_iterations: int = 20, tolerance: float = 1e-3):
+                                num_iterations: int = 20, tolerance: float = 1e-3):
     """
     Simulate a deep search with many push/pop cycles.
 
@@ -1267,9 +1264,8 @@ def test_engine_best_move():
 
         f = io.StringIO()
         with redirect_stdout(f):
-            start_time = time.perf_counter()
             found_move, score, _, nodes, nps = find_best_move(fen, max_depth=30, time_limit=test_suite[3],
-                                                        expected_best_moves=expected_moves)
+                                                              expected_best_moves=expected_moves)
             nps_sum += nps
             nodes_sum += nodes
 
@@ -1319,7 +1315,7 @@ def test_random_games(nn_type: str, model_path: str, num_games: int = 10, max_mo
 
     random.seed(42)  # Reproducible
 
-    evaluator = NNEvaluator.create(CachedBoard(), nn_type, model_path) # Loads model
+    evaluator = NNEvaluator.create(CachedBoard(), nn_type, model_path)  # Loads model
 
     for game_num in range(num_games):
         board = CachedBoard()
@@ -1593,7 +1589,7 @@ Examples:
     model_path = args.model_path or get_model_path(nn_type)
 
     # Custom conditional logic
-    if  nn_type is None and test_type != "Engine-Tests":
+    if nn_type is None and test_type != "Engine-Tests":
         parser.error("--nn-type is required")
 
     print(f"Neural Network Type: {nn_type}")

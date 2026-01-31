@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Tuple, Optional
+from typing import Tuple
 
 import chess
 
 from cached_board import CachedBoard, move_to_int
-from nn_inference import NNUEIncrementalUpdater
-from nn_inference import DNNIncrementalUpdater
-from nn_inference import load_model
 from config import MAX_SCORE
+from nn_inference import DNNIncrementalUpdater
+from nn_inference import NNUEIncrementalUpdater
+from nn_inference import load_model
 
 
 class NNEvaluator(ABC):
@@ -279,7 +279,7 @@ class NNUEEvaluator(NNEvaluator):
         Note: For NNUE, this is less efficient than push_with_board() because
         it requires creating a temporary board copy. Use push_with_board() when possible.
 
-        PHASE 3: Uses lazy accumulator refresh for king moves.
+        Uses lazy accumulator refresh for king moves.
         """
         # Get pre-push data
         is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board_before_push, move)
@@ -307,13 +307,13 @@ class NNUEEvaluator(NNEvaluator):
         Efficiently update both evaluator state and board for a move.
         Uses NNUE's two-phase update for optimal performance.
 
-        PHASE 3: Uses lazy accumulator refresh - king moves just mark dirty
+        Uses lazy accumulator refresh - king moves just mark dirty
         instead of immediately refreshing.
 
-        WEEK 1 OPTIMIZATION: Uses cached move info when available to eliminate
+        OPTIMIZATION: Uses cached move info when available to eliminate
         piece_at() calls in update_pre_push.
 
-        WEEK 2 OPTIMIZATION: Also uses push_with_info() to eliminate redundant
+        OPTIMIZATION: Also uses push_with_info() to eliminate redundant
         is_en_passant(), is_castling(), and _get_captured_piece() calls in board.push().
 
         Args:
@@ -322,7 +322,7 @@ class NNUEEvaluator(NNEvaluator):
             :param move:
             :param board:
         """
-        # WEEK 1: Try to get cached move info to avoid piece_at() calls
+        # Try to get cached move info to avoid piece_at() calls
         move_int = move_to_int(move)
 
         # Check if we have cached move info
@@ -340,13 +340,16 @@ class NNUEEvaluator(NNEvaluator):
             captured_type = cache.move_captured_piece_type_int.get(move_int)
             captured_color = cache.move_captured_piece_color_int.get(move_int)
 
-            # Phase 1: Before board.push() - use fast version
-            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push_fast(
-                board, move, attacker_type, piece_color,
-                is_en_passant, is_castling, captured_type, captured_color
-            )
+            # Before board.push() - use fast version
+            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push_fast(move,
+                                                                                                      attacker_type,
+                                                                                                      piece_color,
+                                                                                                      is_en_passant,
+                                                                                                      is_castling,
+                                                                                                      captured_type,
+                                                                                                      captured_color)
 
-            # WEEK 2: Push the board using cached info (no redundant lookups!)
+            # Push the board using cached info (no redundant lookups!)
             board.push_with_info(move, move_int, is_en_passant, is_castling,
                                  captured_type, captured_color)
         else:
@@ -355,7 +358,7 @@ class NNUEEvaluator(NNEvaluator):
             # Slow path: regular push (computes is_en_passant, is_castling, etc.)
             board.push(move)
 
-        # Phase 2: After board.push()
+        # After board.push()
         self.updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
 
         # Update accumulators - lazy refresh for king moves
@@ -372,10 +375,10 @@ class NNUEEvaluator(NNEvaluator):
 
     def push_with_board_int(self, board: CachedBoard, move: chess.Move, move_int: int):
         """
-        WEEK 1 OPTIMIZATION: Variant of push_with_board that accepts pre-computed
+        OPTIMIZATION: Variant of push_with_board that accepts pre-computed
         move_int to avoid redundant conversion.
 
-        WEEK 2 OPTIMIZATION: Also uses push_with_info() to eliminate redundant
+        OPTIMIZATION: Also uses push_with_info() to eliminate redundant
         is_en_passant(), is_castling(), and _get_captured_piece() calls.
 
         Use this when you already have the integer move from move ordering.
@@ -400,13 +403,16 @@ class NNUEEvaluator(NNEvaluator):
             captured_type = cache.move_captured_piece_type_int.get(move_int)
             captured_color = cache.move_captured_piece_color_int.get(move_int)
 
-            # Phase 1: Before board.push() - use fast version
-            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push_fast(
-                board, move, attacker_type, piece_color,
-                is_en_passant, is_castling, captured_type, captured_color
-            )
+            # Before board.push() - use fast version
+            is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push_fast(move,
+                                                                                                      attacker_type,
+                                                                                                      piece_color,
+                                                                                                      is_en_passant,
+                                                                                                      is_castling,
+                                                                                                      captured_type,
+                                                                                                      captured_color)
 
-            # WEEK 2: Push the board using cached info (no redundant lookups!)
+            # Push the board using cached info (no redundant lookups!)
             board.push_with_info(move, move_int, is_en_passant, is_castling,
                                  captured_type, captured_color)
         else:
@@ -415,7 +421,7 @@ class NNUEEvaluator(NNEvaluator):
             # Slow path: regular push
             board.push(move)
 
-        # Phase 2: After board.push()
+        # After board.push()
         self.updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
 
         # Update accumulators - lazy refresh for king moves
@@ -431,8 +437,6 @@ class NNUEEvaluator(NNEvaluator):
 
     def update_pre_push(self, board_before_push: CachedBoard, move: chess.Move) -> Tuple:
         """
-        Phase 1 of two-phase push. Call BEFORE board.push(move).
-
         Returns:
             Tuple of (is_white_king_move, is_black_king_move, change_record)
             Pass these to update_post_push() after calling board.push(move).
@@ -444,9 +448,7 @@ class NNUEEvaluator(NNEvaluator):
                          is_black_king_move: bool,
                          change_record: dict):
         """
-        Phase 2 of two-phase push. Call AFTER board.push(move).
-
-        PHASE 3: Uses lazy accumulator refresh for king moves.
+        Uses lazy accumulator refresh for king moves.
 
         Args:
             board_after_push: Board state after the move was pushed
@@ -471,7 +473,7 @@ class NNUEEvaluator(NNEvaluator):
     def pop(self):
         """Restore internal state to before the last push. Does NOT modify the board.
 
-        PHASE 3: Uses lazy accumulator handling - king move pops either decrement
+        Uses lazy accumulator handling - king move pops either decrement
         dirty counter (if never evaluated) or refresh (if evaluation happened).
         """
         change_record = self.updater.pop()
@@ -501,7 +503,7 @@ class NNUEEvaluator(NNEvaluator):
     def _evaluate(self, board: CachedBoard) -> float:
         """Evaluate using incremental accumulators.
 
-        PHASE 3: Provides feature_getter for lazy refresh when needed.
+        Provides feature_getter for lazy refresh when needed.
         """
         stm = board.turn == chess.WHITE
         # Provide feature getter for lazy refresh

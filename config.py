@@ -1,8 +1,8 @@
 import os
-from dataclasses import dataclass
 
 # Track which parameters were overridden from environment
 _overridden_params = []
+
 
 def _env_int(key, default):
     """Get integer from environment variable."""
@@ -13,6 +13,7 @@ def _env_int(key, default):
         return result
     return default
 
+
 def _env_float(key, default):
     """Get float from environment variable."""
     val = os.environ.get(key)
@@ -22,6 +23,7 @@ def _env_float(key, default):
         return result
     return default
 
+
 def _env_bool(key, default):
     """Get boolean from environment variable (accepts true/false/1/0/yes/no)."""
     val = os.environ.get(key)
@@ -30,6 +32,7 @@ def _env_bool(key, default):
     result = val.lower() in ('true', '1', 'yes', 'on')
     _overridden_params.append((key, default, result))
     return result
+
 
 def _env_str(key, default):
     """Get string from environment variable."""
@@ -62,10 +65,11 @@ FULL_NN_EVAL_FREQ = _env_int('FULL_NN_EVAL_FREQ', 3000)  # Increase to 50_000 af
 
 # Note when NN related parameters are optimized, use real games as positional understanding will be reflected.
 # The non-NN parameters are primarily about tactics, and they can be quickly tuned using test positions.
-QS_DEPTH_MIN_NN_EVAL = _env_int('QS_DEPTH_MIN_NN_EVAL', 6) #
+QS_DEPTH_MIN_NN_EVAL = _env_int('QS_DEPTH_MIN_NN_EVAL', 6)  #
 QS_DEPTH_MAX_NN_EVAL = _env_int('QS_DEPTH_MAX_NN_EVAL', 999)  # NN evaluation is allowed at all QS depths
 QS_DELTA_MAX_NN_EVAL = _env_int('QS_DELTA_MAX_NN_EVAL', 100)  # Score difference, below it will trigger a NN evaluation
-STAND_PAT_MAX_NN_EVAL = _env_int('STAND_PAT_MAX_NN_EVAL', 200)  # Absolute value of stand-pat, below it will trigger a NN evaluation.
+STAND_PAT_MAX_NN_EVAL = _env_int('STAND_PAT_MAX_NN_EVAL',
+                                 200)  # Absolute value of stand-pat, below it will trigger a NN evaluation.
 
 # Limit moves examined per QS ply to prevent explosion
 MAX_QS_DEPTH = _env_int('MAX_QS_DEPTH', 22)  # REDUCED from 15 to prevent search explosion
@@ -76,10 +80,7 @@ if _max_q_moves_env:
     _overridden_params.append(('MAX_QS_MOVES', _max_qs_moves_default, MAX_QS_MOVES))
 else:
     MAX_QS_MOVES = _max_qs_moves_default
-#MAX_QS_MOVES_Q1 = _env_int('MAX_QS_MOVES_Q1', 10)
-#MAX_QS_MOVES_Q2 = _env_int('MAX_QS_MOVES_Q2', 5)
-#MAX_QS_MOVES_Q3 = _env_int('MAX_QS_MOVES_Q3', 2)
-#MAX_QS_MOVES_Q4 = _env_int('MAX_QS_MOVES_Q4', 1)
+
 _max_qs_moves_divisor_default = [4, 2.0, 1.33]
 _max_q_moves_divisor_env = os.environ.get('MAX_QS_MOVES_DIVISOR')
 if _max_q_moves_divisor_env:
@@ -87,23 +88,16 @@ if _max_q_moves_divisor_env:
     _overridden_params.append(('MAX_QS_MOVES_DIVISOR', _max_qs_moves_divisor_default, MAX_QS_MOVES_DIVISOR))
 else:
     MAX_QS_MOVES_DIVISOR = _max_qs_moves_divisor_default
-#MAX_QS_MOVES_Q1_DIVISOR = _env_float('MAX_QS_MOVES_Q1_DIVISOR', 4.0) # 0.25
-#MAX_QS_MOVES_Q2_DIVISOR = _env_float('MAX_QS_MOVES_Q2_DIVISOR', 2.0) # 0.5
-#MAX_QS_MOVES_Q3_DIVISOR = _env_float('MAX_QS_MOVES_Q3_DIVISOR', 1.33) # 0.75
 
 QS_SOFT_STOP_DIVISOR = _env_float('QS_SOFT_STOP_DIVISOR', 8.0)
-#MAX_QS_MOVES_PER_PLY = _env_int('MAX_QS_MOVES_PER_PLY', 10)  # REDUCED from 12 - Maximum captures to examine at each QS depth
-#MAX_QS_MOVES_DEEP = _env_int('MAX_QS_MOVES_DEEP', 5)  # REDUCED from 6
 QS_TIME_CRITICAL_FACTOR = _env_float('QS_TIME_CRITICAL_FACTOR', 0.88)
 MAX_QS_MOVES_TIME_CRITICAL = _env_int('MAX_QS_MOVES_TIME_CRITICAL', 6)  # FIX: Increased from 3 to 5
-#MIN_QS_MOVES_SHALLOW = _env_int('MIN_QS_MOVES_SHALLOW', 6)  # NEW: Minimum moves at QS depth 1-2
 DELTA_PRUNING_QS_MIN_DEPTH = _env_int('DELTA_PRUNING_QS_MIN_DEPTH', 5)  # REDUCED from 6
 DELTA_PRUNING_QS_MARGIN = _env_int('DELTA_PRUNING_QS_MARGIN', 75)
 CHECK_QS_MAX_DEPTH = _env_int('CHECK_QS_MAX_DEPTH', 5)  # REDUCED from 5
 # Time check frequency in QS - more aggressive
 QS_TIME_CHECK_INTERVAL = _env_int('QS_TIME_CHECK_INTERVAL', 35)  # REDUCED from 50
 QS_TIME_BUDGET_FRACTION = _env_float('QS_TIME_BUDGET_FRACTION', 0.40)  # FIX V4: Reduced from 0.35
-#MIN_MAIN_SEARCH_RESERVE = _env_float('MIN_MAIN_SEARCH_RESERVE', 0.30)  # NEW: Always reserve 30% of time
 QS_TT_SUPPORTED = _env_bool('QS_TT_SUPPORTED', False)
 
 # Minimum depth requirements
