@@ -449,14 +449,28 @@ def ordered_moves_int(board: CachedBoard, depth: int, pv_move_int: int = 0, tt_m
     return [move_int for _, move_int in scored_moves]
 
 
-def ordered_moves_q_search_int(board: CachedBoard) -> List[int]:
+def ordered_moves_q_search_int(board: CachedBoard, last_capture_sq: int = -1) -> List[int]:
     """
     PHASE 2 OPTIMIZATION: Return legal moves for quiescence search as integers.
+
+    FIX: Added last_capture_sq parameter to prioritize recaptures on that square.
+    This ensures capture sequences are properly resolved before soft-stop.
     """
     board.precompute_move_info_int()
 
     moves_int = board.get_legal_moves_int()
-    moves_with_scores = [(move_score_q_search_int(board, m), m) for m in moves_int]
+    moves_with_scores = []
+
+    for m in moves_int:
+        score = move_score_q_search_int(board, m)
+        to_sq = (m >> 6) & 0x3F
+
+        # FIX: Prioritize recaptures on the last capture square with a large bonus
+        if last_capture_sq >= 0 and to_sq == last_capture_sq:
+            score += 100000  # Ensure recaptures are searched first
+
+        moves_with_scores.append((score, m))
+
     moves_with_scores.sort(key=lambda x: x[0], reverse=True)
     return [m for _, m in moves_with_scores]
 
@@ -543,11 +557,24 @@ def should_stop_search(current_depth: int) -> bool:
     return False
 
 
-def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple[int, List[int]]:
+def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int,
+               last_capture_sq: int = -1) -> Tuple[int, List[int]]:
     """
     Quiescence search with improved time management and move limits.
 
     PHASE 3: Uses integer moves throughout for performance.
+
+    FIX: Added last_capture_sq parameter to track capture sequences.
+    When the last move was a capture, we MUST search at least one recapture
+    on that square before allowing soft-stop. This prevents horizon effect
+    where we stop right before an obvious recapture.
+
+    Args:
+        board: Current board position
+        alpha: Alpha bound
+        beta: Beta bound
+        q_depth: Current quiescence search depth
+        last_capture_sq: Square where the last capture occurred (-1 if none)
 
     Returns:
         Tuple of (score, pv_int) where pv_int is the list of integer moves in the principal variation.
@@ -583,14 +610,19 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
             return evaluate_classical(board, skip_game_over=True), []
 
     # -------- EARLIER soft stop in QS - honor at shallower depth --------
-    if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // QS_SOFT_STOP_DIVISOR):  # Changed from // 2
-        _qs_stats["time_cutoffs"] += 1
-        _diag_warn("qs_time_cutoff", f"QS soft-stopped at depth {q_depth}")
-        # PHASE 3: Skip game_over check - we got here via legal move
-        if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL:
-            return evaluate_nn(board, skip_game_over=True), []
-        else:
-            return evaluate_classical(board, skip_game_over=True), []
+    # FIX: Don't soft-stop if we're in a capture sequence (last move was a capture)
+    # This prevents horizon effect where we stop right before an obvious recapture
+    in_capture_sequence = (last_capture_sq >= 0)
+    if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // QS_SOFT_STOP_DIVISOR):
+        if not in_capture_sequence:
+            _qs_stats["time_cutoffs"] += 1
+            _diag_warn("qs_time_cutoff", f"QS soft-stopped at depth {q_depth}")
+            # PHASE 3: Skip game_over check - we got here via legal move
+            if IS_NN_ENABLED and q_depth <= QS_DEPTH_MAX_NN_EVAL:
+                return evaluate_nn(board, skip_game_over=True), []
+            else:
+                return evaluate_classical(board, skip_game_over=True), []
+        # If in capture sequence, continue but with tighter limits (handled below)
 
     # -------- Hard depth limit to prevent search explosion --------
     if q_depth > MAX_QS_DEPTH:
@@ -688,11 +720,20 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
     board.precompute_move_info_int()
 
     moves_searched = 0
-    for move_int in ordered_moves_q_search_int(board):
+    # FIX: Get ordered moves, prioritizing recaptures on the last capture square
+    all_moves = ordered_moves_q_search_int(board, last_capture_sq)
+
+    for move_int in all_moves:
         # -------- NEW: Enforce move limit to prevent explosion --------
+        # FIX: But always allow recaptures on the last capture square
+        to_sq = (move_int >> 6) & 0x3F
+        is_recapture = (last_capture_sq >= 0 and to_sq == last_capture_sq)
+
         if not is_check and moves_searched >= move_limit:
-            _diag_warn("qs_move_limit", f"QS move limit ({move_limit}) at depth {q_depth}")
-            break
+            # Allow one recapture even past move limit
+            if not is_recapture:
+                _diag_warn("qs_move_limit", f"QS move limit ({move_limit}) at depth {q_depth}")
+                break
 
         if not is_check:
             # Use cached is_capture (integer version - faster)
@@ -714,6 +755,10 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
                     if best_score + gain + DELTA_PRUNING_QS_MARGIN < alpha:  # ✅ Use best_score
                         continue
 
+        # Compute is_capture_move if not already done (when in_check is True)
+        if is_check:
+            is_capture_move = board.is_capture_int(move_int)
+
         # Convert to chess.Move for push (needed by evaluator)
         move = int_to_move(move_int)
         should_update_nn = q_depth <= QS_DEPTH_MAX_NN_EVAL
@@ -722,7 +767,10 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
         else:
             board.push(move)  # Only push board, not evaluator
 
-        score, child_pv = quiescence(board, -beta, -alpha, q_depth + 1)
+        # FIX: Pass capture square to child if this move is a capture
+        # This ensures recaptures are always searched
+        child_capture_sq = to_sq if is_capture_move else -1
+        score, child_pv = quiescence(board, -beta, -alpha, q_depth + 1, child_capture_sq)
         score = -score
         board.pop()
 
@@ -731,15 +779,20 @@ def quiescence(board: CachedBoard, alpha: int, beta: int, q_depth: int) -> Tuple
 
         moves_searched += 1
 
+        # FIX: Track if we've searched a recapture on the last capture square
+        if in_capture_sequence and to_sq == last_capture_sq:
+            in_capture_sequence = False  # We've resolved the capture, can soft-stop now
+
         # -------- IMPROVED: Check time more frequently --------
         if moves_searched % 5 == 0:
             check_time()
             if TimeControl.stop_search:
                 break  # Exit loop gracefully, return best_score below
-            # Also check soft_stop in deep QS
+            # Also check soft_stop in deep QS - but not if we're still in capture sequence
             if TimeControl.soft_stop and q_depth > round(MAX_QS_DEPTH // QS_SOFT_STOP_DIVISOR):
-                _qs_stats["time_cutoffs"] += 1
-                break
+                if not in_capture_sequence:
+                    _qs_stats["time_cutoffs"] += 1
+                    break
 
         if score > best_score:  # ✅ Track best_score
             best_score = score
