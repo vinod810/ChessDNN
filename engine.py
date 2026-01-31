@@ -1,3 +1,4 @@
+import heapq
 import importlib
 import random
 import re
@@ -463,8 +464,10 @@ def ordered_moves_q_search_int(board: CachedBoard, last_capture_sq: int = -1) ->
 
         moves_with_scores.append((score, m))
 
-    moves_with_scores.sort(key=lambda x: x[0], reverse=True)
-    return [m for _, m in moves_with_scores]
+    # OPTIMIZED: Only get top moves instead of sorting all
+    # Use MAX_QS_MOVES[0] (=12) as upper bound - actual limit applied in quiescence()
+    top_moves = heapq.nlargest(MAX_QS_MOVES[0], moves_with_scores)
+    return [m for _, m in top_moves]
 
 
 def see(board: CachedBoard, move: chess.Move) -> int:
