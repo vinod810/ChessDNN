@@ -420,7 +420,8 @@ class CachedBoard:
         self._move_stack.append(move)
         self._move_info_stack.append(move_info)
         self._cache_stack.append(_CacheState())
-        self._hash_history.append(self.zobrist_hash())
+        # OPTIMIZATION: Defer hash computation until actually needed
+        self._hash_history.append(None)
 
     def push_with_info(self, move: chess.Move, move_int: int,
                        is_en_passant: bool, is_castling: bool,
@@ -490,7 +491,9 @@ class CachedBoard:
         self._move_stack.append(move)
         self._move_info_stack.append(move_info)
         self._cache_stack.append(_CacheState())
-        self._hash_history.append(self.zobrist_hash())
+        # OPTIMIZATION: Defer hash computation until actually needed
+        # Store None as placeholder - will be computed lazily in is_repetition or zobrist_hash
+        self._hash_history.append(None)
 
     def pop(self) -> chess.Move:
         if not self._move_stack:
@@ -654,15 +657,29 @@ class CachedBoard:
             return self._board.is_capture(MoveAdapter.from_chess_move(move, is_castling=is_castling_move))
         return self._board.is_capture(move)
 
+    def _ensure_current_hash(self) -> int:
+        """Ensure current position's hash is computed and stored in history."""
+        if self._hash_history and self._hash_history[-1] is None:
+            h = self.zobrist_hash()  # This caches in _CacheState
+            self._hash_history[-1] = h
+            return h
+        return self._hash_history[-1] if self._hash_history else self.zobrist_hash()
+
     def is_repetition(self, count: int = 3) -> bool:
-        """OPTIMIZED: Early termination when match count reached."""
+        """OPTIMIZED: Early termination with lazy hash computation."""
         history_len = len(self._hash_history)
         if history_len < count:
             return False
-        current_hash = self._hash_history[-1]
-        match_count = 0
-        for h in self._hash_history:
-            if h == current_hash:
+
+        # Ensure current hash is computed
+        current_hash = self._ensure_current_hash()
+
+        match_count = 1  # Current position counts as 1
+        # Check backwards through history (more likely to find recent repetitions)
+        for i in range(history_len - 2, -1, -1):
+            h = self._hash_history[i]
+            # Skip None entries (positions we never needed to check)
+            if h is not None and h == current_hash:
                 match_count += 1
                 if match_count >= count:
                     return True

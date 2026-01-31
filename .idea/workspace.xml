@@ -4,10 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="WAC 266">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="WAC 264">
       <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -308,14 +306,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00157" summary="About 50% win rate again SF2300">
-      <option name="closed" value="true" />
-      <created>1769381859903</created>
-      <option name="number" value="00157" />
-      <option name="presentableId" value="LOCAL-00157" />
-      <option name="project" value="LOCAL" />
-      <updated>1769381859904</updated>
-    </task>
     <task id="LOCAL-00158" summary="About 75% win rate again SF2300">
       <option name="closed" value="true" />
       <created>1769386301249</created>
@@ -524,7 +514,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769858285267</updated>
     </task>
-    <option name="localTasksCounter" value="184" />
+    <task id="LOCAL-00184" summary="WAC 264">
+      <option name="closed" value="true" />
+      <created>1769859630395</created>
+      <option name="number" value="00184" />
+      <option name="presentableId" value="LOCAL-00184" />
+      <option name="project" value="LOCAL" />
+      <updated>1769859630395</updated>
+    </task>
+    <option name="localTasksCounter" value="185" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -539,7 +537,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Perfromance got worse. But now more configrarable" />
     <MESSAGE value="About 50% win rate again SF2300" />
     <MESSAGE value="About 75% win rate again SF2300" />
     <MESSAGE value="Config via bash" />
@@ -564,7 +561,8 @@
     <MESSAGE value="Optimization 2307" />
     <MESSAGE value="Optimization 2292" />
     <MESSAGE value="WAC 266" />
-    <option name="LAST_COMMIT_MESSAGE" value="WAC 266" />
+    <MESSAGE value="WAC 264" />
+    <option name="LAST_COMMIT_MESSAGE" value="WAC 264" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
