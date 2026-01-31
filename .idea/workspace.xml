@@ -4,11 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="WAC 265">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="ELO 2319">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -309,14 +308,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00161" summary="Pytorch COO training">
-      <option name="closed" value="true" />
-      <created>1769533970385</created>
-      <option name="number" value="00161" />
-      <option name="presentableId" value="LOCAL-00161" />
-      <option name="project" value="LOCAL" />
-      <updated>1769533970385</updated>
-    </task>
     <task id="LOCAL-00162" summary="CPP training">
       <option name="closed" value="true" />
       <created>1769545455370</created>
@@ -525,7 +516,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769873766516</updated>
     </task>
-    <option name="localTasksCounter" value="188" />
+    <task id="LOCAL-00188" summary="ELO 2319">
+      <option name="closed" value="true" />
+      <created>1769892905285</created>
+      <option name="number" value="00188" />
+      <option name="presentableId" value="LOCAL-00188" />
+      <option name="project" value="LOCAL" />
+      <updated>1769892905285</updated>
+    </task>
+    <option name="localTasksCounter" value="189" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -540,7 +539,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Config via bash" />
     <MESSAGE value="NN optimization" />
     <MESSAGE value="Pytorch COO training" />
     <MESSAGE value="CPP training" />
@@ -565,7 +563,8 @@
     <MESSAGE value="WAC 264" />
     <MESSAGE value="ELO 2340" />
     <MESSAGE value="WAC 265" />
-    <option name="LAST_COMMIT_MESSAGE" value="WAC 265" />
+    <MESSAGE value="ELO 2319" />
+    <option name="LAST_COMMIT_MESSAGE" value="ELO 2319" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

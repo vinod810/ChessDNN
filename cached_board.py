@@ -164,7 +164,7 @@ class _CacheState:
     move_piece_color_int: Optional[Dict[int, bool]] = None  # True = WHITE
     move_captured_piece_type_int: Optional[Dict[int, Optional[int]]] = None  # For non-ep captures
     move_captured_piece_color_int: Optional[Dict[int, Optional[bool]]] = None
-    # OPTIMIZATION: Pre-computed MVV-LVA scores (eliminates 3 dict lookups per QS move)
+    # OPTIMIZATION: Pre-computed MVV-LVA scores (from MVV-LVA optimization)
     move_mvv_lva_int: Optional[Dict[int, int]] = None
 
 
@@ -326,8 +326,50 @@ class CachedBoard:
                  '_move_info_stack', '_move_stack', '_use_cpp', '_initial_fen',
                  '_cpp_stack_dirty', '_hash_history')
 
+    # OPTIMIZATION: Class-level pool for _CacheState objects to avoid allocation overhead
+    _cache_pool: List[_CacheState] = []
+    _POOL_MAX_SIZE = 128  # Limit pool size to avoid unbounded memory growth
+
+    @classmethod
+    def _get_pooled_cache(cls) -> _CacheState:
+        """Get a _CacheState from pool or create new one."""
+        if cls._cache_pool:
+            cache = cls._cache_pool.pop()
+            # Reset all fields to None (faster than creating new object)
+            cache.zobrist_hash = None
+            cache.legal_moves = None
+            cache.legal_moves_int = None
+            cache.has_non_pawn_material = None
+            cache.is_check = None
+            cache.is_checkmate = None
+            cache.is_game_over = None
+            cache.material_evaluation = None
+            cache.is_endgame = None
+            cache.move_is_capture = None
+            cache.move_gives_check = None
+            cache.move_victim_type = None
+            cache.move_attacker_type = None
+            cache.move_is_capture_int = None
+            cache.move_gives_check_int = None
+            cache.move_victim_type_int = None
+            cache.move_attacker_type_int = None
+            cache.move_is_en_passant_int = None
+            cache.move_is_castling_int = None
+            cache.move_piece_color_int = None
+            cache.move_captured_piece_type_int = None
+            cache.move_captured_piece_color_int = None
+            cache.move_mvv_lva_int = None
+            return cache
+        return _CacheState()
+
+    @classmethod
+    def _return_to_pool(cls, cache: _CacheState) -> None:
+        """Return a _CacheState to the pool for reuse."""
+        if len(cls._cache_pool) < cls._POOL_MAX_SIZE:
+            cls._cache_pool.append(cache)
+
     def __init__(self, fen: Optional[str] = chess.STARTING_FEN):
-        self._cache_stack: List[_CacheState] = [_CacheState()]
+        self._cache_stack: List[_CacheState] = [self._get_pooled_cache()]
         self._move_info_stack: List[_MoveInfo] = []
         self._move_stack: List[chess.Move] = []
         self._use_cpp = HAS_CPP_BACKEND
@@ -429,7 +471,7 @@ class CachedBoard:
 
         self._move_stack.append(move)
         self._move_info_stack.append(move_info)
-        self._cache_stack.append(_CacheState())
+        self._cache_stack.append(self._get_pooled_cache())
         # OPTIMIZATION: Defer hash computation until actually needed
         self._hash_history.append(None)
 
@@ -500,7 +542,7 @@ class CachedBoard:
 
         self._move_stack.append(move)
         self._move_info_stack.append(move_info)
-        self._cache_stack.append(_CacheState())
+        self._cache_stack.append(self._get_pooled_cache())
         # OPTIMIZATION: Defer hash computation until actually needed
         # Store None as placeholder - will be computed lazily in is_repetition or zobrist_hash
         self._hash_history.append(None)
@@ -519,7 +561,7 @@ class CachedBoard:
             if self._cpp_stack_dirty or is_null_move:
                 self._move_stack.pop()
                 if len(self._cache_stack) > 1:
-                    self._cache_stack.pop()
+                    self._return_to_pool(self._cache_stack.pop())
                 if self._move_info_stack:
                     self._move_info_stack.pop()
 
@@ -553,7 +595,7 @@ class CachedBoard:
 
         self._move_stack.pop()
         if len(self._cache_stack) > 1:
-            self._cache_stack.pop()
+            self._return_to_pool(self._cache_stack.pop())
         if self._move_info_stack:
             self._move_info_stack.pop()
         return move
@@ -577,7 +619,10 @@ class CachedBoard:
 
     def set_fen(self, fen: str) -> None:
         self._board.set_fen(fen)
-        self._cache_stack = [_CacheState()]
+        # OPTIMIZATION: Return old caches to pool before replacing
+        for cache in self._cache_stack:
+            self._return_to_pool(cache)
+        self._cache_stack = [self._get_pooled_cache()]
         self._move_info_stack = []
         self._move_stack = []
         self._initial_fen = fen
@@ -958,19 +1003,18 @@ class CachedBoard:
 
             # PHASE 3.3: Get victim type using piece_type_at (no object creation)
             # WEEK 1: Also cache captured piece color
+            # OPTIMIZATION: Pre-compute MVV-LVA score
             if is_cap:
                 if is_ep:
                     cache.move_victim_type_int[move_int] = chess.PAWN
                     cache.move_captured_piece_type_int[move_int] = chess.PAWN
                     cache.move_captured_piece_color_int[move_int] = not stm  # Opposite of moving piece
-                    # OPTIMIZATION: Pre-compute MVV-LVA score
                     cache.move_mvv_lva_int[move_int] = _MVV_LVA[chess.PAWN][attacker_type]
                 else:
                     victim_type = piece_type_at(to_sq)
                     cache.move_victim_type_int[move_int] = victim_type
                     cache.move_captured_piece_type_int[move_int] = victim_type
                     cache.move_captured_piece_color_int[move_int] = piece_color_map.get(to_sq)
-                    # OPTIMIZATION: Pre-compute MVV-LVA score
                     if victim_type and attacker_type:
                         cache.move_mvv_lva_int[move_int] = _MVV_LVA[victim_type][attacker_type]
                     else:

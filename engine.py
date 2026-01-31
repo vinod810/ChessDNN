@@ -374,7 +374,7 @@ def move_score_int(board: CachedBoard, move_int: int, depth: int) -> int:
     """
     score = 0
 
-    # Use cached is_capture (integer version)
+    # Use cached is_capture (integer version) - has fast bitboard path for non-captures
     is_capture = board.is_capture_int(move_int)
 
     # Killer moves (quiet moves only) - now using integer comparison
