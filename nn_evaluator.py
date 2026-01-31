@@ -313,6 +313,9 @@ class NNUEEvaluator(NNEvaluator):
         WEEK 1 OPTIMIZATION: Uses cached move info when available to eliminate
         piece_at() calls in update_pre_push.
 
+        WEEK 2 OPTIMIZATION: Also uses push_with_info() to eliminate redundant
+        is_en_passant(), is_castling(), and _get_captured_piece() calls in board.push().
+
         Args:
             board: Board state BEFORE the move (will be modified)
             move: Move being made
@@ -342,12 +345,15 @@ class NNUEEvaluator(NNEvaluator):
                 board, move, attacker_type, piece_color,
                 is_en_passant, is_castling, captured_type, captured_color
             )
+
+            # WEEK 2: Push the board using cached info (no redundant lookups!)
+            board.push_with_info(move, move_int, is_en_passant, is_castling,
+                                 captured_type, captured_color)
         else:
             # Slow path: compute piece info via piece_at() calls
             is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board, move)
-
-        # Push the board
-        board.push(move)
+            # Slow path: regular push (computes is_en_passant, is_castling, etc.)
+            board.push(move)
 
         # Phase 2: After board.push()
         self.updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)
@@ -368,6 +374,9 @@ class NNUEEvaluator(NNEvaluator):
         """
         WEEK 1 OPTIMIZATION: Variant of push_with_board that accepts pre-computed
         move_int to avoid redundant conversion.
+
+        WEEK 2 OPTIMIZATION: Also uses push_with_info() to eliminate redundant
+        is_en_passant(), is_castling(), and _get_captured_piece() calls.
 
         Use this when you already have the integer move from move ordering.
 
@@ -396,12 +405,15 @@ class NNUEEvaluator(NNEvaluator):
                 board, move, attacker_type, piece_color,
                 is_en_passant, is_castling, captured_type, captured_color
             )
+
+            # WEEK 2: Push the board using cached info (no redundant lookups!)
+            board.push_with_info(move, move_int, is_en_passant, is_castling,
+                                 captured_type, captured_color)
         else:
             # Slow path: compute piece info via piece_at() calls
             is_white_king_move, is_black_king_move, change_record = self.updater.update_pre_push(board, move)
-
-        # Push the board
-        board.push(move)
+            # Slow path: regular push
+            board.push(move)
 
         # Phase 2: After board.push()
         self.updater.update_post_push(board, is_white_king_move, is_black_king_move, change_record)

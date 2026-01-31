@@ -418,6 +418,76 @@ class CachedBoard:
         self._cache_stack.append(_CacheState())
         self._hash_history.append(self.zobrist_hash())
 
+    def push_with_info(self, move: chess.Move, move_int: int,
+                       is_en_passant: bool, is_castling: bool,
+                       captured_piece_type: Optional[int],
+                       captured_piece_color: Optional[bool]) -> None:
+        """
+        WEEK 2 OPTIMIZATION: Push move using pre-computed move info.
+
+        This eliminates redundant calls to:
+        - _get_captured_piece() (which calls is_en_passant())
+        - is_en_passant()
+        - is_castling() (which calls piece_at())
+
+        Args:
+            move: The chess.Move to push
+            move_int: Integer representation of the move
+            is_en_passant: Whether this move is en passant
+            is_castling: Whether this move is castling
+            captured_piece_type: Type of captured piece (1-6) or None
+            captured_piece_color: Color of captured piece (True=WHITE) or None
+        """
+        is_null_move = (move.from_square == move.to_square == 0 and move.promotion is None)
+
+        if is_null_move:
+            move_info = _MoveInfo(
+                move=move,
+                previous_castling_rights=self.castling_rights,
+                previous_ep_square=self.ep_square,
+            )
+
+            if self._use_cpp:
+                parts = self._board.fen().split(' ')
+                parts[1] = 'b' if parts[1] == 'w' else 'w'
+                parts[3] = '-'
+                self._board.set_fen(' '.join(parts))
+                self._py_board_dirty = True
+                self._cpp_stack_dirty = True
+            else:
+                self._board.push(move)
+        else:
+            # WEEK 2: Build captured_piece from pre-computed info (no function calls!)
+            captured_piece = None
+            if captured_piece_type is not None and captured_piece_color is not None:
+                captured_piece = chess.Piece(captured_piece_type, captured_piece_color)
+
+            move_info = _MoveInfo(
+                move=move,
+                captured_piece=captured_piece,
+                was_en_passant=is_en_passant,
+                was_castling=is_castling,
+                previous_castling_rights=self.castling_rights,
+                previous_ep_square=self.ep_square,
+            )
+
+            if self._use_cpp:
+                if self._cpp_stack_dirty:
+                    temp_board = chess.Board(self._board.fen())
+                    temp_board.push(move)
+                    self._board.set_fen(temp_board.fen())
+                else:
+                    # Only apply castling conversion if this is actually a castling move
+                    self._board.push(MoveAdapter.from_chess_move(move, is_castling=is_castling))
+                self._py_board_dirty = True
+            else:
+                self._board.push(move)
+
+        self._move_stack.append(move)
+        self._move_info_stack.append(move_info)
+        self._cache_stack.append(_CacheState())
+        self._hash_history.append(self.zobrist_hash())
+
     def pop(self) -> chess.Move:
         if not self._move_stack:
             raise IndexError("pop from empty move stack")

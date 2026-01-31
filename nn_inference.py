@@ -242,30 +242,54 @@ class NNUEIncrementalUpdater:
 
     def _remove_piece_features(self, square: int, piece_type: int, piece_color: bool,
                                change_record: Dict):
-        if piece_type == chess.KING:
+        """
+        WEEK 3 OPTIMIZATION: Inlined feature computation to avoid function call overhead.
+        """
+        if piece_type == chess.KING or piece_type < 1 or piece_type > 5:
             return
 
-        white_feat = self._get_feature_for_perspective(True, square, piece_type, piece_color)
+        # Inline white perspective feature computation
+        white_king_sq = self.white_king_sq
+        white_piece_idx = _PIECE_INDEX_TABLE[piece_type, 1 if piece_color else 0]
+        white_feat = int(_NNUE_FEATURE_TABLE[white_king_sq, square, white_piece_idx])
+
         if white_feat >= 0 and white_feat in self.white_features:
             self.white_features.discard(white_feat)
             change_record['white_removed'].add(white_feat)
 
-        black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
+        # Inline black perspective feature computation
+        black_king_sq = _FLIPPED_SQUARES[self.black_king_sq]
+        flipped_square = _FLIPPED_SQUARES[square]
+        black_piece_idx = _PIECE_INDEX_TABLE[piece_type, 0 if piece_color else 1]
+        black_feat = int(_NNUE_FEATURE_TABLE[black_king_sq, flipped_square, black_piece_idx])
+
         if black_feat >= 0 and black_feat in self.black_features:
             self.black_features.discard(black_feat)
             change_record['black_removed'].add(black_feat)
 
     def _add_piece_features(self, square: int, piece_type: int, piece_color: bool,
                             change_record: Dict):
-        if piece_type == chess.KING:
+        """
+        WEEK 3 OPTIMIZATION: Inlined feature computation to avoid function call overhead.
+        """
+        if piece_type == chess.KING or piece_type < 1 or piece_type > 5:
             return
 
-        white_feat = self._get_feature_for_perspective(True, square, piece_type, piece_color)
+        # Inline white perspective feature computation
+        white_king_sq = self.white_king_sq
+        white_piece_idx = _PIECE_INDEX_TABLE[piece_type, 1 if piece_color else 0]
+        white_feat = int(_NNUE_FEATURE_TABLE[white_king_sq, square, white_piece_idx])
+
         if white_feat >= 0 and white_feat not in self.white_features:
             self.white_features.add(white_feat)
             change_record['white_added'].add(white_feat)
 
-        black_feat = self._get_feature_for_perspective(False, square, piece_type, piece_color)
+        # Inline black perspective feature computation
+        black_king_sq = _FLIPPED_SQUARES[self.black_king_sq]
+        flipped_square = _FLIPPED_SQUARES[square]
+        black_piece_idx = _PIECE_INDEX_TABLE[piece_type, 0 if piece_color else 1]
+        black_feat = int(_NNUE_FEATURE_TABLE[black_king_sq, flipped_square, black_piece_idx])
+
         if black_feat >= 0 and black_feat not in self.black_features:
             self.black_features.add(black_feat)
             change_record['black_added'].add(black_feat)
@@ -934,16 +958,31 @@ class NNUEInference:
             )
 
     def refresh_accumulator(self, white_features: List[int], black_features: List[int]):
+        """
+        WEEK 3 OPTIMIZATION: Use NumPy array operations for faster feature validation.
+
+        Note: Despite type hints, features may be passed as sets - handle both.
+        """
         self.white_accumulator = self.ft_bias.copy()
         self.black_accumulator = self.ft_bias.copy()
 
-        valid_white = [f for f in white_features if 0 <= f < self._max_feature_idx]
-        valid_black = [f for f in black_features if 0 <= f < self._max_feature_idx]
+        # WEEK 3: Convert to NumPy array and filter in one operation
+        # Handle both list and set inputs
+        if white_features:
+            white_list = list(white_features) if isinstance(white_features, set) else white_features
+            white_arr = np.array(white_list, dtype=np.int64)
+            valid_mask = (white_arr >= 0) & (white_arr < self._max_feature_idx)
+            valid_white = white_arr[valid_mask]
+            if len(valid_white) > 0:
+                self.white_accumulator += self.ft_weight[:, valid_white].sum(axis=1)
 
-        if valid_white:
-            self.white_accumulator += self.ft_weight[:, valid_white].sum(axis=1)
-        if valid_black:
-            self.black_accumulator += self.ft_weight[:, valid_black].sum(axis=1)
+        if black_features:
+            black_list = list(black_features) if isinstance(black_features, set) else black_features
+            black_arr = np.array(black_list, dtype=np.int64)
+            valid_mask = (black_arr >= 0) & (black_arr < self._max_feature_idx)
+            valid_black = black_arr[valid_mask]
+            if len(valid_black) > 0:
+                self.black_accumulator += self.ft_weight[:, valid_black].sum(axis=1)
 
     def update_accumulator(self, added_features_white: Set[int], removed_features_white: Set[int],
                            added_features_black: Set[int], removed_features_black: Set[int]):
@@ -951,12 +990,19 @@ class NNUEInference:
 
         PHASE 3: If accumulators are dirty (pending refresh from king move),
         skip the incremental update - we'll do a full refresh before evaluation anyway.
+
+        WEEK 3 OPTIMIZATION: Skip empty set processing and pre-filter features.
         """
         if self.white_accumulator is None or self.black_accumulator is None:
             raise RuntimeError("Accumulators not initialized.")
 
         # Skip incremental updates when dirty - we'll refresh before evaluation
         if self._dirty_depth > 0:
+            return
+
+        # WEEK 3: Skip if all sets are empty (common case for quiet moves with no captures)
+        if not added_features_white and not removed_features_white and \
+           not added_features_black and not removed_features_black:
             return
 
         _cy_nnue_update(
@@ -1041,11 +1087,19 @@ class DNNInference:
         )
 
     def refresh_accumulator(self, features: List[int], perspective: bool):
+        """WEEK 3 OPTIMIZATION: Use NumPy array operations.
+
+        Note: Despite type hints, features may be passed as sets - handle both.
+        """
         accumulator = self.l1_bias.copy()
 
-        valid_features = [f for f in features if 0 <= f < self._max_feature_idx]
-        if valid_features:
-            accumulator += self.l1_weight[:, valid_features].sum(axis=1)
+        if features:
+            feat_list = list(features) if isinstance(features, set) else features
+            feat_arr = np.array(feat_list, dtype=np.int64)
+            valid_mask = (feat_arr >= 0) & (feat_arr < self._max_feature_idx)
+            valid_features = feat_arr[valid_mask]
+            if len(valid_features) > 0:
+                accumulator += self.l1_weight[:, valid_features].sum(axis=1)
 
         if perspective:
             self.white_accumulator = accumulator
@@ -1053,7 +1107,10 @@ class DNNInference:
             self.black_accumulator = accumulator
 
     def update_accumulator(self, added_features: Set[int], removed_features: Set[int], perspective: bool):
-        """PHASE 2: Uses Cython-accelerated update when available."""
+        """PHASE 2: Uses Cython-accelerated update when available.
+
+        WEEK 3 OPTIMIZATION: Skip empty set processing.
+        """
         if perspective:
             if self.white_accumulator is None:
                 raise RuntimeError("White accumulator not initialized")
@@ -1062,6 +1119,10 @@ class DNNInference:
             if self.black_accumulator is None:
                 raise RuntimeError("Black accumulator not initialized")
             accumulator = self.black_accumulator
+
+        # WEEK 3: Skip if both sets are empty
+        if not added_features and not removed_features:
+            return
 
         _cy_dnn_update(
             accumulator,
