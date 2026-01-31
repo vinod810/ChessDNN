@@ -401,19 +401,27 @@ def move_score_int(board: CachedBoard, move_int: int, depth: int) -> int:
     return score
 
 
+# OPTIMIZATION: Pre-computed MVV-LVA table for instant lookup
+# Key: (victim_type, attacker_type), Value: MVV-LVA score
+_MVV_LVA_TABLE = {}
+for v in range(1, 7):  # Victim types 1-6
+    for a in range(1, 7):  # Attacker types 1-6
+        _MVV_LVA_TABLE[(v, a)] = 10 * PIECE_VALUES.get(v, 0) - PIECE_VALUES.get(a, 0)
+
+
 def move_score_q_search_int(board: CachedBoard, move_int: int) -> int:
     """
-    PHASE 2 OPTIMIZATION: Score a move for quiescence search using integer representation.
+    OPTIMIZED: Score a move for quiescence search using pre-computed table.
     """
-    score = 0
+    if not board.is_capture_int(move_int):
+        return 0
 
-    if board.is_capture_int(move_int):
-        victim_type = board.get_victim_type_int(move_int)
-        attacker_type = board.get_attacker_type_int(move_int)
-        if victim_type and attacker_type:
-            score += 10 * PIECE_VALUES[victim_type] - PIECE_VALUES[attacker_type]
+    victim_type = board.get_victim_type_int(move_int)
+    attacker_type = board.get_attacker_type_int(move_int)
 
-    return score
+    if victim_type and attacker_type:
+        return _MVV_LVA_TABLE.get((victim_type, attacker_type), 0)
+    return 0
 
 
 def ordered_moves_int(board: CachedBoard, depth: int, pv_move_int: int = 0, tt_move_int: int = 0) -> List[int]:

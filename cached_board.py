@@ -158,6 +158,10 @@ class _CacheState:
     move_captured_piece_color_int: Optional[Dict[int, Optional[bool]]] = None
 
 
+# OPTIMIZATION: Pre-computed bitmasks for fast capture detection
+_SQUARE_MASKS = tuple(1 << sq for sq in range(64))
+
+
 @dataclass(slots=True)
 class _MoveInfo:
     move: chess.Move
@@ -651,10 +655,18 @@ class CachedBoard:
         return self._board.is_capture(move)
 
     def is_repetition(self, count: int = 3) -> bool:
-        if len(self._hash_history) < count:
+        """OPTIMIZED: Early termination when match count reached."""
+        history_len = len(self._hash_history)
+        if history_len < count:
             return False
         current_hash = self._hash_history[-1]
-        return sum(1 for h in self._hash_history if h == current_hash) >= count
+        match_count = 0
+        for h in self._hash_history:
+            if h == current_hash:
+                match_count += 1
+                if match_count >= count:
+                    return True
+        return False
 
     def ply(self) -> int:
         return len(self._move_stack)
@@ -966,16 +978,27 @@ class CachedBoard:
         return chess_cpp.Move(from_sq, to_sq, promo)
 
     def is_capture_int(self, move_int: int) -> bool:
-        """Check if move is a capture using integer key."""
+        """
+        OPTIMIZED: Check if move is a capture using integer key.
+        Uses fast fallback to avoid triggering expensive precompute.
+        """
         cache = self._cache_stack[-1]
-        if cache.move_is_capture_int is None:
-            self.precompute_move_info_int()
-        result = cache.move_is_capture_int.get(move_int)
-        if result is not None:
-            return result
-        # Fallback: compute directly
+        # Try cache first if available
+        if cache.move_is_capture_int is not None:
+            result = cache.move_is_capture_int.get(move_int)
+            if result is not None:
+                return result
+        # Fast fallback: direct bitboard check (avoids precompute)
         to_sq = (move_int >> 6) & 0x3F
-        return bool(self.occupied & (1 << to_sq))
+        if self.occupied & _SQUARE_MASKS[to_sq]:
+            return True
+        # Check en passant
+        ep = self.ep_square
+        if ep is not None and to_sq == ep:
+            from_sq = move_int & 0x3F
+            diff = from_sq - to_sq
+            return diff == 7 or diff == -7 or diff == 9 or diff == -9
+        return False
 
     def gives_check_int(self, move_int: int) -> bool:
         """Check if move gives check using integer key."""
