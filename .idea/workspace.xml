@@ -4,11 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimization 2307">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Optimization 2292">
+      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -310,14 +307,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00153" summary="Fixes for QS explosion">
-      <option name="closed" value="true" />
-      <created>1769316319591</created>
-      <option name="number" value="00153" />
-      <option name="presentableId" value="LOCAL-00153" />
-      <option name="project" value="LOCAL" />
-      <updated>1769316319592</updated>
-    </task>
     <task id="LOCAL-00154" summary="Blunders reduced. Occasionaly stalls">
       <option name="closed" value="true" />
       <created>1769347795321</created>
@@ -526,7 +515,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769817722358</updated>
     </task>
-    <option name="localTasksCounter" value="180" />
+    <task id="LOCAL-00180" summary="Optimization 2292">
+      <option name="closed" value="true" />
+      <created>1769855371950</created>
+      <option name="number" value="00180" />
+      <option name="presentableId" value="LOCAL-00180" />
+      <option name="project" value="LOCAL" />
+      <updated>1769855371950</updated>
+    </task>
+    <option name="localTasksCounter" value="181" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -541,7 +538,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Blunders reduced. Occasionaly stalls" />
     <MESSAGE value="Stalling fixed" />
     <MESSAGE value="Perfromance got worse. But now more configrarable" />
     <MESSAGE value="About 50% win rate again SF2300" />
@@ -566,7 +562,8 @@
     <MESSAGE value="Optimization WAC 263/300" />
     <MESSAGE value="Optimization WAC 264/300" />
     <MESSAGE value="Optimization 2307" />
-    <option name="LAST_COMMIT_MESSAGE" value="Optimization 2307" />
+    <MESSAGE value="Optimization 2292" />
+    <option name="LAST_COMMIT_MESSAGE" value="Optimization 2292" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
