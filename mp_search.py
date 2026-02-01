@@ -19,6 +19,7 @@ from typing import List, Tuple, Optional, Dict
 import chess
 
 from cached_board import CachedBoard
+from config import MAX_MP_CORES
 from engine import pv_to_san, is_debug_enabled
 
 
@@ -439,12 +440,8 @@ def stop_parallel_search():
 
 def set_mp_cores(cores: int):
     """Set number of MP cores and reinitialize pool if needed."""
-    global MAX_MP_CORES
-
     if cores > MAX_MP_CORES:
         cores = MAX_MP_CORES
-
-    MAX_MP_CORES = cores
 
     if cores > 1:
         init_worker_pool(cores)
@@ -454,13 +451,6 @@ def set_mp_cores(cores: int):
 
 def set_shared_tt(enabled: bool):
     """Set whether to use shared TT. Requires pool reinitialization."""
-    global IS_SHARED_TT_MP
-
-    if enabled == IS_SHARED_TT_MP:
-        return
-
-    IS_SHARED_TT_MP = enabled
-
     # Reinitialize pool with new setting
     if _pool_initialized:
         init_worker_pool(MAX_MP_CORES)

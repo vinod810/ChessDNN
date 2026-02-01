@@ -71,7 +71,6 @@ def uci_loop():
             print(f"option name ResignMoves type spin default {RESIGN_CONSECUTIVE_MOVES} min 1 max 10")
             print("option name Ponder type check default true")
             print(f"option name Threads type spin default {mp_search.MAX_MP_CORES} min 1 max 64")
-            print(f"option name SharedTT type check default {'true' if mp_search.IS_SHARED_TT_MP else 'false'}")
             print("uciok", flush=True)
 
         elif command == "isready":

@@ -4,26 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="WAC 266">
+    <list default="true" id="d1de13a6-553e-4283-90e8-58dd1588e14e" name="Changes" comment="Code clean up">
+      <change afterPath="$PROJECT_DIR$/test/stockfish_tune.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/book_move.py" beforeDir="false" afterPath="$PROJECT_DIR$/book_move.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cached_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cached_board.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cpp_board/test_cpp_board.py" beforeDir="false" afterPath="$PROJECT_DIR$/cpp_board/test_cpp_board.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/environment.yml" beforeDir="false" afterPath="$PROJECT_DIR$/environment.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/mp_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/mp_search.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_evaluator.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_evaluator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_inference.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_ops_fallback.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_ops_fallback.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nn_train/nn_train.py" beforeDir="false" afterPath="$PROJECT_DIR$/nn_train/nn_train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/engine_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/engine_test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/nn_tests.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/nn_tests.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/notes.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/notes.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/oldfish.sh" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/test/stockfish.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/stockfish.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/sf_static_eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/sf_static_eval.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/wait.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/uci.py" beforeDir="false" afterPath="$PROJECT_DIR$/uci.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -324,14 +311,6 @@
       <option name="project" value="LOCAL" />
       <updated>1768336477178</updated>
     </task>
-    <task id="LOCAL-00163" summary="config.py to print overridden params">
-      <option name="closed" value="true" />
-      <created>1769548728009</created>
-      <option name="number" value="00163" />
-      <option name="presentableId" value="LOCAL-00163" />
-      <option name="project" value="LOCAL" />
-      <updated>1769548728009</updated>
-    </task>
     <task id="LOCAL-00164" summary="Parameter optimization">
       <option name="closed" value="true" />
       <created>1769607511011</created>
@@ -540,7 +519,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769894421420</updated>
     </task>
-    <option name="localTasksCounter" value="190" />
+    <task id="LOCAL-00190" summary="Code clean up">
+      <option name="closed" value="true" />
+      <created>1769902091997</created>
+      <option name="number" value="00190" />
+      <option name="presentableId" value="LOCAL-00190" />
+      <option name="project" value="LOCAL" />
+      <updated>1769902091997</updated>
+    </task>
+    <option name="localTasksCounter" value="191" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -555,7 +542,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="NN optimization" />
     <MESSAGE value="Pytorch COO training" />
     <MESSAGE value="CPP training" />
     <MESSAGE value="config.py to print overridden params" />
@@ -580,6 +566,18 @@
     <MESSAGE value="WAC 265" />
     <MESSAGE value="ELO 2319" />
     <MESSAGE value="WAC 266" />
-    <option name="LAST_COMMIT_MESSAGE" value="WAC 266" />
+    <MESSAGE value="Code clean up" />
+    <option name="LAST_COMMIT_MESSAGE" value="Code clean up" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/mp_search.py</url>
+          <line>14</line>
+          <option name="timeStamp" value="8" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
   </component>
 </project>
